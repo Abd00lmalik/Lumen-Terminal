@@ -23,6 +23,7 @@ import type { ProgressListener } from "../research/progress.js";
 import {
   evidenceToDTO, judgmentToDTO, researchToDTO, continuitySnapshotToDTO,
   thesisToDTO, thesisAssessmentToDTO, artifactToDTO, memoryToDTO, monitorToDTO,
+  toHistoricalAnalysisDTO,
   type ResearchResponseDTO, type AnswerDTO, type EvidenceDTO, type JudgmentDTO,
 } from "./dto.js";
 import { InvalidRequestError, ModelFailureError, PersistenceFailureError, NotFoundError } from "./errors.js";
@@ -243,6 +244,11 @@ export class ResearchApp {
       ...(judgments.length > 0 ? { judgmentRef: judgments[judgments.length - 1]!.ref } : {}),
       evidence,
       judgments,
+      // Flow 5 structured historical analysis (server-computed; §8D — the frontend renders,
+      // never derives): mapped only when this request ran the historical-comparison flow.
+      ...(result.flow5?.historicalAnalysis !== undefined
+        ? { historicalAnalysis: toHistoricalAnalysisDTO(result.flow5.historicalAnalysis) }
+        : {}),
     };
   }
 

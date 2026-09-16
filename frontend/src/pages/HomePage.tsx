@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "../components/AppShell.js";
 import { Panel, StatusBadge, Empty, Note, timeAgo } from "../components/ui.js";
+import { BackendDownNote } from "../components/BackendDownNote.js";
 import { listResearch, getWorkspace } from "../api/index.js";
 import { homeDataFromSnapshot, thesisFromDto } from "../data/adapters.js";
 import { listTheses } from "../api/index.js";
@@ -22,7 +23,7 @@ export function HomePage() {
   const [contradictions, setContradictions] = useState<readonly string[]>([]);
   const [uncertainties, setUncertainties] = useState<readonly string[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
+  const [error, setError] = useState<unknown>(undefined);
 
   useEffect(() => {
     void (async () => {
@@ -41,7 +42,7 @@ export function HomePage() {
         setUncertainties(snapshot.unresolvedUncertainties);
         setLoaded(true);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(err);
         setLoaded(true);
       }
     })();
@@ -91,19 +92,33 @@ export function HomePage() {
         </>
       }
     >
-      <div className="page-head" style={{ display: "flex", gap: "var(--gap-4)", alignItems: "center" }}>
-        <div style={{ flex: 1 }}>
-          <h1 className="page-title">Workspace</h1>
-          <p className="page-sub" style={{ marginBottom: 0 }}>Your live research state — loaded from the backend, nothing invented.</p>
+      {/* §8G — home hero: the primary action is asking a research question; example
+          questions seed the ask flow without inventing any data. */}
+      <section className="home-hero">
+        <div className="hero-kicker">AI research workbench</div>
+        <h1 className="home-title">Ask a research question.</h1>
+        <p className="home-sub">
+          Lumen investigates with real market capabilities, classifies every piece of evidence,
+          and hands you a judgment with its uncertainty — research informs your decision; it never becomes it.
+        </p>
+        <div className="hero-actions">
+          <button className="btn primary" onClick={() => navigate("/research")}>Ask a research question →</button>
+          <button className="btn ghost" onClick={() => navigate("/thesis")}>Review thesis</button>
         </div>
-        <button className="btn primary" onClick={() => navigate("/research")}>+ New research</button>
-      </div>
+        <div className="hero-examples" aria-label="Example research questions">
+          {[
+            "What is affecting BTC right now?",
+            "Why did BTC move recently?",
+            "Search historical data for similar BTC setups",
+          ].map((q) => (
+            <button key={q} className="example-chip" onClick={() => navigate("/research", { state: { question: q } })}>
+              {q}
+            </button>
+          ))}
+        </div>
+      </section>
 
-      {error !== undefined && (
-        <Note tone="warn">
-          <b>Backend unreachable.</b> {error} — start it with <code>npm run api</code> and refresh.
-        </Note>
-      )}
+      {error !== undefined && <BackendDownNote error={error} />}
 
       <div className="search-wrap" style={{ maxWidth: 560, marginBottom: "var(--gap-5)" }}>
         <span className="search-icon" aria-hidden>⌕</span>

@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { AppShell } from "../components/AppShell.js";
 import { Panel, Note, Empty, timeAgo } from "../components/ui.js";
+import { BackendDownNote } from "../components/BackendDownNote.js";
 import { listMemories, listArtifacts, ApiError } from "../api/index.js";
 import { memoryFromDto, artifactFromDto } from "../data/adapters.js";
 import type { MemoryItem, SavedArtifactView } from "../data/types.js";
@@ -25,7 +26,7 @@ export function MemoryPage() {
   const [memories, setMemories] = useState<readonly MemoryItem[]>([]);
   const [artifacts, setArtifacts] = useState<readonly SavedArtifactView[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
+  const [error, setError] = useState<unknown>(undefined);
 
   useEffect(() => {
     void (async () => {
@@ -57,11 +58,7 @@ export function MemoryPage() {
         </p>
       </div>
 
-      {error !== undefined && (
-        <Note tone="warn">
-          <b>Backend unreachable.</b> {error} — start it with <code>npm run api</code> and refresh.
-        </Note>
-      )}
+      {error !== undefined && <BackendDownNote error={error} />}
 
       <div className="grid-2">
         <Panel kicker={`${artifacts.length} items`} title="Saved artifacts">

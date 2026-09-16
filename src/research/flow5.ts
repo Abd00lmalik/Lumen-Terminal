@@ -18,7 +18,7 @@
 import type { ModelProvider } from "../model/provider.js";
 import { ModelFailure } from "../model/provider.js";
 import { runFlow, type FlowObjective, type FlowOutcome, type FlowMode } from "./flow-runner.js";
-import { analyzeEpisodes, renderEpisodeAnalysis } from "./episode-analysis.js";
+import { analyzeEpisodes, renderEpisodeAnalysis, type EpisodeAnalysis } from "./episode-analysis.js";
 import type { Workspace } from "../domain/workspace.js";
 import type { WorkspaceStore } from "../persistence/index.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
@@ -66,6 +66,10 @@ export interface Flow5Result {
   /** Typed model failure — planning/decision failures never become historical findings. */
   readonly modelFailure?: ModelFailure;
   readonly response: string;
+  /** Structured episode analysis (API DTO seam): the deterministic CURRENT SETUP →
+   *  ANALOGUES → OUTCOMES result, so the frontend can render real historical research
+   *  structure instead of re-parsing prose. Never derived client-side. */
+  readonly historicalAnalysis?: EpisodeAnalysis;
 }
 
 /**
@@ -288,6 +292,7 @@ export async function runFlow5(objective: string, options: Flow5Options): Promis
   return {
     outcome: scoped,
     response: buildFlow5Response(scoped, excludedCapabilities, analysis),
+    ...(analysis !== undefined ? { historicalAnalysis: analysis } : {}),
   };
 }
 

@@ -64,7 +64,10 @@ const TECHNICAL_FIXTURE = JSON.stringify({
 });
 
 function makeRegistry(mcp: FakeMcpTransport, rest: FakeRestTransport): CapabilityRegistry {
-  return createBitgetAdapterSet({ mcp: mcp as never, rest: rest as never }).registry;
+  // fallbacks disabled: these fixtures assert PRIMARY-provider laws deterministically —
+  // enabling the live fallback adapters here would fetch real RSS feeds in unit tests.
+  // Fallback-specific laws are covered in tests/adapters/fallback-providers.test.ts.
+  return createBitgetAdapterSet({ mcp: mcp as never, rest: rest as never, fallbacks: false }).registry;
 }
 
 function makeFixtureEnv() {

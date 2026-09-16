@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import { AppShell } from "../components/AppShell.js";
 import { Panel, Toggle, Note, KV, StatusBadge } from "../components/ui.js";
+import { BackendDownNote } from "../components/BackendDownNote.js";
 import { http } from "../api/index.js";
 
 interface HealthResponse {
@@ -50,14 +51,14 @@ function Segmented({ options, value, onChange, label }: {
 
 export function SettingsPage() {
   const [health, setHealth] = useState<HealthResponse | undefined>(undefined);
-  const [healthError, setHealthError] = useState<string | undefined>(undefined);
+  const [healthError, setHealthError] = useState<unknown>(undefined);
 
   useEffect(() => {
     void (async () => {
       try {
         setHealth(await http.get<HealthResponse>("/api/health"));
-      } catch {
-        setHealthError("API process not reachable — start it with `npm run api`.");
+      } catch (err) {
+        setHealthError(err);
       }
     })();
   }, []);
@@ -87,7 +88,7 @@ export function SettingsPage() {
             </div>
             {health !== undefined ? <StatusBadge status="OK" /> : <StatusBadge status={healthError !== undefined ? "UNAVAILABLE" : "…"} />}
           </div>
-          {healthError !== undefined && <Note tone="warn">{healthError}</Note>}
+          {healthError !== undefined && <BackendDownNote error={healthError} />}
           {health !== undefined && (
             <>
               <KV k="api" v={health.api ?? "—"} />

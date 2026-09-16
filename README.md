@@ -101,6 +101,19 @@ flowchart LR
     EV1 --> CL[Claims] --> AN[Analysis] --> J[Judgment]
 ```
 
+### Capability / provider fallback
+
+```mermaid
+flowchart TD
+    FLOW[Flow requests a capability<br/>never names a provider] --> REG[Capability Registry<br/>priority-ordered providers]
+    REG --> P1[Primary: Bitget MCP/REST]
+    REG --> P2[Fallback: news RSS · Fear&Greed · World Bank]
+    P1 -->|typed failure OR empty coverage| REG
+    P2 -->|serves| TR[TOOL_RESULT + attemptedProviders trail<br/>+ fallback limitation]
+    P1 -->|serves| TR2[TOOL_RESULT — no fallback noise]
+    REG -->|all fail / all empty| EMPTY[Honest EMPTY<br/>never fabricated, never negative evidence]
+```
+
 ### Flow 5 historical analysis
 
 ```mermaid
@@ -139,9 +152,30 @@ flowchart LR
 
 ## Bitget, G1, and G2 capabilities
 
-- **Bitget (M1/M2)** — MCP + REST transports with throttling, bounded retry, freshness, and `TOOL_RESULT` normalization. Live-verified: real technical-analysis evidence (RSI/MACD/Bollinger) with conflicting interpretations preserved as genuine disagreement.
+- **Bitget (M1/M2)** — MCP + REST transports with throttling, bounded retry, freshness, and `TOOL_RESULT` normalization. Live-verified: real technical-analysis evidence (RSI/MACD/Bollinger) with conflicting interpretations preserved as genuine disagreement. Live-verified from production Vercel: real kline-derived technical evidence flowing end to end.
 - **G1 historical data** — engine-selected `HistoricalQuery` (symbol, metric, window, interval) served by **Bitget REST when reachable**, with **Binance Vision** (`data-api.binance.vision`, Binance's official keyless market-data mirror) as the live fallback; the serving venue is recorded in provenance. OHLCV is real and multi-year; funding/open-interest/liquidations are honestly `UNAVAILABLE` (mirrored nowhere reachable — never fabricated).
 - **G2 web/primary sources** — bounded retrieval with URL validation (SSRF-safe), HTML-to-text extraction, source classification (**primary / secondary / commentary / community**), and source/evidence separation: a web page is a *source*, not automatically evidence. Repeated syndication of one origin is not counted as independent corroboration.
+
+### Provider fallback (registry-owned)
+
+The **capability registry owns failover** — flows never name providers. When the primary
+(Bitget) fails *or returns empty coverage*, the next registered provider for that
+capability serves:
+
+- **NEWS** → curated public crypto RSS (CoinDesk/Cointelegraph) — classified as secondary
+  reporting; per-item publisher/timestamp/URL preserved.
+- **SENTIMENT** → alternative.me Fear & Greed Index — a `SENTIMENT_SIGNAL` with explicit
+  `proxyBasis`; never upgraded to a market observation.
+- **MACRO** → World Bank official indicators — `QUANTITATIVE_OBSERVATION` with
+  freshness `STALE` (annual official lag is never labeled current).
+
+A serving fallback **must not erase the primary's failure**: every tool result carries an
+`attemptedProviders` audit trail plus a human-readable limitation ("Bitget unavailable —
+research continued using fallback/news-rss"). All providers failing/empty is an honest
+`EMPTY` — never fabricated coverage, never negative evidence about the market.
+
+Live-verified from production: Bitget news/sentiment returned empty coverage and the
+fallbacks served with the provenance trail intact (COMPLETED, HIGH confidence).
 
 ## Safety boundary
 
@@ -159,19 +193,22 @@ Verification categories are never collapsed (`VERIFIED LIVE` / `VERIFIED DETERMI
 
 | Layer | Result |
 |---|---|
-| Deterministic tests | **372 passed / 0 failed** (25 env-gated live tests skipped without credentials) |
+| Deterministic tests | **389 backend + 11 frontend passed / 0 failed** (25 env-gated live tests skipped without credentials) |
 | Backend typecheck | clean |
 | Frontend typecheck + production build | clean |
+| **Production deployment** | **VERIFIED LIVE at https://asklumen.vercel.app** — same-origin serverless API, health 200, real research COMPLETED |
 | Live research (Suite B) | Flow 1 and Flow 5 COMPLETED with real evidence; Flow 5 live UI run verified |
+| Live provider fallback | VERIFIED LIVE from production: Bitget empty coverage → news/sentiment fallbacks served, provenance trail preserved |
 | Browser E2E (Suite C / CDP) | real ask-bar submission → new backend research object → judgment (backend-side proof) |
 | Security scans | no secrets, `.env` ignored, one fetch boundary in the frontend, no trading surface |
 
 ## Known limitations
 
-- **News / sentiment / macro upstreams** are unreachable from some networks (Bitget endpoint blocking) — the system reports honest `INSUFFICIENT_EVIDENCE`/`UNAVAILABLE` rather than fabricating. Verified live where reachable.
+- **Production workspace state is per-instance memory** (documented in `DEPLOYMENT.md` §3) — serverless disks are ephemeral; durable external persistence is a contained future upgrade behind the two-method `WorkspaceStore` interface.
+- **News / sentiment / macro upstreams** can be unreachable from some networks (Bitget endpoint blocking) — registry-owned fallbacks now cover news/sentiment/macro; all-fail remains an honest EMPTY, never fabricated.
 - **G1 depth beyond OHLCV** — historical funding/OI/liquidations are not mirrored by any reachable source; reported `UNAVAILABLE`.
 - **Monitoring is a handoff, not a worker** — proposed/activated monitors persist, but nothing runs in the background. This is intentional for this phase.
-- **Single-process persistence** — `FileStore` (`.data/workspace.json`) is local and single-user; multi-user auth and external persistence are future work (see `DEPLOYMENT.md`).
+- **Local dev persistence** — `FileStore` (`.data/workspace.json`) is local and single-user; multi-user auth is future work.
 - **Free-tier model quotas** — per-model daily limits on Gemini's free tier; quota exhaustion surfaces as an honest `MODEL_FAILURE`, and retries are bounded so it fails fast.
 
 ## Local setup
@@ -181,7 +218,7 @@ Requirements: Node.js ≥ 20, npm.
 ```bash
 # 1. Install
 npm install
-cd frontend && npm install && cd ..
+cd frontend && npm ci && cd ..
 
 # 2. Configure (server-side only; never committed)
 cp .env.example .env
@@ -193,6 +230,9 @@ npm run api
 # 4. Run the frontend (port 5173)
 cd frontend && npm run dev
 ```
+
+**Production:** the same app deploys to Vercel with serverless API functions —
+same-origin `/api`, streaming SSE, server-side-only credentials. See [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 Open **http://localhost:5173**, go to *Research*, and ask e.g.
 `Search historical data for similar BTC setups and patterns.`
@@ -223,9 +263,10 @@ Live tests are **env-gated** (`FREEBUFF_LIVE=1` + credentials) and never run in 
 │  ├─ model/           # provider-neutral model layer (Gemini implementation, schemas)
 │  ├─ lui/             # natural-language understanding + dispatch (6 actions)
 │  ├─ research/        # flow runner, flows 1–8, episode analysis, context
-│  ├─ adapters/        # capability registry, Bitget MCP/REST, G1 historical, G2 web
+│  ├─ adapters/        # capability registry + failover, Bitget MCP/REST, G1 historical, G2 web, fallbacks
 │  ├─ persistence/     # WorkspaceStore (file + memory)
 │  └─ api/             # F0 boundary: Fastify server, routes, DTOs, SSE, error model
+├─ api/                # Vercel function adapter (hosts the same Fastify app — no second backend)
 ├─ frontend/           # React + Vite research workbench (single fetch boundary)
 ├─ tests/              # deterministic + env-gated live suites, benchmark suites A/B/C
 ├─ docs/architecture/  # the source-of-truth architecture documents
@@ -238,4 +279,6 @@ Source-of-truth hierarchy: `docs/architecture/` → `AGENT.md` → `FINDINGS.md`
 
 ## Deployment
 
-See [`DEPLOYMENT.md`](DEPLOYMENT.md) — including an honest assessment of what Vercel can and cannot host for this architecture today.
+**Deployed and live:** https://asklumen.vercel.app — same-origin serverless API + SPA on
+Vercel, with registry-owned provider fallbacks. Full architecture, environment variables,
+persistence honesty, and known limits: [`DEPLOYMENT.md`](DEPLOYMENT.md).

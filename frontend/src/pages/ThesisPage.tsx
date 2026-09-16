@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "../components/AppShell.js";
 import { Panel, ConfidenceMeter, StatusBadge, Note, KV, Empty, timeAgo } from "../components/ui.js";
+import { BackendDownNote } from "../components/BackendDownNote.js";
 import { listTheses, getThesis } from "../api/index.js";
 import { thesisFromDto } from "../data/adapters.js";
 import type { ThesisView } from "../data/types.js";
@@ -16,7 +17,7 @@ export function ThesisPage() {
   const navigate = useNavigate();
   const [thesis, setThesis] = useState<ThesisView | undefined>(undefined);
   const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
+  const [error, setError] = useState<unknown>(undefined);
 
   useEffect(() => {
     void (async () => {
@@ -29,7 +30,7 @@ export function ThesisPage() {
         }
         setLoaded(true);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(err);
         setLoaded(true);
       }
     })();
@@ -79,11 +80,7 @@ export function ThesisPage() {
         <p className="page-sub">Loaded from the backend — the trader's property, evaluated but never rewritten.</p>
       </div>
 
-      {error !== undefined && (
-        <Note tone="warn">
-          <b>Backend unreachable.</b> {error} — start it with <code>npm run api</code> and refresh.
-        </Note>
-      )}
+      {error !== undefined && <BackendDownNote error={error} />}
 
       {loaded && error === undefined && thesis === undefined && (
         <Empty

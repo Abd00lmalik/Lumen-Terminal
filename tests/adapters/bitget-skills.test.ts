@@ -24,7 +24,8 @@ describe("five Bitget skills registered through the generic registry (final lock
   it("all five skills resolve their capabilities; G1 connected (vendor selected); G2 stub remains unconnected", { timeout: 30_000 }, async () => {
     // G1's both-venues path exercises real bounded-retry backoff against the fakes — give it
     // an explicit budget so parallel-suite load can never turn it flaky.
-    const { registry } = createBitgetAdapterSet({ mcp: mcp as never, rest: rest as never });
+    // fallbacks: false → PRIMARY-only wiring law (fallback ordering asserted separately).
+    const { registry } = createBitgetAdapterSet({ mcp: mcp as never, rest: rest as never, fallbacks: false });
 
     expect(registry.resolve("MACRO_ANALYSIS").map((r) => r.adapter.providerId)).toEqual(["bitget-signal/macro-analyst"]);
     expect(registry.resolve("MARKET_DATA_ANALYSIS").map((r) => r.adapter.providerId)).toEqual(["bitget-signal/market-intel"]);
@@ -179,9 +180,9 @@ describe("five Bitget skills registered through the generic registry (final lock
   });
 
   it("adapters are wired as flat instances — no hidden per-flow branches in the factory", () => {
-    // the factory registers exactly 7 providers (5 skills + G1 + G2); nothing else.
-    // G1 (vendor selected 2026-09-15) and G2 (bounded web retrieval, implemented 2026-09-15)
-    // both replace their NotConnected stubs.
+    // the factory registers exactly 10 providers by DEFAULT (5 skills + G1 + G2 + 3 capability
+    // fallbacks). G1 (vendor selected 2026-09-15) and G2 (bounded web retrieval, implemented
+    // 2026-09-15) both replace their NotConnected stubs.
     const { registry } = createBitgetAdapterSet({ mcp: mcp as never, rest: rest as never });
     const providers = new Set<string>();
     for (const capability of ["MACRO_ANALYSIS", "MARKET_DATA_ANALYSIS", "SENTIMENT_ANALYSIS", "NEWS_ANALYSIS", "TECHNICAL_ANALYSIS", "HISTORICAL_COMPARISON", "SOURCE_VALIDATION"]) {
@@ -193,6 +194,9 @@ describe("five Bitget skills registered through the generic registry (final lock
       "bitget-signal/news-briefing",
       "bitget-signal/sentiment-analyst",
       "bitget-signal/technical-analysis",
+      "fallback/fear-greed",
+      "fallback/news-rss",
+      "fallback/world-bank",
       "g1/historical-data",
       "g2/web-retrieval",
     ]);

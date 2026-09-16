@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "../components/AppShell.js";
 import { Panel, Note, StatusBadge, ConfidenceMeter, Empty } from "../components/ui.js";
+import { BackendDownNote } from "../components/BackendDownNote.js";
 import { getWorkspace } from "../api/index.js";
 import { challengeFromSnapshot } from "../data/adapters.js";
 import type { ChallengeView } from "../data/types.js";
@@ -16,7 +17,7 @@ export function ChallengePage() {
   const navigate = useNavigate();
   const [challenge, setChallenge] = useState<ChallengeView | undefined>(undefined);
   const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
+  const [error, setError] = useState<unknown>(undefined);
 
   useEffect(() => {
     void (async () => {
@@ -25,7 +26,7 @@ export function ChallengePage() {
         setChallenge(challengeFromSnapshot(snapshot));
         setLoaded(true);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(err);
         setLoaded(true);
       }
     })();
@@ -42,11 +43,7 @@ export function ChallengePage() {
         </p>
       </div>
 
-      {error !== undefined && (
-        <Note tone="warn">
-          <b>Backend unreachable.</b> {error} — start it with <code>npm run api</code> and refresh.
-        </Note>
-      )}
+      {error !== undefined && <BackendDownNote error={error} />}
 
       {loaded && error === undefined && challenge !== undefined && (
         <>

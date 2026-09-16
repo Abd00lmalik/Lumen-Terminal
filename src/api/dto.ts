@@ -455,6 +455,40 @@ export function continuitySnapshotToDTO(s: {
   };
 }
 
+/** Flow 5 structured episode analysis → transport-safe DTO (§8D). Structure-preserving. */
+export function toHistoricalAnalysisDTO(a: {
+  currentSetup?: {
+    readonly asOf: string; readonly trendState: string; readonly momentumState: string;
+    readonly volatilityState: string; readonly rangePositionState: string;
+    readonly volumeState: string; readonly basis: string;
+  } | undefined;
+  episodesEvaluated: number;
+  matches: readonly {
+    episode: {
+      anchorDate: string; window: { from: string; to: string };
+      outcomes: readonly { days: number; forwardReturnPct: number; mfePct: number; maePct: number; directionPersisted: boolean }[];
+      evidenceRefs: readonly string[];
+    };
+    dimensions: readonly { dimension: string; referenceValue: string; episodeValue: string; matched: boolean }[];
+    differences: readonly string[];
+  }[];
+  interpretiveNote: string;
+}): HistoricalAnalysisDTO {
+  return {
+    ...(a.currentSetup !== undefined ? { currentSetup: { ...a.currentSetup } } : {}),
+    episodesEvaluated: a.episodesEvaluated,
+    matches: a.matches.map((m) => ({
+      anchorDate: m.episode.anchorDate,
+      window: { from: m.episode.window.from, to: m.episode.window.to },
+      dimensions: m.dimensions.map((d) => ({ ...d })),
+      differences: [...m.differences],
+      outcomes: m.episode.outcomes.map((o) => ({ ...o })),
+      evidenceRefs: [...m.episode.evidenceRefs],
+    })),
+    interpretiveNote: a.interpretiveNote,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Research-request response DTO (F0 mandate §6/§7)
 // ---------------------------------------------------------------------------
@@ -491,6 +525,44 @@ export interface ResearchResponseDTO {
   /** Epistemic view of the evidence this request produced (classes preserved). */
   readonly evidence: readonly EvidenceDTO[];
   readonly judgments: readonly JudgmentDTO[];
+  /** Flow 5 (HAS_THIS_HAPPENED_BEFORE) only: the deterministic historical-episode analysis —
+   *  current setup, explained analogues with per-dimension similarity, forward outcome windows.
+   *  Structured server-side; the frontend renders it, never recomputes it. */
+  readonly historicalAnalysis?: HistoricalAnalysisDTO;
+}
+
+/** API view of the Flow 5 episode analysis (episode-analysis.ts shapes, transport-safe). */
+export interface HistoricalAnalysisDTO {
+  readonly currentSetup?: {
+    readonly asOf: string;
+    readonly trendState: string;
+    readonly momentumState: string;
+    readonly volatilityState: string;
+    readonly rangePositionState: string;
+    readonly volumeState: string;
+    readonly basis: string;
+  };
+  readonly episodesEvaluated: number;
+  readonly matches: readonly {
+    readonly anchorDate: string;
+    readonly window: { readonly from: string; readonly to: string };
+    readonly dimensions: readonly {
+      readonly dimension: string;
+      readonly referenceValue: string;
+      readonly episodeValue: string;
+      readonly matched: boolean;
+    }[];
+    readonly differences: readonly string[];
+    readonly outcomes: readonly {
+      readonly days: number;
+      readonly forwardReturnPct: number;
+      readonly mfePct: number;
+      readonly maePct: number;
+      readonly directionPersisted: boolean;
+    }[];
+    readonly evidenceRefs: readonly string[];
+  }[];
+  readonly interpretiveNote: string;
 }
 
 export type ApiErrorCode =

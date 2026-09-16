@@ -149,6 +149,19 @@ a.row:hover { background: var(--panel-2); text-decoration: none; }
 .page-sub { color: var(--text-2); font-size: 13px; margin: 0 0 var(--gap-5); max-width: 720px; }
 .page-head { margin-bottom: var(--gap-5); }
 
+/* home hero (§8G) — product identity without dashboard clutter */
+.home-hero { padding: var(--gap-5) 0 var(--gap-5); margin-bottom: var(--gap-5); border-bottom: 1px solid var(--line); }
+.home-hero .hero-kicker { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.2em; color: var(--accent); text-transform: uppercase; margin-bottom: 10px; }
+.home-title { font-family: var(--font-ui); font-weight: 600; font-size: clamp(24px, 3vw, 32px); letter-spacing: -0.01em; margin: 0 0 10px; }
+.home-sub { color: var(--text-2); font-size: 14px; max-width: 640px; line-height: 1.65; margin: 0 0 18px; }
+.hero-actions { display: flex; gap: var(--gap-3); margin-bottom: 16px; flex-wrap: wrap; }
+.hero-examples { display: flex; gap: 8px; flex-wrap: wrap; }
+.example-chip {
+  font-size: 12px; color: var(--text-2); background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; cursor: pointer;
+}
+.example-chip:hover { border-color: var(--accent); color: var(--text); }
+
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-4); }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap-4); }
 
@@ -210,6 +223,87 @@ a.row:hover { background: var(--panel-2); text-decoration: none; }
 
 /* ---------- research workspace ---------- */
 .ask-bar { display: flex; gap: var(--gap-3); margin-bottom: var(--gap-5); }
+
+/* ---------- surface-type system (§8I): research objects get distinct identities ---------- */
+/* 1. Primary judgment surface — THE focal object of a completed run. Elevated, larger
+      type, restrained accent top-rule; never looks like "another card". */
+.surface-judgment {
+  position: relative;
+  background: linear-gradient(180deg, var(--panel-2) 0%, var(--panel) 100%);
+  border: 1px solid var(--line-strong);
+  border-top: 2px solid var(--accent);
+  border-radius: var(--r-md);
+  padding: 18px 20px 16px;
+  box-shadow: var(--shadow-2);
+}
+.surface-judgment .verdict {
+  font-family: var(--font-ui);
+  font-size: 16.5px;
+  font-weight: 600;
+  line-height: 1.55;
+  letter-spacing: 0.005em;
+  margin: 0;
+}
+.surface-judgment .judgment-head {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px;
+}
+.surface-judgment .judgment-kicker {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.18em;
+  color: var(--accent); text-transform: uppercase;
+}
+/* 2. Metric surface — compact data treatment (counts, key numbers). */
+.surface-metric {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 3px;
+}
+.surface-metric .metric-value { font-family: var(--font-mono); font-size: 17px; color: var(--text); }
+.surface-metric .metric-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; color: var(--text-3); text-transform: uppercase; }
+/* 3. Diagnostic surface — quiet; unavailability is never styled as negative evidence. */
+.surface-diagnostic { color: var(--text-3); }
+/* 4. Source/reference surface — citation treatment, not a dashboard card. */
+.src-refs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.src-ref {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-3);
+  border: 1px solid var(--line); border-radius: 3px; padding: 1px 6px;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.src-ref b { color: var(--text-2); font-weight: 500; }
+/* 5. Timeline/episode surface — Flow 5 historical analogues (§8D): timeline-flavored,
+      explainable; matched/differed dimensions are chips, outcomes are a compact table. */
+.setup-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--gap-2); }
+.setup-grid .surface-metric { gap: 4px; }
+.setup-val { font-size: 12.5px; color: var(--text); line-height: 1.4; }
+.episode { padding: 14px; border-top: 1px solid var(--line); position: relative; }
+.episode:first-child { border-top: none; }
+.episode::before {
+  content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 2px;
+  background: var(--line-strong); border-radius: 1px;
+}
+.episode-anchor { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.episode-date { font-size: 13px; color: var(--accent); font-weight: 600; }
+.episode-window { font-size: 10.5px; color: var(--text-3); }
+.dims { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.dim-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.03em;
+  padding: 2px 7px; border-radius: 3px; border: 1px solid var(--line);
+  color: var(--text-2); text-transform: lowercase;
+}
+.dim-chip.match { color: var(--up); border-color: rgba(31,208,122,.35); background: rgba(31,208,122,.06); }
+.dim-chip.diff { color: var(--warn); border-color: rgba(232,163,61,.35); background: rgba(232,163,61,.05); }
+.dim-mark { font-size: 10px; }
+.episode-diffs { font-size: 12px; color: var(--text-3); margin-bottom: 8px; }
+.outcomes { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.outcomes th {
+  text-align: left; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--text-3); font-weight: 500;
+  padding: 4px 10px 4px 0; border-bottom: 1px solid var(--line);
+}
+.outcomes td { padding: 4px 10px 4px 0; border-bottom: 1px dashed var(--line); }
+.outcomes tr:last-child td { border-bottom: none; }
+.outcomes .pos { color: var(--up); }
+.outcomes .neg { color: var(--down); }
+
 .answer-card { border-left: 2px solid var(--accent); }
 .finding { display: flex; gap: 10px; padding: 9px 0; border-top: 1px dashed var(--line); font-size: 13px; }
 .finding:first-child { border-top: none; }

@@ -1,71 +1,99 @@
-# DEPLOYMENT.md — Lumen Terminal
+# Deployment
 
-Status: **the frontend deploys to Vercel as-is; the backend does not, and this document does not pretend otherwise.** Below is the honest assessment and the smallest change required for a real deployment.
+Status: **the full application deploys to Vercel** — frontend (static SPA) and backend
+(serverless API functions) on one domain. This document describes the deployed
+architecture honestly, including its real limitations.
+
+Production URL: **https://asklumen.vercel.app/**
 
 ---
 
-## 1. What deploys cleanly today
+## 1. Production architecture (deployed)
 
-**Frontend (React + Vite SPA)** — deploys to Vercel static hosting with zero changes:
-
-| Setting | Value |
-|---|---|
-| Framework preset | Vite |
-| Root directory | `frontend` |
-| Build command | `npm run build` |
-| Output directory | `frontend/dist` |
-| Environment variables | none required (no secrets in the browser, by design) |
-
-The SPA calls the backend through a single fetch boundary (`frontend/src/api/client.ts`). Point it at the deployed API via the client's base-URL configuration (defaults to the Vite dev proxy / `127.0.0.1:3001` in local development; set the production API origin for the deployed backend).
-
-## 2. What does NOT deploy to Vercel today — and why
-
-The backend is a **stateful, long-running Fastify server**. Three concrete incompatibilities with Vercel's serverless model:
-
-1. **SSE + long-running requests.** A research run streams real progress over `POST /api/research?stream=1` for ~40–110 s (multi-round model calls + capability execution) and uses Fastify's `reply.hijack()` for raw streaming. Serverless functions impose per-request execution limits and are not designed for hijacked long-lived HTTP streams.
-2. **Filesystem persistence.** `FileStore` persists the workspace to local disk (`.data/workspace.json`). Serverless filesystems are ephemeral — every cold start would resume from nothing (or from a stale bundled copy).
-3. **Single-process state identity.** ID counters are restored from the loaded snapshot (restart-safe within one process, regression-tested), but two concurrent serverless instances would each mint ids independently and diverge — the workspace is single-writer by design.
-
-## 3. Recommended deployment architecture (smallest change)
-
-```
-Browser ──► Vercel (static frontend)
-                 │
-                 ▼
-     Long-running host: the EXISTING Fastify API, unchanged
-     (Railway / Render / Fly.io / a small VPS)
-                 │
-                 ▼
-     GEMINI_API_KEY + GEMINI_MODEL (server-side only)
-     FileStore volume (persistent disk attached)
+```mermaid
+flowchart TD
+    U[Trader browser] -->|https://asklumen.vercel.app| V["Vercel edge"]
+    V -->|static assets| SPA["React SPA (frontend/dist)"]
+    V -->|"/api/*"| F["Vercel Function (Node.js, 300s, streaming)"]
+    F --> FAST["Fastify app — buildApi() (same app as `npm run api`)"]
+    FAST --> LUI["LUI → Research Engine → Capability Registry"]
+    LUI --> BIT["Bitget adapters (primary)"]
+    LUI --> FB["Fallback providers (news RSS / Fear&Greed / World Bank)"]
+    LUI --> G1["G1 historical (Bitget → Binance Vision)"]
+    LUI --> G2["G2 bounded web retrieval"]
+    LUI --> GEM["Gemini provider (server-side key)"]
+    FAST --> MEM["MemoryStore (ephemeral per warm instance)"]
 ```
 
-- **No code changes** to the research engine, LUI, adapters, API, or DTOs.
-- Backend host must support: persistent Node.js process, port exposure, a writable volume for `WORKSPACE_FILE`, and unrestricted outbound HTTPS (Gemini + Bitget/Binance Vision/G2 sources).
-- Set CORS to the frontend origin for production (dev CORS is localhost-only by configuration in `src/api/server.ts`).
-- Secrets live only in the backend host's environment: `GEMINI_API_KEY`, `GEMINI_MODEL`, `API_PORT`, `WORKSPACE_FILE`. **Never** `NEXT_PUBLIC_*`/`VITE_*`-style exposure of credentials.
+Key properties:
 
-## 4. If Vercel must host everything (larger change, not recommended for this phase)
+- **One application, two hosts.** `api/research.ts` is a ~40-line adapter that hosts the
+  SAME Fastify app built by `buildApi()` (`src/api/server.ts`) inside Vercel's Node.js
+  runtime via `app.routing()`. No research logic exists in the function file; there is no
+  second backend.
+- **Same-origin API.** The SPA calls relative `/api/...` in production
+  (`resolveBaseUrl` returns `""` when `PROD`), so there is no cross-origin deployment and
+  no CORS dependency in production. `VITE_API_URL` may still override the target
+  (e.g. a locally running Fastify server during frontend development).
+- **SSE streaming.** Research progress streams through the function's raw response —
+  Vercel's Node.js runtime supports streaming responses. Function duration is configured
+  to 300 s (`vercel.json`), comfortably above observed end-to-end research runs
+  (~40–160 s live).
 
-Would require, in order of smallest to largest:
+## 2. Configuration (Vercel project settings → Environment Variables)
 
-1. Persistence → managed database (e.g. Postgres) behind the existing `WorkspaceStore` interface (the interface is already the seam; `FileStore`/`MemoryStore` prove the swap point).
-2. SSE → client polling of a `GET /api/research/:ref` status endpoint (the DTO already carries lifecycle status), or an external streaming provider.
-3. Single-writer discipline → id allocation moved into the database (sequences) or a single writer instance.
+| Variable | Scope | Purpose |
+|---|---|---|
+| `GEMINI_API_KEY` | production, preview | Gemini model access — **server-side only; never exposed to the browser** |
+| `GEMINI_MODEL` | production, preview | Model override (free-tier-reliable Flash-class default) |
+| `WORKSPACE_FILE` | optional | Opt in to a `FileStore` at an explicit path. **Do not set it to a normal serverless disk path** (see §3) |
 
-This is genuine engineering work and is intentionally **not** done in this phase; the current architecture is honest about being a single-trader workbench.
+There are no `VITE_*` secrets and no credentials in the frontend bundle; the secret scan
+(`grep` over `frontend/src` and the build output) is part of the release checklist.
 
-## 5. Runtime constraints worth knowing
+## 3. Persistence — honest limits
 
-- **Gemini free-tier quotas are per model per day.** Quota exhaustion surfaces as a typed `MODEL_FAILURE` (fail-fast; no long retry loops) — expect this on a public demo under load.
-- **Upstream reachability varies by host.** Some networks block exchange API hosts (this was decisive in selecting the keyless Binance Vision mirror for G1). Verify outbound HTTPS to `generativelanguage.googleapis.com`, `api.bitget.com`, `data-api.binance.vision`, and G2 sources from the deployment host.
-- **No background workers exist.** Monitoring is a confirmation-gated handoff; do not deploy this behind a load balancer that assumes horizontal scale-out of shared in-memory state.
+The default production store is **in-memory** (`createProductionStore` in
+`api/research.ts`): serverless local disks are ephemeral, so workspace state survives
+across requests on a warm function instance and is lost on cold start. The UI never
+claims durable persistence, and the health endpoint does not advertise any.
 
-## 6. Deployment checklist
+- **Local development** uses the real `FileStore` (`.data/workspace.json`) — state
+  survives restarts and restart-ID-collisions are handled (ID counters are re-seeded
+  from the restored workspace).
+- **Production (current)** is per-instance memory. Acceptable for a demo workload;
+  runs are visible while the instance is warm.
+- **Production (durable, when needed):** the `WorkspaceStore` interface is two methods
+  (`save`/`load`), so the smallest real upgrade is a hosted key-value store (e.g. Vercel
+  Blob / Upstash Redis) behind the same interface — a contained change in
+  `src/persistence/`, no engine changes. This is deliberately NOT faked in the current
+  deployment.
 
-- [ ] `npm test` green, `npx tsc --noEmit` clean, frontend build clean
-- [ ] `.env` NOT committed; backend env vars set on the host
-- [ ] Persistent volume mounted at `WORKSPACE_FILE` path
-- [ ] CORS origin set to the deployed frontend
-- [ ] `frontend` static deploy points at the backend origin
-- [ ] Smoke test: submit a Flow 1 question, verify SSE progress + judgment render; submit a Flow 5 question, verify historical evidence appears
+## 4. Local development
+
+```bash
+npm install            # backend deps
+cd frontend && npm ci  # frontend deps
+npm run api            # Fastify on :3001 (FileStore persistence)
+cd frontend && npm run dev   # Vite on :5173 (proxies to localhost:3001 by default)
+```
+
+## 5. Deploying
+
+```bash
+npx vercel --prod --yes     # builds the SPA + API functions, promotes to production
+```
+
+The custom domain `asklumen.vercel.app` is aliased to the current production deployment.
+Note: a manual `vercel alias set` does NOT follow future deployments automatically —
+re-run it after a deployment if the domain drifts, or manage the domain in the project
+settings so it always tracks production.
+
+## 6. Known deployment limitations
+
+1. **Ephemeral workspace state** (§3) — by design, documented, not silently faked.
+2. **300 s function ceiling** — research runs observed so far peak well below it; a
+   pathologically slow provider could still hit it (the run would surface as an honest
+   transport failure, never fabricated success).
+3. **No background monitoring** — monitoring remains a persistent handoff record; the
+   serverless model has no worker, and the product does not pretend to run one.

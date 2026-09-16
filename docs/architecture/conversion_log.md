@@ -1,6 +1,6 @@
 # Conversion Log — architecture .txt → docs/architecture/*.md
 
-Generated: 2026-09-12. One-time fidelity conversion; original `.txt` files remain intact at repo root.
+Generated: 2026-09-12. One-time fidelity conversion. **2026-09-16: the root `.txt` sources were removed after conversion verification** — these `.md` files are the sole architecture source of truth.
 
 | Source .txt (root) | Output .md | Lines (in → out) | Cross-references |
 |---|---|---|---|

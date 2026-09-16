@@ -63,6 +63,16 @@ export interface ToolResult {
     readonly retriable: boolean;
   };
   readonly limitations: readonly string[];
+  /**
+   * Provider-failover audit trail (fallback policy): providers attempted BEFORE the serving
+   * one, with their outcomes. Present only when a fallback actually served after earlier
+   * attempts failed — the serving fallback must not erase the primary's failure.
+   */
+  readonly attemptedProviders?: readonly {
+    readonly provider: string;
+    readonly outcome: string;
+    readonly failureType?: ToolResult["failure"]["type"];
+  }[];
   readonly provenance: Provenance;
 }
 
@@ -108,6 +118,11 @@ export type ToolResultInput = {
   validation?: ToolResult["validation"];
   failure?: ToolResult["failure"];
   limitations?: readonly string[];
+  attemptedProviders?: readonly {
+    provider: string;
+    outcome: string;
+    failureType?: ToolResult["failure"]["type"];
+  }[];
 };
 
 /**
@@ -132,6 +147,7 @@ export function normalizedResult(input: ToolResultInput, origin: ProvenanceOrigi
     validation: input.validation ?? "NOT_VALIDATED",
     failure,
     limitations: Object.freeze([...(input.limitations ?? [])]),
+    ...(input.attemptedProviders !== undefined ? { attemptedProviders: Object.freeze([...input.attemptedProviders]) } : {}),
     provenance: createProvenance(origin, `tool result from ${input.tool} via ${input.transport}`, at),
   });
 }

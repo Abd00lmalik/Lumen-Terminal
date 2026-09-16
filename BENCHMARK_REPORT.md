@@ -1,18 +1,20 @@
 # Lumen Terminal — Benchmark Report
 
-Latest update: **2026-09-16** (G1 live + G2 + Flow 5 analysis phases) · Spec: [`BENCHMARK.md`](BENCHMARK.md) · Verification categories are never collapsed:
+Latest update: **2026-09-16** (production deployment + provider fallbacks + frontend boundary tests) · Spec: [`BENCHMARK.md`](BENCHMARK.md) · Verification categories are never collapsed:
 **VERIFIED LIVE** / **VERIFIED DETERMINISTICALLY** / **MOCKED** / **UNVERIFIED** / **BLOCKED-EXTERNAL**.
 
 ## Overall status
 
 | Layer | Result | Mode |
 |---|---|---|
-| Deterministic suite (backend) | **372 passed / 0 failed**, 25 env-gated skipped (397 total) | VERIFIED DETERMINISTICALLY |
+| Deterministic suite (backend) | **389 passed / 0 failed**, 25 env-gated skipped (414 total) — one known load-sensitive G2 test flakes under full-suite parallel load and passes standalone (noted, not hidden) | VERIFIED DETERMINISTICALLY |
+| Frontend deterministic suite (new) | **11 passed / 0 failed** — URL resolution (prod = same-origin, never localhost), NetworkError environment vocabulary, BackendDownNote rendering, single-fetch-boundary scan | VERIFIED DETERMINISTICALLY |
 | Backend typecheck (`tsc --noEmit`) | clean | VERIFIED DETERMINISTICALLY |
 | Frontend typecheck + production build | clean | VERIFIED DETERMINISTICALLY |
+| **Production deployment** | **https://asklumen.vercel.app — health 200; Flow 1 research COMPLETED end-to-end on the serverless API; provider fallback served live with provenance trail; SPA same-origin /api (no localhost dependency)** | VERIFIED LIVE |
 | Live suite (Suite B, env-gated) | Flow 1 TA scenario COMPLETED with real Bitget evidence (2026-09-15); Flow 5 COMPLETED with 1,095 real historical candles (2026-09-16) | VERIFIED LIVE |
 | Browser E2E (Suite C / raw CDP) | real ask-bar submission → **new backend research object with judgment** (backend-side proof, not DOM-only) | VERIFIED LIVE |
-| Security / mock / trading / fetch scans | clean — no secrets, `mock.ts` deleted, exactly one fetch boundary (`frontend/src/api/client.ts`), no execution surface | VERIFIED DETERMINISTICALLY |
+| Security / mock / trading / fetch scans | clean — no secrets, no `mock.ts`, exactly one fetch boundary (`frontend/src/api/client.ts`), no execution surface, encrypted server-side env vars on Vercel | VERIFIED DETERMINISTICALLY |
 
 ## Flow coverage (all 8)
 
@@ -34,7 +36,8 @@ A benchmark "pass" = correct epistemic outcome, not forced COMPLETED. Quota-limi
 - **TECHNICAL_ANALYSIS — VERIFIED LIVE** (2026-09-15): real BTC/USDT RSI 33.34/34.93, MACD golden cross (+75.58 hist), Bollinger %b 0.95; conflicting MACD interpretations preserved as genuine disagreement (no forced synthesis).
 - **G1 HISTORICAL_COMPARISON — VERIFIED LIVE** (2026-09-16): Bitget-first → **Binance Vision fallback** served 3 years of real daily candles; the 2021-05-19 crash episode returns the exact real bar (O 42,849.78 / L 30,000 / C 36,690.09); provenance records the serving venue and raw-capture refs of the actual HTTP fetches. Funding/OI/liquidations honestly `UNAVAILABLE` (mirrored nowhere reachable — never fabricated).
 - **G2 WEB_RETRIEVAL — VERIFIED DETERMINISTICALLY** (14 tests: URL validation, SSRF guard, extraction, source classification primary/secondary/commentary/community, duplicate-source non-corroboration, failure ≠ negative evidence); **live retrieval BLOCKED-EXTERNAL in the last automated run** (sandbox network policy), general-web reachability confirmed by live probes earlier in the phase (Wikipedia/federalreserve.gov/CoinDesk HTTP 200).
-- NEWS / SENTIMENT / MARKET_INTEL upstreams: **BLOCKED-EXTERNAL** (FINDINGS.md risk R1). Honest insufficiency reported; no fabrication.
+- **PROVIDER FAILOVER — VERIFIED LIVE from production** (2026-09-16): Bitget news/sentiment returned empty coverage from Vercel; registry-owned fallbacks (`fallback/news-rss`, `fallback/fear-greed`) served; final DTO COMPLETED (HIGH confidence, 21 evidence) with the `attemptedProviders` trail and human-readable fallback limitations intact. TECHNICAL_ANALYSIS served by Bitget primary in the same run (real RSI 45.35).
+- NEWS / SENTIMENT / MARKET_INTEL upstreams: previously **BLOCKED-EXTERNAL** (FINDINGS.md risk R1) — now mitigated by registry-owned fallbacks for news/sentiment/macro; total-failure remains an honest EMPTY (deterministic tests: 12 fallback laws).
 
 ## Model reliability (configured: `gemini-3.5-flash-lite` via `GEMINI_MODEL`)
 
@@ -57,12 +60,17 @@ Consolidated anti-laundering probe (Suite A, 11 tests): observation vs derived v
 6. **Restart ID collision (CONFIRMED DEFECT, data loss)** (G1-analysis phase) — fresh process counters restarted at 1 and the first new research object OVERWROTE persisted `rs_000001`. Fixed in `Workspace.fromSnapshot` via counter seeding from the loaded graph; regression test in `file-store.test.ts`.
 7. **Interrupted runs stayed ACTIVE forever** (G1-analysis phase) — runs killed by a process restart never left ACTIVE. Startup sweep marks judgment-less ACTIVE research as STOPPED with an honest note; regression test through the API.
 8. **Test-infra flakiness** (benchmark + analysis phases) — load-sensitive real-timer assertions given explicit budgets; no assertions weakened.
+9. **Production UI pointed at localhost** (hardening phase) — the deployed SPA fell back to `http://127.0.0.1:3001` in production and no `/api` functions existed on Vercel. Fixed: same-origin resolution in `client.ts` (regression-tested), thin `api/research.ts` function hosting the same Fastify app (regression-tested through real node:http), `vercel.json` with SPA rewrites + 300s function duration. Root cause of the original "Backend unreachable" screen.
+10. **Empty-coverage primary blocked fallback** (hardening phase, found via live production test) — the registry only failed over on *thrown* failures, but Bitget from Vercel returned valid empty payloads → NEWS/SENTIMENT/MACRO stayed EMPTY. Fixed: "serves" now requires actual coverage (≥1 non-UNAVAILABLE output); empty result preserved as honest lastFailure. Regression tests: empty-primary→fallback-serves and all-empty→honest-EMPTY.
+11. **Fallback adapters ignored the fetch test seam** (hardening phase) — Sentiment/Macro adapters hardcoded transports, so the all-fail test hit the LIVE World Bank API. Fixed with constructor-injected `fetchImpl` (same seam News already had).
+12. **Production error text leaked dev instructions** (hardening phase) — every page rendered "start it with `npm run api`" regardless of environment. Fixed: environment-aware `NetworkError` + shared `BackendDownNote` (production never sees dev instructions; regression-tested).
 
 ## Known external limitations (not code defects)
 
 1. Gemini free-tier quota is per model per day — several benchmark scenarios BLOCKED-EXTERNAL on 2026-09-16 after live verification runs consumed the bucket.
-2. MCP hub upstream outage (R1): news/sentiment/market-intel degraded from this environment.
+2. MCP hub upstream outage (R1): news/sentiment/market-intel degraded from this environment — now mitigated by registry-owned fallbacks (see capability coverage).
 3. `api.bitget.com` REST network-unreachable from this machine (verified twice); Bitget MCP path and Binance Vision fallback both live-verified.
+4. Production workspace state is per-instance memory (serverless disks are ephemeral) — documented in DEPLOYMENT.md §3, upgrade path defined behind the two-method store interface.
 
 ## Final gate
 

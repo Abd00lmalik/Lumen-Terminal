@@ -95,21 +95,48 @@ export class CapabilityRegistry {
     }
 
     let lastFailure: ToolResult | undefined;
+    /** Fallback audit trail: every non-serving provider attempt, preserved on the winner. */
+    const attempts: { provider: string; outcome: string; failureType?: ToolResult["failure"]["type"] }[] = [];
     for (const { adapter } of candidates) {
       try {
         const input = await adapter.execute(capability, params);
+        // Fallback law (provider-failover policy): a serving fallback must not erase the
+        // primary's failure. attemptedProviders carries the machine-readable trail; the
+        // limitation makes it surfaceable ("continued using [fallback]").
+        const servedAfterAttempts = attempts.length > 0;
+        const trailText = attempts.map((a) => `${a.provider}: ${a.outcome}`).join("; ");
         const result = normalizedResult(
           {
             ...input,
             capability,
-            limitations: [...adapter.limitations, ...(input.limitations ?? [])],
+            limitations: [
+              ...adapter.limitations,
+              ...(input.limitations ?? []),
+              ...(servedAfterAttempts ? [`provider fallback: ${trailText} — research continued using ${adapter.providerId}`] : []),
+            ],
+            ...(servedAfterAttempts ? { attemptedProviders: [...attempts] } : {}),
           },
           origin,
           at,
         );
-        if (result.failure.type === "NONE") return result;
+        // Fallback law (provider-failover policy §4): a candidate "serves" only when it
+        // provides actual coverage — at least one output that is not an UNAVAILABLE
+        // diagnostic. NONE + empty coverage is INSUFFICIENT COVERAGE, not success: the
+        // next provider gets a chance, and the empty result is preserved as lastFailure
+        // so an all-empty outcome stays an honest EMPTY (never fabricated evidence).
+        const hasCoverage = result.normalizedOutput.some((o) => o.outputClass !== "UNAVAILABLE");
+        if (result.failure.type === "NONE" && hasCoverage) return result;
+        attempts.push({
+          provider: adapter.providerId,
+          outcome:
+            result.failure.type === "NONE"
+              ? "empty (no coverage)"
+              : `failed (${result.failure.type})`,
+          ...(result.failure.type !== "NONE" ? { failureType: result.failure.type } : {}),
+        });
         lastFailure = result;
       } catch (error) {
+        attempts.push({ provider: adapter.providerId, outcome: "threw" });
         lastFailure = normalizedResult(
           {
             tool: adapter.providerId,

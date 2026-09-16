@@ -8,9 +8,10 @@
  * - The context rail shows the real continuity snapshot (active thesis, judgment,
  *   recent evidence). Empty/failed/partial states render the backend's own state.
  */
-import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { AppShell } from "../components/AppShell.js";
+import { BackendDownNote } from "../components/BackendDownNote.js";
 import {
   Panel, ClassBadge, EpistemicRail, FreshnessBadge, ConfidenceMeter, StatusBadge,
   ProxyNote, UnavailableNote, KV, Note, Empty, timeAgo,
@@ -18,7 +19,7 @@ import {
 import { evidenceFromDto, judgmentFromDto } from "../data/adapters.js";
 import { submitResearch, getWorkspace } from "../api/index.js";
 import type { EvidenceItem, JudgmentView, ThesisView } from "../data/types.js";
-import type { ResearchResponseDto, ContinuitySnapshotDto } from "../api/index.js";
+import type { ResearchResponseDto, ContinuitySnapshotDto, HistoricalAnalysisDto } from "../api/index.js";
 import { useResearchStream } from "../hooks/useResearchStream.js";
 
 interface WorkspaceData {
@@ -26,7 +27,7 @@ interface WorkspaceData {
   readonly judgment: JudgmentView | undefined;
   readonly thesis: ThesisView | undefined;
   readonly snapshot: ContinuitySnapshotDto | undefined;
-  readonly loadError: string | undefined;
+  readonly loadError: unknown;
 }
 
 interface Turn {
@@ -36,11 +37,13 @@ interface Turn {
 
 export function ResearchWorkspacePage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [runs, setRuns] = useState<readonly Turn[]>([]);
-  const [ws, setWs] = useState<WorkspaceData>({ evidence: [], judgment: undefined, thesis: undefined, snapshot: undefined, loadError: undefined });
+  const [ws, setWs] = useState<WorkspaceData>({ evidence: [], judgment: undefined, thesis: undefined, snapshot: undefined, loadError: undefined as unknown });
   const { state: stream } = useResearchStream();
+  const askedFromHome = useRef(""); // guards double-submission of a home-hero example in StrictMode
 
   const refresh = useCallback(async () => {
     try {
@@ -70,11 +73,22 @@ export function ResearchWorkspacePage() {
         loadError: undefined,
       });
     } catch (err) {
-      setWs((prev) => ({ ...prev, loadError: err instanceof Error ? err.message : String(err) }));
+      setWs((prev) => ({ ...prev, loadError: err }));
     }
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // A question handed over from the home hero (navigation state) is asked once on arrival.
+  useEffect(() => {
+    const q = (location.state as { question?: string } | null)?.question;
+    if (typeof q === "string" && q.length > 0 && askedFromHome.current !== q) {
+      askedFromHome.current = q;
+      navigate(location.pathname, { replace: true }); // clear the state so refresh/resubmit doesn't re-ask
+      void ask(q);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
 
   const ask = async (question: string, confirmed = false) => {
     const q = question.trim();
@@ -168,10 +182,7 @@ export function ResearchWorkspacePage() {
       </div>
 
       {ws.loadError !== undefined && (
-        <Note tone="warn">
-          <b>Backend unreachable.</b> {ws.loadError} — start it with <code>npm run api</code>, then refresh.
-          No mock content is shown in its place.
-        </Note>
+        <BackendDownNote error={ws.loadError}> No mock content is shown in its place.</BackendDownNote>
       )}
 
       {stream.running && (
@@ -215,21 +226,37 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
         <div className="bubble">{turn.question}</div>
       </div>
 
-      <Panel
-        kicker={`${run.outcome.toLowerCase()} · ${run.action.toLowerCase()}`}
-        title={run.outcome === "COMPLETED" ? "Judgment" : run.outcome === "AWAITING_CONFIRMATION" ? "Confirmation required" : run.outcome === "REJECTED" ? "Request rejected" : "Interpretation failed"}
-        right={<ConfidenceMeter confidence={run.answer.confidence} />}
-      >
-        <div className="panel-body answer-card" style={{ borderLeft: "none", padding: 14 }}>
-          <p style={{ margin: 0, fontSize: 14, lineHeight: 1.65 }}>{run.answer.answer}</p>
+      {/* §8A: the JUDGMENT is the visual focal point — elevated surface, larger type.
+          Failure/ambiguous states keep honest panel treatment (not a celebratory verdict). */}
+      {run.outcome === "COMPLETED" ? (
+        <section className="surface-judgment" aria-label="Research judgment">
+          <div className="judgment-head">
+            <span className="judgment-kicker">Judgment · {run.action.toLowerCase()}</span>
+            <ConfidenceMeter confidence={run.answer.confidence} />
+          </div>
+          <p className="verdict">{run.answer.answer}</p>
           {run.answer.keyUncertainty.length > 0 && (
             <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--warn)" }}>◆ {run.answer.keyUncertainty}</p>
           )}
           {run.answer.implication.length > 0 && (
             <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--text-3)" }}>↳ {run.answer.implication}</p>
           )}
-        </div>
-      </Panel>
+        </section>
+      ) : (
+        <Panel
+          kicker={`${run.outcome.toLowerCase()} · ${run.action.toLowerCase()}`}
+          title={run.outcome === "AWAITING_CONFIRMATION" ? "Confirmation required" : run.outcome === "REJECTED" ? "Request rejected" : "Interpretation failed"}
+        >
+          <div className="panel-body" style={{ padding: 14 }}>
+            <p style={{ margin: 0, fontSize: 14, lineHeight: 1.65 }}>{run.answer.answer}</p>
+            {run.answer.keyUncertainty.length > 0 && (
+              <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--warn)" }}>◆ {run.answer.keyUncertainty}</p>
+            )}
+          </div>
+        </Panel>
+      )}
+
+      {run.historicalAnalysis !== undefined && <HistoricalAnalysisView a={run.historicalAnalysis} />}
 
       {run.outcome === "AWAITING_CONFIRMATION" && (
         <Panel kicker="consequential action" title="This request wants to change persistent state">
@@ -289,6 +316,16 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
                       {item.proxyBasis !== undefined && <ProxyNote basis={item.proxyBasis} />}
                       <span className="ev-time mono">{item.ref} · {timeAgo(item.observedAt)}</span>
                     </div>
+                    {item.eventTimestamp !== undefined && (
+                      <div className="ev-time mono" style={{ marginTop: 4 }}>observed: {item.eventTimestamp}</div>
+                    )}
+                    {item.sourceRefs.length > 0 && (
+                      <div className="src-refs">
+                        {item.sourceRefs.slice(0, 3).map((s, i) => (
+                          <span className="src-ref" key={i} title={s}>{s}</span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -326,5 +363,86 @@ function Finding({ text, tone }: { text: string; tone: "sup" | "opp" }) {
       <span className="tick" aria-hidden>{tone === "sup" ? "▲" : "▼"}</span>
       <span>{text}</span>
     </div>
+  );
+}
+
+/**
+ * §8D — Flow 5 historical-research presentation. Renders the SERVER-COMPUTED structured
+ * analysis: CURRENT SETUP → HISTORICAL ANALOGUES (explained, per-dimension) → FORWARD
+ * OUTCOMES → what the record does NOT establish. Timeline-flavored; never a bare
+ * "similarity score"; never a prediction.
+ */
+function HistoricalAnalysisView({ a }: { a: HistoricalAnalysisDto }) {
+  return (
+    <>
+      {a.currentSetup !== undefined && (
+        <Panel kicker="historical research · comparison target" title="Current setup">
+          <div className="panel-body">
+            <div className="setup-grid">
+              <div className="surface-metric"><span className="metric-label">as of</span><span className="metric-value mono" style={{ fontSize: 12.5 }}>{a.currentSetup.asOf}</span></div>
+              <div className="surface-metric"><span className="metric-label">trend</span><span className="setup-val">{a.currentSetup.trendState}</span></div>
+              <div className="surface-metric"><span className="metric-label">momentum</span><span className="setup-val">{a.currentSetup.momentumState}</span></div>
+              <div className="surface-metric"><span className="metric-label">volatility</span><span className="setup-val">{a.currentSetup.volatilityState}</span></div>
+              <div className="surface-metric"><span className="metric-label">range position</span><span className="setup-val">{a.currentSetup.rangePositionState}</span></div>
+              <div className="surface-metric"><span className="metric-label">volume</span><span className="setup-val">{a.currentSetup.volumeState}</span></div>
+            </div>
+            <div className="src-refs" style={{ borderTop: "none", paddingTop: 6 }}>
+              <span className="src-ref" title={a.currentSetup.basis}>basis: {a.currentSetup.basis}</span>
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      <Panel
+        kicker="historical research · analogues"
+        title={`${a.matches.length} comparable episode${a.matches.length === 1 ? "" : "s"} of ${a.episodesEvaluated} evaluated`}
+      >
+        <div>
+          {a.matches.length === 0 && (
+            <div className="panel-body" style={{ color: "var(--text-2)", fontSize: 13 }}>
+              No comparable episodes met the similarity threshold — the current setup may be genuinely novel, or the feature comparison too narrow.
+            </div>
+          )}
+          {a.matches.map((m) => (
+            <div className="episode" key={m.anchorDate}>
+              <div className="episode-anchor">
+                <span className="episode-date mono">{m.anchorDate}</span>
+                <span className="episode-window mono">window {m.window.from} → {m.window.to}</span>
+              </div>
+              <div className="dims">
+                {m.dimensions.map((d) => (
+                  <span key={d.dimension} className={`dim-chip ${d.matched ? "match" : "diff"}`} title={`${d.referenceValue} vs ${d.episodeValue}`}>
+                    <span className="dim-mark" aria-hidden>{d.matched ? "≈" : "≠"}</span> {d.dimension}
+                  </span>
+                ))}
+              </div>
+              {m.differences.length > 0 && (
+                <div className="episode-diffs">differs: {m.differences.join(" · ")}</div>
+              )}
+              <table className="outcomes">
+                <thead>
+                  <tr><th>window</th><th>forward return</th><th>max favorable</th><th>max adverse</th><th>direction held</th></tr>
+                </thead>
+                <tbody>
+                  {m.outcomes.map((o) => (
+                    <tr key={o.days}>
+                      <td className="mono">{o.days}d</td>
+                      <td className={`mono ${o.forwardReturnPct >= 0 ? "pos" : "neg"}`}>{o.forwardReturnPct >= 0 ? "+" : ""}{o.forwardReturnPct.toFixed(2)}%</td>
+                      <td className="mono pos">+{o.mfePct.toFixed(2)}%</td>
+                      <td className="mono neg">−{o.maePct.toFixed(2)}%</td>
+                      <td className="mono">{o.directionPersisted ? "yes" : "no"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      </Panel>
+
+      <Note tone="info">
+        <b>What this does not establish:</b> {a.interpretiveNote} Historical precedent describes what happened before — it does not predict and does not recommend any action.
+      </Note>
+    </>
   );
 }

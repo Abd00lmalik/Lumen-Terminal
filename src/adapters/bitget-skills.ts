@@ -10,6 +10,7 @@
 import { CapabilityRegistry, HistoricalDataStub, WebRetrievalStub, type ProviderAdapter } from "./capability-registry.js";
 import { G1HistoricalDataAdapter, BINANCE_VISION_BASE_URL } from "./g1-historical.js";
 import { G2WebRetrievalAdapter } from "./g2-web-retrieval.js";
+import { NewsFallbackAdapter, SentimentFallbackAdapter, MacroFallbackAdapter } from "./fallback-providers.js";
 import { BitgetSkillAdapter, type SkillDescriptor, type OutputMapping } from "./bitget-skill-adapter.js";
 import { McpTransport } from "./transports/mcp.js";
 import { RestTransport, type Candle } from "./transports/rest.js";
@@ -528,6 +529,8 @@ export interface BitgetAdapterSetOptions {
   readonly historical?: G1HistoricalDataAdapter | HistoricalDataStub;
   /** G2 web-retrieval override (tests inject fakes; default is the real bounded adapter). */
   readonly webRetrieval?: G2WebRetrievalAdapter | WebRetrievalStub;
+  /** Disable capability-level fallback providers (tests assert primary-only laws). */
+  readonly fallbacks?: boolean;
 }
 
 /** Register the five skills (plus G1/G2 stubs) through the generic registry mechanism. */
@@ -551,6 +554,15 @@ export function createBitgetAdapterSet(options: BitgetAdapterSetOptions = {}): {
   // G2 (implemented 2026-09-15): bounded web/primary-source retrieval — SSRF-guarded,
   // source-classified, source≠evidence. Tests may override via options.webRetrieval.
   registry.register(options.webRetrieval ?? new G2WebRetrievalAdapter());
+  // Capability-level fallbacks (2026-09-16): Bitget stays PRIMARY (default priority 100);
+  // these register at lower priority (200) so the registry's failover loop reaches them
+  // only when the primary fails/unavailable. The registry owns this selection — flows
+  // never hardcode providers. Tests may disable via options.fallbacks === false.
+  if (options.fallbacks !== false) {
+    registry.register(new NewsFallbackAdapter(), 200);
+    registry.register(new SentimentFallbackAdapter(), 200);
+    registry.register(new MacroFallbackAdapter(), 200);
+  }
 
   return { registry, mcp, rest };
 }

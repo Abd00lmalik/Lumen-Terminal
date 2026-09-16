@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AppShell } from "../components/AppShell.js";
 import { Panel, Note, Empty, StatusBadge } from "../components/ui.js";
+import { BackendDownNote } from "../components/BackendDownNote.js";
 import { listMonitors, activateMonitor, ApiError } from "../api/index.js";
 import { monitorFromDto } from "../data/adapters.js";
 import type { MonitorView } from "../data/types.js";
@@ -23,7 +24,7 @@ export function MonitorPage() {
   const [monitors, setMonitors] = useState<readonly MonitorView[]>([]);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
+  const [error, setError] = useState<unknown>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
 
   const refresh = useCallback(async () => {
@@ -79,11 +80,7 @@ export function MonitorPage() {
         </p>
       </div>
 
-      {error !== undefined && (
-        <Note tone="warn">
-          <b>Backend unreachable.</b> {error} — start it with <code>npm run api</code> and refresh.
-        </Note>
-      )}
+      {error !== undefined && <BackendDownNote error={error} />}
       {notice !== undefined && <Note tone="info">{notice}</Note>}
 
       {error === undefined && monitors.length === 0 && (

@@ -262,6 +262,41 @@ export interface ResearchResponseDto {
   readonly judgmentRef?: string;
   readonly evidence: readonly EvidenceDto[];
   readonly judgments: readonly JudgmentDto[];
+  /** Flow 5 only: deterministic historical-episode analysis (server-computed, never derived here). */
+  readonly historicalAnalysis?: HistoricalAnalysisDto;
+}
+
+export interface HistoricalAnalysisDto {
+  readonly currentSetup?: {
+    readonly asOf: string;
+    readonly trendState: string;
+    readonly momentumState: string;
+    readonly volatilityState: string;
+    readonly rangePositionState: string;
+    readonly volumeState: string;
+    readonly basis: string;
+  };
+  readonly episodesEvaluated: number;
+  readonly matches: readonly {
+    readonly anchorDate: string;
+    readonly window: { readonly from: string; readonly to: string };
+    readonly dimensions: readonly {
+      readonly dimension: string;
+      readonly referenceValue: string;
+      readonly episodeValue: string;
+      readonly matched: boolean;
+    }[];
+    readonly differences: readonly string[];
+    readonly outcomes: readonly {
+      readonly days: number;
+      readonly forwardReturnPct: number;
+      readonly mfePct: number;
+      readonly maePct: number;
+      readonly directionPersisted: boolean;
+    }[];
+    readonly evidenceRefs: readonly string[];
+  }[];
+  readonly interpretiveNote: string;
 }
 
 export type ApiErrorCode =

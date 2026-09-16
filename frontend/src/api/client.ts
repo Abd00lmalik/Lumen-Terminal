@@ -13,8 +13,22 @@
 
 import type { ApiErrorDto } from "./types.js";
 
-const BASE_URL: string =
-  (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_API_URL ?? "http://127.0.0.1:3001";
+/**
+ * API base URL resolution:
+ * - VITE_API_URL set (local dev pointing at the Fastify server) → use it.
+ * - Production / any non-dev origin → same-origin `/api` (the Vercel function).
+ * - Dev default → the local Fastify server.
+ * Production never depends on localhost; local dev never needs a build-time variable.
+ */
+export function resolveBaseUrl(env: Record<string, string | boolean | undefined> | undefined): string {
+  if (typeof env?.VITE_API_URL === "string" && env.VITE_API_URL !== "") return env.VITE_API_URL;
+  if (env?.PROD === true) return ""; // same-origin /api in production
+  return "http://127.0.0.1:3001";
+}
+
+const BASE_URL: string = resolveBaseUrl(
+  (import.meta as { env?: Record<string, string | boolean | undefined> }).env,
+);
 
 /** Normalized API error carrying the backend's typed vocabulary. */
 export class ApiError extends Error {
@@ -31,10 +45,25 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Transport-level connection failure. `environment` distinguishes dev-local-unreachable
+ * from production-service-unavailable so the UI can show the RIGHT recovery guidance
+ * (dev: start the local server; prod: the service is down/redeploying — retry later).
+ * A development instruction (`npm run api`) must never reach a production user.
+ */
 export class NetworkError extends Error {
-  constructor(cause: unknown) {
-    super("Cannot reach the research backend — is the API server running (`npm run api`)?");
+  readonly environment: "development" | "production";
+
+  constructor(cause: unknown, opts?: { readonly production?: boolean }) {
+    const env = (import.meta as { env?: Record<string, string | boolean | undefined> }).env;
+    const production = opts?.production ?? env?.PROD === true;
+    super(
+      production
+        ? "Research service unavailable — the API is not responding. This is usually temporary (deployment or cold start); try again shortly."
+        : "Cannot reach the research backend — is the API server running (`npm run api`)?",
+    );
     this.name = "NetworkError";
+    this.environment = production ? "production" : "development";
     this.cause = cause;
   }
 }

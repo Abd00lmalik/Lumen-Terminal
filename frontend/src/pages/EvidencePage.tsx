@@ -9,7 +9,8 @@ import { AppShell } from "../components/AppShell.js";
 import {
   Panel, ClassBadge, EpistemicRail, FreshnessBadge, ProxyNote, KV, Note, Empty, timeAgo,
 } from "../components/ui.js";
-import { listEvidence, listClaims, ApiError } from "../api/index.js";
+import { BackendDownNote } from "../components/BackendDownNote.js";
+import { listEvidence, listClaims } from "../api/index.js";
 import { evidenceFromDto } from "../data/adapters.js";
 import type { EvidenceItem } from "../data/types.js";
 
@@ -20,7 +21,7 @@ export function EvidencePage() {
   const [selectedRef, setSelectedRef] = useState<string | undefined>(undefined);
   const [evidence, setEvidence] = useState<readonly EvidenceItem[]>([]);
   const [claims, setClaims] = useState<readonly { ref: string; statement: string }[]>([]);
-  const [error, setError] = useState<string | undefined>(undefined);
+  const [error, setError] = useState<unknown>(undefined);
 
   useEffect(() => {
     void (async () => {
@@ -29,7 +30,7 @@ export function EvidencePage() {
         setEvidence(ev.map(evidenceFromDto));
         setClaims(cl.map((c) => ({ ref: c.ref, statement: c.statement })));
       } catch (err) {
-        setError(err instanceof ApiError ? `${err.code}: ${err.message}` : err instanceof Error ? err.message : String(err));
+        setError(err);
       }
     })();
   }, []);
@@ -92,11 +93,7 @@ export function EvidencePage() {
         </p>
       </div>
 
-      {error !== undefined && (
-        <Note tone="warn">
-          <b>Backend unreachable.</b> {error} — start it with <code>npm run api</code> and refresh.
-        </Note>
-      )}
+      {error !== undefined && <BackendDownNote error={error} />}
 
       {error === undefined && evidence.length === 0 && (
         <Empty title="No evidence yet" hint="Run research in the workspace — evidence appears here as the engine records it." />
