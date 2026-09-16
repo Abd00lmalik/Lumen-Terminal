@@ -8,7 +8,7 @@ related: [research-execution-engine.md, research-planning.md, branch.md]
 
 **Related documents:** `research-execution-engine.md` · `research-planning.md` · `branch.md`
 
-> Converted from `EXECUTION SCHEDULER & RESOURCE ALLO.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `EXECUTION SCHEDULER & RESOURCE ALLO.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 EXECUTION SCHEDULER & RESOURCE ALLOCATION
 

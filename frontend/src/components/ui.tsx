@@ -1,5 +1,5 @@
 /**
- * Reusable UI primitives — the visual vocabulary shared by every screen.
+ * Reusable UI primitives; the visual vocabulary shared by every screen.
  * The epistemic rail + class badge pair is the signature: structure encodes evidence class.
  */
 import type { ReactNode } from "react";

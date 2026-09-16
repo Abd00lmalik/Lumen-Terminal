@@ -1,5 +1,5 @@
 /**
- * Research Memory & Monitoring Handoff — M5 domain additions (continuity layer).
+ * Research Memory & Monitoring Handoff; M5 domain additions (continuity layer).
  *
  * Architectural basis:
  * - memory.md MEMORY ENTRY MODEL (id, type, content, source_object, source_research, created_at,
@@ -11,19 +11,19 @@
  *   Memory is continuity, not authority. Stale memory is NEVER silently treated as current
  *   evidence (M5 §5): decay reduces current influence, not existence (no deletion).
  * - M5 §4: memory categories research/thesis/framework/preference/historical/monitor. Only an
- *   explicit confirmed SAVE promotes research into persistent memory — normal research updates
+ *   explicit confirmed SAVE promotes research into persistent memory; normal research updates
  *   the workspace WITHOUT becoming reusable memory.
  * - M5 §18 (memory conflicts): current research wins for current judgment; the historical record
- *   is preserved — never silently overwritten. The validation relationship is recorded.
+ *   is preserved; never silently overwritten. The validation relationship is recorded.
  * - M5 §10/§11 (monitor handoff): MONITOR representation per thesis-monitor-reassessment.md §21
  *   (MONITOR: target, thesis_refs, conditions, severity, frequency, reassessment_policy, status,
  *   lineage, history, provenance) + §22 (MONITOR_CONDITION with trigger_type/materiality).
  *   Invalidation vs early-warning conditions are DISTINCT (§323: "An early warning is weaker
- *   than invalidation") — never merged (M5 §10). Activation is a trader-confirmed boundary:
+ *   than invalidation"); never merged (M5 §10). Activation is a trader-confirmed boundary:
  *   PROPOSED → (trader confirms) → ACTIVE → PAUSED / STALE / COMPLETED (lifecycle MONITOR
- *   LIFECYCLE; §20 "No Silent Monitor Activation"). No monitoring infrastructure in M5 — this is
+ *   LIFECYCLE; §20 "No Silent Monitor Activation"). No monitoring infrastructure in M5; this is
  *   the persistent handoff/state a future monitoring layer consumes.
- * - M5 §12 (source failure law): SOURCE_UNAVAILABLE is a monitoring LIMITATION/state — "could
+ * - M5 §12 (source failure law): SOURCE_UNAVAILABLE is a monitoring LIMITATION/state; "could
  *   not retrieve source" is NEVER "thesis invalidated" (no false alerts).
  * - ids.ts: prefixes `mem_`, `mon_` (M5).
  */
@@ -33,7 +33,7 @@ import { createProvenance, appendProvenance, type Provenance, type ProvenanceOri
 import type { ISO } from "./objects.js";
 
 // ---------------------------------------------------------------------------
-// RESEARCH MEMORY — persistent, decayable, revalidatable (memory.md)
+// RESEARCH MEMORY; persistent, decayable, revalidatable (memory.md)
 // ---------------------------------------------------------------------------
 
 /** Memory categories (memory.md §2; M5 §4). */
@@ -62,7 +62,7 @@ export interface MemoryEntry {
   /** Last time this memory was confirmed still valid/current (revalidation timestamps). */
   readonly lastValidatedAt?: ISO;
   readonly status: MemoryStatus;
-  /** Why the status holds (e.g. what made it stale / what revalidated it) — auditable decay. */
+  /** Why the status holds (e.g. what made it stale / what revalidated it); auditable decay. */
   readonly statusReason?: string;
   /** Free-text context tags (asset, question, topic) for materiality-scoped retrieval. */
   readonly contextTags: readonly string[];
@@ -105,7 +105,7 @@ export function createMemoryEntry(
   });
 }
 
-/** Mark memory stale/historical — decay reduces current influence; the entry is NEVER deleted. */
+/** Mark memory stale/historical; decay reduces current influence; the entry is NEVER deleted. */
 export function decayMemory(
   entry: MemoryEntry,
   status: "STALE" | "HISTORICAL",
@@ -137,7 +137,7 @@ export function revalidateMemory(
   return Object.freeze({
     ...entry,
     lastValidatedAt: atDate.toISOString(),
-    validationNote: `${outcome.confirmed ? "revalidated: confirmed current" : "revalidated: NOT confirmed by current research"} — ${outcome.note}`,
+    validationNote: `${outcome.confirmed ? "revalidated: confirmed current" : "revalidated: NOT confirmed by current research"}; ${outcome.note}`,
     ...(outcome.newStatus !== undefined ? { status: outcome.newStatus } : {}),
     provenance: appendProvenance(entry.provenance, origin, `memory revalidated (${outcome.confirmed ? "confirmed" : "not confirmed"}): ${outcome.note}`, atDate),
     updatedAt: atDate.toISOString(),
@@ -145,14 +145,14 @@ export function revalidateMemory(
 }
 
 // ---------------------------------------------------------------------------
-// MONITORING HANDOFF — the persistent representation of what should be monitored
+// MONITORING HANDOFF; the persistent representation of what should be monitored
 // (no infrastructure: proposal/activation/state only)
 // ---------------------------------------------------------------------------
 
 export type MonitorLifecycleStatus = "PROPOSED" | "ACTIVE" | "PAUSED" | "STALE" | "COMPLETED";
 
 /**
- * Condition kind — invalidation vs early-warning are DISTINCT (thesis-monitor-reassessment.md
+ * Condition kind; invalidation vs early-warning are DISTINCT (thesis-monitor-reassessment.md
  * §323; M5 §10): an early warning signals increasing risk; an invalidation condition's occurrence
  * materially undermines the thesis.
  */
@@ -161,7 +161,7 @@ export type MonitorConditionKind = "INVALIDATION" | "EARLY_WARNING";
 export interface MonitorCondition {
   readonly description: string;
   readonly kind: MonitorConditionKind;
-  /** Trigger type vocabulary (thesis-monitor-reassessment.md §23) — meaningful conditions only. */
+  /** Trigger type vocabulary (thesis-monitor-reassessment.md §23); meaningful conditions only. */
   readonly triggerType: "THRESHOLD" | "STATE_CHANGE" | "EVENT" | "PATTERN" | "CONTRADICTION" | "NEW_EVIDENCE" | "TIME" | "DEPENDENCY_CHANGE" | "SOURCE_UPDATE";
   /** Where this condition came from: the thesis's own text vs proposed by research (M4 §19 law). */
   readonly conditionStatus: "DERIVED_FROM_THESIS" | "PROPOSED";
@@ -180,7 +180,7 @@ export interface Monitor {
   readonly conditions: readonly MonitorCondition[];
   /** Freshness expectation for the monitored signals (how current the data must be). */
   readonly freshnessExpectation?: string;
-  /** Suggested cadence/scope — representation only; no scheduler exists in M5. */
+  /** Suggested cadence/scope; representation only; no scheduler exists in M5. */
   readonly suggestedFrequency?: "REAL_TIME" | "HIGH" | "MEDIUM" | "LOW";
   /** Why these conditions deserve monitoring (trigger rationale). */
   readonly triggerRationale: string;
@@ -192,7 +192,7 @@ export interface Monitor {
   readonly updatedAt: ISO;
 }
 
-/** Propose a monitor — status PROPOSED, inert until explicit trader confirmation (M5 §11). */
+/** Propose a monitor; status PROPOSED, inert until explicit trader confirmation (M5 §11). */
 export function proposeMonitor(
   input: {
     target: string;
@@ -218,7 +218,7 @@ export function proposeMonitor(
     ...(input.suggestedFrequency !== undefined ? { suggestedFrequency: input.suggestedFrequency } : {}),
     status: "PROPOSED",
     sourceStates: [],
-    provenance: createProvenance(origin, "monitor proposed (inert — activation requires trader confirmation)", at),
+    provenance: createProvenance(origin, "monitor proposed (inert; activation requires trader confirmation)", at),
     createdAt: timestamp,
     updatedAt: timestamp,
   });
@@ -248,7 +248,7 @@ export function transitionMonitor(monitor: Monitor, to: MonitorLifecycleStatus, 
 }
 
 /**
- * Record a source state — "could not retrieve source" is SOURCE_UNAVAILABLE, a monitoring
+ * Record a source state; "could not retrieve source" is SOURCE_UNAVAILABLE, a monitoring
  * limitation. It must NEVER be interpreted as a thesis invalidation (M5 §12).
  */
 export function recordMonitorSourceState(
@@ -268,7 +268,7 @@ export function recordMonitorSourceState(
   });
 }
 
-/** Revalidate monitor conditions after reassessment (M5 §15) — review flag, never silent change. */
+/** Revalidate monitor conditions after reassessment (M5 §15); review flag, never silent change. */
 export function flagMonitorForReview(monitor: Monitor, reason: string, origin: ProvenanceOrigin, at?: Date): Monitor {
   const atDate = at ?? new Date();
   return Object.freeze({

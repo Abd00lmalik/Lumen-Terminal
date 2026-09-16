@@ -1,5 +1,5 @@
 /**
- * ModelProvider — the provider-neutral LLM seam (M3).
+ * ModelProvider; the provider-neutral LLM seam (M3).
  *
  * Architectural basis:
  * - M3 mandate §2/§3: Gemini is an implementation detail behind this interface; the core is
@@ -8,7 +8,7 @@
  *   structured output it returns must be validated (§6) before dispatch; the Research Engine
  *   executes; adapters provide data; workspace/persistence owns state; the trader decides.
  * - Evidence laws survive the model boundary (§9): the context handed to the model preserves
- *   epistemic classes — the model can never "receive" interpretations as observations.
+ *   epistemic classes; the model can never "receive" interpretations as observations.
  *
  * Failure semantics (§19/§20): model failure is a typed condition (ModelFailure), distinct from
  * research/tool failure. Providers must never fabricate a response to hide failure.
@@ -17,15 +17,15 @@
 import type { ISO } from "../domain/objects.js";
 
 // ---------------------------------------------------------------------------
-// Model failures — typed, distinct from research failure (M3 §19/§20)
+// Model failures; typed, distinct from research failure (M3 §19/§20)
 // ---------------------------------------------------------------------------
 
 export type ModelFailureType =
-  | "PROVIDER_UNAVAILABLE" // network/HTTP/service outage — retriable
-  | "AUTH_FAILURE" // missing/invalid credentials — not retriable
-  | "RATE_LIMITED" // quota/429 — retriable with backoff
+  | "PROVIDER_UNAVAILABLE" // network/HTTP/service outage; retriable
+  | "AUTH_FAILURE" // missing/invalid credentials; not retriable
+  | "RATE_LIMITED" // quota/429; retriable with backoff
   | "INVALID_OUTPUT" // response arrived but failed schema/structural validation
-  | "TIMEOUT" // request exceeded the deadline — retriable
+  | "TIMEOUT" // request exceeded the deadline; retriable
   | "EMPTY_OUTPUT" // response arrived but contained no usable content
   | "UNKNOWN";
 
@@ -60,7 +60,7 @@ export interface ModelUsage {
  * all providers must run the returned text through `validateModelOutput` regardless.
  */
 export interface StructuredRequest {
-  /** Stable schema name (e.g. "lui.interpretation") — included in prompts and validation. */
+  /** Stable schema name (e.g. "lui.interpretation"); included in prompts and validation. */
   readonly schemaName: string;
   /** JSON-schema-ish description of the expected object; providers render it into the prompt. */
   readonly schemaDescription: string;
@@ -77,7 +77,7 @@ export interface StructuredRequest {
 export interface StructuredResponse<T = unknown> {
   /** The validated parsed object (shape governed by schemaName). */
   readonly data: T;
-  /** Raw model text, preserved for audit (never used for machine routing — §6). */
+  /** Raw model text, preserved for audit (never used for machine routing; §6). */
   readonly raw: string;
   readonly schemaName: string;
   readonly usage?: ModelUsage;
@@ -97,14 +97,14 @@ export interface ModelProvider {
   /**
    * One structured round-trip. Implementations must:
    * - obtain credentials exclusively from environment configuration (never hardcoded);
-   * - throw ModelFailure (typed) on failure — never fabricate output;
+   * - throw ModelFailure (typed) on failure; never fabricate output;
    * - return only responses whose `data` passes `validateModelOutput`.
    */
   structured<T>(request: StructuredRequest): Promise<StructuredResponse<T>>;
 }
 
 // ---------------------------------------------------------------------------
-// Output validation — every model-produced object is validated before dispatch (M3 §6)
+// Output validation; every model-produced object is validated before dispatch (M3 §6)
 // ---------------------------------------------------------------------------
 
 /**
@@ -120,7 +120,7 @@ export type PrimitiveGuard =
   | "number[]"
   | "record"
   | "record[]" // array of objects (compound structures are shape-checked by their parsers)
-  | "array"; // array of unknown items — ONLY where the call-site parser does entry-level validation and drops malformed entries (never silently coerces)
+  | "array"; // array of unknown items; ONLY where the call-site parser does entry-level validation and drops malformed entries (never silently coerces)
 
 export interface OutputSchema {
   readonly name: string;
@@ -130,7 +130,7 @@ export interface OutputSchema {
    * When present they are still type-checked; everything not listed here is required.
    */
   readonly optional?: readonly string[];
-  /** Allow additional properties beyond those declared (default: false — strict). */
+  /** Allow additional properties beyond those declared (default: false; strict). */
   readonly allowExtra?: boolean;
 }
 
@@ -154,14 +154,14 @@ function guardProblems(
   for (const key of Object.keys(record)) {
     // Models legitimately express "not provided" as an explicit JSON null for optional fields
     // (e.g. live Flash-Lite sends researchRef:null on a fresh workspace). null on an OPTIONAL
-    // field IS that signal — normalize before guarding instead of failing the whole output.
+    // field IS that signal; normalize before guarding instead of failing the whole output.
     if (record[key] === null && optionalKeys.has(key)) delete record[key];
   }
   for (const [key, guard] of Object.entries(schema.properties)) {
     let v = record[key];
     // LIST-SHAPED NORMALIZATION: small models omit (or null) a list field when it is empty
     // ("no clarifying questions" → no `questions` key) even though the field is required.
-    // For list guards an ABSENT/NULL value has exactly one honest meaning — "none" — so it is
+    // For list guards an ABSENT/NULL value has exactly one honest meaning; "none"; so it is
     // normalized to [] instead of failing the whole output. Scalar guards stay strictly
     // required; parsers still reject empty lists where emptiness is illegal (e.g. plan steps).
     if ((v === undefined || v === null) && (guard === "string[]" || guard === "number[]" || guard === "record[]" || guard === "array")) {
@@ -241,7 +241,7 @@ export function extractJson(text: string): unknown {
 }
 
 /**
- * Validate raw model text against a schema. Throws ModelFailure (INVALID_OUTPUT) — never
+ * Validate raw model text against a schema. Throws ModelFailure (INVALID_OUTPUT); never
  * returns an unvalidated object. This is the gate every model output passes before the LUI
  * or engine may act on it (M3 §6: "Never blindly trust JSON returned by the model").
  */
@@ -253,7 +253,7 @@ export function validateModelOutput<T>(schema: OutputSchema, text: string): { da
 }
 
 // ---------------------------------------------------------------------------
-// Config — credentials from environment ONLY (M3 §2)
+// Config; credentials from environment ONLY (M3 §2)
 // ---------------------------------------------------------------------------
 
 export interface ModelEnvConfig {
@@ -282,7 +282,7 @@ export function requireEnvConfig(
   return { apiKey, model };
 }
 
-/** Convenience: what the provider layer is allowed to put into errors/logs — never the key. */
+/** Convenience: what the provider layer is allowed to put into errors/logs; never the key. */
 export function redactCredential(value: string): string {
   return value.length > 0 ? "[redacted]" : "";
 }

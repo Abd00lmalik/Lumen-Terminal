@@ -1,5 +1,5 @@
 /**
- * G1 historical-data adapter — deterministic tests (vendor selected 2026-09-15).
+ * G1 historical-data adapter; deterministic tests (vendor selected 2026-09-15).
  *
  * Laws under test:
  * - venue priority: Bitget REST primary; Binance Vision public-mirror fallback when the
@@ -128,7 +128,7 @@ describe("G1 historical-data adapter (vendor: Bitget → Binance Vision)", () =>
     }
   });
 
-  it("returns EMPTY_RESULT for an empty window — absence of data is not negative evidence", async () => {
+  it("returns EMPTY_RESULT for an empty window; absence of data is not negative evidence", async () => {
     const bitget = new RestTransport({ fetchImpl: scriptedFetch([{ body: JSON.stringify({ code: "00000", data: [] }) }]) });
     const vision = new RestTransport({ baseUrl: BINANCE_VISION_BASE_URL, fetchImpl: scriptedFetch([{ body: "[]" }]) });
     const g1 = new G1HistoricalDataAdapter(bitget, vision);
@@ -181,7 +181,7 @@ describe("G1 historical-data adapter (vendor: Bitget → Binance Vision)", () =>
   });
 
   it("paginates forward when the first page is full (deep-range safety bound)", async () => {
-    // 2 pages: full page (limit=3 in test via MAX override not possible — emulate with small window
+    // 2 pages: full page (limit=3 in test via MAX override not possible; emulate with small window
     // and a second call returning the remainder). Use a 3-candle page + expect a second call.
     const t0 = Date.UTC(2020, 0, 1);
     const page1 = JSON.stringify({ code: "00000", data: [
@@ -189,7 +189,7 @@ describe("G1 historical-data adapter (vendor: Bitget → Binance Vision)", () =>
       { ts: String(t0 + DAY_MS), open: "1", high: "2", low: "0.5", close: "1.5", baseVolume: "10" },
       { ts: String(t0 + 2 * DAY_MS), open: "1", high: "2", low: "0.5", close: "1.5", baseVolume: "10" },
     ]});
-    // MAX_CANDLES_PER_CALL=1000 > 3, so the loop stops after page 1 — this test verifies
+    // MAX_CANDLES_PER_CALL=1000 > 3, so the loop stops after page 1; this test verifies
     // dedupe/sort and the no-forward-progress guard instead.
     const bitget = new RestTransport({ fetchImpl: scriptedFetch([{ body: page1 }]) });
     const vision = new RestTransport({ baseUrl: BINANCE_VISION_BASE_URL, fetchImpl: scriptedFetch([{ body: "[]" }]) });

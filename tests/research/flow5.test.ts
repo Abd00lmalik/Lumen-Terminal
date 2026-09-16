@@ -1,5 +1,5 @@
 /**
- * Benchmark: Flow 5 — HAS THIS HAPPENED BEFORE? (historical comparison).
+ * Benchmark: Flow 5; HAS THIS HAPPENED BEFORE? (historical comparison).
  *
  * Covers the defect fixed in this benchmark phase: Flow 5 previously fell through the LUI
  * dispatch to the generic adaptive loop, where CURRENT-data capabilities could silently
@@ -7,7 +7,7 @@
  *
  * Laws under test (research-flows.md FLOW 5 + M6 audit law):
  * - A historical question is answerable ONLY by HISTORICAL_COMPARISON evidence.
- * - Until a G1 vendor connects, the honest outcome is UNAVAILABLE — never fabricated
+ * - Until a G1 vendor connects, the honest outcome is UNAVAILABLE; never fabricated
  *   history, never current data presented as precedent, never model background knowledge.
  * - Model/provider failure ends the flow honestly (MODEL_FAILURE), with no fabricated claims.
  */
@@ -67,10 +67,10 @@ const CURRENT_DATA_PLAN = JSON.stringify({
 });
 
 // ---------------------------------------------------------------------------
-// Flow 5 direct — G1 stub (the current real-world state)
+// Flow 5 direct; G1 stub (the current real-world state)
 // ---------------------------------------------------------------------------
 
-describe("Flow 5 — historical comparison (G1 unavailable)", () => {
+describe("Flow 5; historical comparison (G1 unavailable)", () => {
   it("ends in honest UNAVAILABLE: the G1 stub failure is reported, nothing is fabricated", async () => {
     const provider = new FakeModelProvider(new Map([
       ["research.plan", HISTORICAL_UNAVAILABLE_PLAN],
@@ -95,7 +95,7 @@ describe("Flow 5 — historical comparison (G1 unavailable)", () => {
     expect(result.outcome.evidence).toHaveLength(0);
     expect(result.outcome.stoppedBecause).toBe("MODEL_INSUFFICIENT_EVIDENCE");
 
-    // The response states unavailability — it does not pretend precedent was found.
+    // The response states unavailability; it does not pretend precedent was found.
     expect(result.response).toContain("UNAVAILABLE");
     expect(result.response).toContain("G1 historical-data vendor has not been connected");
     expect(result.response).not.toMatch(/precedent (was )?found/i);
@@ -117,7 +117,7 @@ describe("Flow 5 — historical comparison (G1 unavailable)", () => {
       provider, registry, workspace, store: new MemoryStore(),
     });
 
-    // Out-of-scope executions are excluded from the flow outcome — current data can never
+    // Out-of-scope executions are excluded from the flow outcome; current data can never
     // be laundered into a historical answer.
     expect(result.outcome.executions).toHaveLength(0);
     expect(result.outcome.evidence).toHaveLength(0);
@@ -259,7 +259,7 @@ describe("Flow 5 — historical comparison (G1 unavailable)", () => {
           tool: "fake/g1-dedupe",
           capability: cap,
           transport: "fake",
-          // IDENTICAL payload every call — the dedupe law targets repeated identical outputs.
+          // IDENTICAL payload every call; the dedupe law targets repeated identical outputs.
           outputs: [
             { outputClass: "QUANTITATIVE_OBSERVATION", content: "2024-09 analogous setup: RSI 34, -8% drawdown over 10 days", about: "BTC" },
           ],
@@ -327,10 +327,10 @@ describe("Flow 5 — historical comparison (G1 unavailable)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Flow 5 through the LUI — routing + honest response
+// Flow 5 through the LUI; routing + honest response
 // ---------------------------------------------------------------------------
 
-describe("Flow 5 — LUI routing", () => {
+describe("Flow 5; LUI routing", () => {
   function scriptLui(provider: FakeModelProvider): void {
     provider.responses.set("lui.normalized_request", responses.normalizedRequest());
     provider.responses.set("lui.resolved_target", responses.resolvedTarget({ flow: "HAS_THIS_HAPPENED_BEFORE" }));

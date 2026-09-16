@@ -1,6 +1,6 @@
 ---
-title: "CHALLENGE — Universal Core Action"
-source: # CHALLENGE — Universal Core Action.txt
+title: "CHALLENGE; Universal Core Action"
+source: # CHALLENGE; Universal Core Action.txt
 converted: 2026-09-12
 type: architecture-spec
 related: [lui-universal-core.md, hypothesis.md, research-flows.md]
@@ -8,9 +8,9 @@ related: [lui-universal-core.md, hypothesis.md, research-flows.md]
 
 **Related documents:** `lui-universal-core.md` · `hypothesis.md` · `research-flows.md`
 
-> Converted from `# CHALLENGE — Universal Core Action.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `# CHALLENGE; Universal Core Action.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
-# CHALLENGE — Universal Core Action
+# CHALLENGE; Universal Core Action
 
 ## 1. Definition
 

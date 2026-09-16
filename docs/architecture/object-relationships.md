@@ -8,7 +8,7 @@ related: [research-object-model.md, object-lifecycle-state-machine.md, memory.md
 
 **Related documents:** `research-object-model.md` · `object-lifecycle-state-machine.md` · `memory.md`
 
-> Converted from `OBJECT RELATIONSHIPS  DEPENDENCY GR.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `OBJECT RELATIONSHIPS  DEPENDENCY GR.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 OBJECT RELATIONSHIPS / DEPENDENCY GRAPH
 

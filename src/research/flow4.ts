@@ -1,24 +1,24 @@
 /**
- * Flow 4 — DOES MY THESIS HOLD? (thesis evaluation) — M4b.
+ * Flow 4; DOES MY THESIS HOLD? (thesis evaluation); M4b.
  *
  * Architectural basis: research-flows.md FLOW 4.
  * - Evaluates the TRADER-OWNED active thesis. The system NEVER silently rewrites, weakens,
  *   strengthens, replaces, or mutates the thesis (thesis.md; M4b §3). Revision is a separate
  *   consequential action behind the existing LUI/confirmation boundary (MANAGE_STATE + origin).
  * - Decomposes the thesis into claims/assumptions (the Thesis object already carries
- *   ThesisClaim/ThesisAssumption with importance + invalidationConditions — reused, not
+ *   ThesisClaim/ThesisAssumption with importance + invalidationConditions; reused, not
  *   reinvented); researches BOTH supporting and disconfirming evidence per component.
  * - Reuses the EXISTING judgment vocabulary (SUPPORTED / WEAKENED / MATERIALLY_CHALLENGED /
- *   UNSUPPORTED / INDETERMINATE) — no new scoring system (M4b §3).
+ *   UNSUPPORTED / INDETERMINATE); no new scoring system (M4b §3).
  * - Epistemic separations (M4b §3): evidence quality ≠ research quality ≠ confidence ≠ thesis
  *   assessment. Unavailable evidence is NOT contradiction (retrieval failure ≠ negative
  *   evidence); a single weak source does not invalidate; model confidence never overrides
  *   evidence quality.
  * - Flow 4 vs Flow 7 (M4b §7): Flow 4 evaluates; Flow 7 is dedicated falsification. Flow 4 may
  *   request disconfirming evidence internally (via capability selection) but remains a distinct
- *   flow — they share the runner, not the objective.
+ *   flow; they share the runner, not the objective.
  * - The flow defines objective + mode (EVALUATION); the shared runner + registry pick
- *   capabilities — no Flow→Tool hardcoding (M4b §5).
+ *   capabilities; no Flow→Tool hardcoding (M4b §5).
  */
 
 import type { ModelProvider } from "../model/provider.js";
@@ -32,28 +32,28 @@ import type { Thesis } from "../domain/thesis.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
 
 // ---------------------------------------------------------------------------
-// Flow objective — EVALUATION mode (thesis assessment; evidence over confidence)
+// Flow objective; EVALUATION mode (thesis assessment; evidence over confidence)
 // ---------------------------------------------------------------------------
 
 export const FLOW4_OBJECTIVE: FlowObjective = {
   flow: "DOES_MY_THESIS_HOLD",
   mode: "EVALUATION",
   schedulerGuidance: [
-    "EVALUATION MODE (Flow 4 — DOES MY THESIS HOLD?): assess the trader's thesis against evidence — both supporting AND disconfirming.",
+    "EVALUATION MODE (Flow 4; DOES MY THESIS HOLD?): assess the trader's thesis against evidence; both supporting AND disconfirming.",
     "- Decompose the thesis into its own claims/assumptions (they exist on the Thesis object); evaluate COMPONENT-BY-COMPONENT, not just holistically.",
     "- Research balanced evidence: what supports each claim, what contradicts it, what would count as invalidation (the thesis's OWN invalidationConditions are authoritative).",
     "- Epistemic rules: unavailable evidence is NOT contradiction; one weak source does not invalidate; model confidence never overrides evidence quality; freshness matters (stale evidence stays stale).",
-    "- Distinguish evidence quality, research quality, confidence, and the thesis assessment — they are NOT interchangeable.",
+    "- Distinguish evidence quality, research quality, confidence, and the thesis assessment; they are NOT interchangeable.",
     "- The thesis is TRADER-OWNED: assess it, never modify it.",
   ].join("\n"),
 };
 
 // ---------------------------------------------------------------------------
-// Thesis-evaluation schema — claim-level + overall (existing judgment vocabulary)
+// Thesis-evaluation schema; claim-level + overall (existing judgment vocabulary)
 // ---------------------------------------------------------------------------
 
 /**
- * Assessment vocabulary for thesis evaluations — the architecture's judgment vocabulary (M4b §3).
+ * Assessment vocabulary for thesis evaluations; the architecture's judgment vocabulary (M4b §3).
  * Lives in the domain (thesis.ts); re-exported here for flow-local use.
  */
 export type { ThesisAssessmentStatus } from "../domain/thesis.js";
@@ -67,20 +67,20 @@ export interface ThesisComponentAssessment {
   readonly kind: "CLAIM" | "ASSUMPTION";
   /** Per-component status from the SAME vocabulary as the overall assessment. */
   readonly status: ThesisAssessmentStatus;
-  /** Evidence quality for this component — distinct from status (M4b §3). */
+  /** Evidence quality for this component; distinct from status (M4b §3). */
   readonly evidenceQuality: "STRONG" | "MIXED" | "WEAK" | "UNAVAILABLE";
   readonly supportingRefs: readonly string[];
   readonly contradictingRefs: readonly string[];
-  /** Why this status, grounded in evidence — not model sentiment. */
+  /** Why this status, grounded in evidence; not model sentiment. */
   readonly rationale: string;
   readonly uncertainty: readonly string[];
 }
 
 export interface ThesisEvaluation {
-  /** The evaluated thesis, identified verbatim — trader-owned, unchanged. */
+  /** The evaluated thesis, identified verbatim; trader-owned, unchanged. */
   readonly thesisStatement: string;
   readonly components: readonly ThesisComponentAssessment[];
-  /** Overall assessment — existing judgment vocabulary (no new taxonomy). */
+  /** Overall assessment; existing judgment vocabulary (no new taxonomy). */
   readonly overallAssessment: ThesisAssessmentStatus;
   /** Evidence-quality/readiness of the research behind the overall assessment. */
   readonly evidenceBasisQuality: "STRONG" | "MIXED" | "WEAK" | "UNAVAILABLE";
@@ -89,7 +89,7 @@ export interface ThesisEvaluation {
   /** The thesis's OWN invalidation conditions, with current evidence against each (if any). */
   readonly invalidationConditionStatus: readonly { readonly condition: string; readonly currentlyTriggered: boolean; readonly evidenceRefs: readonly string[] }[];
   readonly unresolved: readonly string[];
-  /** What would change the assessment — evidence/conditions, never sentiment. */
+  /** What would change the assessment; evidence/conditions, never sentiment. */
   readonly whatWouldChange: readonly string[];
   readonly confidence: "HIGH" | "MODERATE" | "LOW";
   readonly rationale: string;
@@ -130,17 +130,18 @@ export const THESIS_EVALUATION_SCHEMA_DESC = [
 ].join("\n");
 
 const EVALUATION_SYSTEM = [
-  "You are the thesis evaluator of a trading RESEARCH workbench (Flow 4 — DOES MY THESIS HOLD?).",
+  "You are the thesis evaluator of a trading RESEARCH workbench (Flow 4; DOES MY THESIS HOLD?).",
   "You receive the TRADER'S OWN thesis (never rewrite it) and the VALIDATED research context.",
   "Hard rules:",
   "- Evaluate the thesis's claims/assumptions component-by-component; the overall assessment must be consistent with the components (a CORE claim invalidated is not a mild weakening).",
-  "- UNAVAILABLE evidence is NOT contradiction: if the context has nothing relevant for a component, evidenceQuality=UNAVAILABLE and the status leans INDETERMINATE — never UNSUPPORTED-by-absence.",
+  "- UNAVAILABLE evidence is NOT contradiction: if the context has nothing relevant for a component, evidenceQuality=UNAVAILABLE and the status leans INDETERMINATE; never UNSUPPORTED-by-absence.",
   "- Retrieval failure and tool limitations in the context are data-availability conditions, NOT negative evidence.",
   "- One weak source does not invalidate; repeated secondary reports of one primary are not independent corroboration; stale evidence stays stale.",
   "- Your confidence NEVER upgrades an assessment beyond what the evidence supports. evidenceQuality and status are separate fields for a reason.",
   "- Use the thesis's OWN invalidationConditions when checking what would falsify it.",
-  "- Only cite evidence ids present in the context — never fabricate refs.",
+  "- Only cite evidence ids present in the context; never fabricate refs.",
   "- The thesis object is not modified by this evaluation; your output informs the trader, who decides.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 // ---------------------------------------------------------------------------
@@ -157,6 +158,11 @@ export interface Flow4Options {
   readonly asset?: string;
   readonly constraints?: readonly string[];
   readonly maxRounds?: number;
+  /**
+   * Wall-clock deadline for the whole run (epoch ms); forwarded to the shared flow runner's
+   * honest TIME_BUDGET_EXHAUSTED stop. Optional; tests omit it.
+   */
+  readonly deadlineMs?: number;
   readonly now?: () => Date;
 }
 
@@ -173,10 +179,10 @@ export async function runFlow4(objective: string, options: Flow4Options): Promis
   const systemOrigin: ProvenanceOrigin = { kind: "agent", detail: "Flow 4 orchestration" };
   const workspace = options.workspace;
 
-  // 1. Retrieve the trader-owned thesis (or fail honestly — never fabricate one).
+  // 1. Retrieve the trader-owned thesis (or fail honestly; never fabricate one).
   const thesis: Thesis | undefined = options.thesisRef !== undefined ? workspace.getThesis(options.thesisRef) : workspace.activeTheses()[0];
   if (thesis === undefined) {
-    const failure = new ModelFailure("INVALID_OUTPUT", "no active thesis to evaluate — activate or state a thesis first (never fabricate one)", false);
+    const failure = new ModelFailure("INVALID_OUTPUT", "no active thesis to evaluate; activate or state a thesis first (never fabricate one)", false);
     return { outcome: emptyOutcome(objective, failure), evaluation: undefined, modelFailure: failure, response: failureResponse(failure) };
   }
   const thesisVersionAtEvaluation = thesis.version;
@@ -196,6 +202,7 @@ export async function runFlow4(objective: string, options: Flow4Options): Promis
     ...(options.constraints !== undefined ? { constraints: options.constraints } : {}),
     capabilityParams: options.asset !== undefined ? { asset: options.asset } : {},
     ...(options.maxRounds !== undefined ? { maxRounds: options.maxRounds } : {}),
+    ...(options.deadlineMs !== undefined ? { deadlineMs: options.deadlineMs } : {}),
     ...(options.now !== undefined ? { now: options.now } : {}),
   });
 
@@ -209,11 +216,11 @@ export async function runFlow4(objective: string, options: Flow4Options): Promis
     return { outcome: flowOutcome, evaluation: undefined, modelFailure: failure, response: failureResponse(failure) };
   }
   if (evaluation === undefined) {
-    const failure = new ModelFailure("INVALID_OUTPUT", "thesis evaluation failed validation — no assessment asserted", false);
+    const failure = new ModelFailure("INVALID_OUTPUT", "thesis evaluation failed validation; no assessment asserted", false);
     return { outcome: flowOutcome, evaluation: undefined, modelFailure: failure, response: failureResponse(failure) };
   }
 
-  // 3. Analysis + judgment. The THESIS OBJECT IS NOT TOUCHED — the evaluation lives in the
+  // 3. Analysis + judgment. The THESIS OBJECT IS NOT TOUCHED; the evaluation lives in the
   //    analysis/judgment layer (thesis.md; M4b §3).
   const analysis = workspace.addAnalysis(
     {
@@ -221,10 +228,10 @@ export async function runFlow4(objective: string, options: Flow4Options): Promis
       mode: "INTERPRET",
       inputs: flowOutcome.evidence.map((e) => e.id),
       findings: [
-        ...evaluation.components.map((c) => `[${c.kind}/${c.status}] ${c.component} — ${c.rationale}`),
+        ...evaluation.components.map((c) => `[${c.kind}/${c.status}] ${c.component}; ${c.rationale}`),
         ...(evaluation.invalidationConditionStatus.filter((i) => i.currentlyTriggered).map((i) => `invalidation condition TRIGGERED (per evidence): ${i.condition}`)),
       ],
-      conclusion: `Overall: ${evaluation.overallAssessment} — ${evaluation.rationale}`,
+      conclusion: `Overall: ${evaluation.overallAssessment}; ${evaluation.rationale}`,
       uncertainty: evaluation.unresolved,
     },
     systemOrigin,
@@ -234,7 +241,7 @@ export async function runFlow4(objective: string, options: Flow4Options): Promis
   const judgment = workspace.addJudgment(
     {
       researchRef: research.id,
-      statement: `THESIS EVALUATION of the trader's thesis (version ${thesisVersionAtEvaluation}, unchanged): ${evaluation.overallAssessment} — ${evaluation.rationale}`,
+      statement: `THESIS EVALUATION of the trader's thesis (version ${thesisVersionAtEvaluation}, unchanged): ${evaluation.overallAssessment}; ${evaluation.rationale}`,
       basis: {
         supportingEvidence: evaluation.citedObjectRefs,
         opposingEvidence: flowOutcome.evidence.filter((e) => e.contradicts.length > 0).map((e) => e.id),
@@ -245,7 +252,7 @@ export async function runFlow4(objective: string, options: Flow4Options): Promis
       uncertainty: evaluation.unresolved,
       unresolvedQuestions: evaluation.whatWouldChange,
       implications: [
-        "the trader's thesis object is unchanged — evaluation only; revision is a separate confirmed action",
+        "the trader's thesis object is unchanged; evaluation only; revision is a separate confirmed action",
         "Flow 7 can stress-test this evaluation with dedicated falsification methodology",
       ],
     },
@@ -254,7 +261,7 @@ export async function runFlow4(objective: string, options: Flow4Options): Promis
   );
 
   // M6 (audit D3): record the evaluation in the auditable thesis-assessment history (M5 §9).
-  // Assessment is a RESEARCH RESULT — the thesis object itself remains untouched (version
+  // Assessment is a RESEARCH RESULT; the thesis object itself remains untouched (version
   // unchanged); recording history is not mutation.
   workspace.recordThesisAssessment(
     {
@@ -298,10 +305,10 @@ async function evaluate(flowOutcome: FlowOutcome, thesis: Thesis, options: Flow4
     schemaDescription: THESIS_EVALUATION_SCHEMA_DESC,
     system: EVALUATION_SYSTEM,
     prompt: [
-      `TRADER'S THESIS (their property — evaluate, never rewrite): "${thesis.statement}"`,
+      `TRADER'S THESIS (their property; evaluate, never rewrite): "${thesis.statement}"`,
       `Thesis structure (authoritative components): ${JSON.stringify(thesisStructure)}`,
       `Research objective: ${objectiveLine(thesis.statement)}`,
-      `Research status: ${flowOutcome.stoppedBecause} — ${flowOutcome.finalDecision.rationale}`,
+      `Research status: ${flowOutcome.stoppedBecause}; ${flowOutcome.finalDecision.rationale}`,
       "VALIDATED RESEARCH CONTEXT:",
       renderResearchContext(flowOutcome.context),
     ].join("\n"),
@@ -350,7 +357,7 @@ function objectiveLine(thesisStatement: string): string {
 function emptyOutcome(objective: string, failure: ModelFailure): FlowOutcome {
   return {
     researchId: "n/a", flow: "DOES_MY_THESIS_HOLD", mode: "EVALUATION",
-    plan: { objective, scopeIncluded: [], scopeExcluded: [], tasks: [], completionCriteria: [], adaptationPolicy: "n/a — no thesis to evaluate" },
+    plan: { objective, scopeIncluded: [], scopeExcluded: [], tasks: [], completionCriteria: [], adaptationPolicy: "n/a; no thesis to evaluate" },
     rounds: [], executions: [], hypotheses: [], evidence: [],
     finalDecision: { decision: "INSUFFICIENT_EVIDENCE", rationale: failure.message, nextTasks: [] },
     stoppedBecause: "MODEL_FAILURE",
@@ -370,7 +377,7 @@ function failureResponse(failure: ModelFailure): string {
 function buildFlow4Response(evaluation: ThesisEvaluation, flowOutcome: FlowOutcome, thesis: Thesis): string {
   const lines: string[] = [];
   lines.push(`**Thesis (trader-owned, version ${thesis.version}, unchanged):** "${thesis.statement}"`);
-  lines.push(`**Assessment:** ${evaluation.overallAssessment} — ${evaluation.rationale}`);
+  lines.push(`**Assessment:** ${evaluation.overallAssessment}; ${evaluation.rationale}`);
   if (evaluation.components.length > 0) {
     lines.push(`**Component assessments:**`);
     for (const c of evaluation.components.slice(0, 5)) lines.push(`  • [${c.kind} · ${c.status} · evidence: ${c.evidenceQuality}] ${c.component}`);

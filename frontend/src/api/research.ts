@@ -1,5 +1,5 @@
 /**
- * Research service — submit requests (JSON or SSE) and read research objects/history.
+ * Research service; submit requests (JSON or SSE) and read research objects/history.
  * The client message is natural language ONLY; flow/action selection belongs to the backend LUI.
  */
 import { http, streamResearch } from "./client.js";

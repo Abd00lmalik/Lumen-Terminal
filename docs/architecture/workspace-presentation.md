@@ -5,7 +5,7 @@ converted: 2026-09-12
 type: architecture-spec
 ---
 
-> Converted from `RESEARCH STATE  WORKSPACE PRESENTAT.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `RESEARCH STATE  WORKSPACE PRESENTAT.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 RESEARCH STATE / WORKSPACE PRESENTATION INTELLIGENCE
 
@@ -658,7 +658,7 @@ For example:
 
 ```text
 Selected:
-Hypothesis — Liquidation cascade
+Hypothesis; Liquidation cascade
 
 Shows:
 Statement
@@ -837,12 +837,12 @@ The workspace should maintain a research timeline containing material events.
 Example:
 
 ```text
-10:02 — Research started
-10:05 — Initial hypothesis created
-10:11 — Macro evidence collected
-10:17 — Contradictory evidence discovered
-10:21 — Liquidation hypothesis promoted
-10:28 — Judgment revised
+10:02; Research started
+10:05; Initial hypothesis created
+10:11; Macro evidence collected
+10:17; Contradictory evidence discovered
+10:21; Liquidation hypothesis promoted
+10:28; Judgment revised
 ```
 
 Minor internal operations should not flood the timeline.
@@ -1462,13 +1462,13 @@ Example:
 ```text
 Researching
 
-Branch A — Macro
+Branch A; Macro
 ████████░░
 
-Branch B — Derivatives
+Branch B; Derivatives
 ██████░░░░
 
-Branch C — News
+Branch C; News
 ██████████
 ```
 

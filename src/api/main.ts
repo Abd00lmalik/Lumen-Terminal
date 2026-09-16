@@ -1,9 +1,9 @@
 /**
- * F0 API CLI entrypoint — `npm run api` (dev: tsx) or compiled `node dist/api/main.js`.
+ * F0 API CLI entrypoint; `npm run api` (dev: tsx) or compiled `node dist/api/main.js`.
  *
  * Wiring only: env-configured Gemini provider (server-side; the key never crosses the API
  * surface), the real Bitget adapter set behind the capability registry, and the file-backed
- * workspace store. No research logic here — the LUI/engine own everything.
+ * workspace store. No research logic here; the LUI/engine own everything.
  */
 
 import { startApi } from "./server.js";

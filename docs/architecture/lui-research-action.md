@@ -1,13 +1,13 @@
 ---
-title: "LUI — RESEARCH Action Specification"
-source: LUI — RESEARCH Action Specification.txt
+title: "LUI; RESEARCH Action Specification"
+source: LUI; RESEARCH Action Specification.txt
 converted: 2026-09-12
 type: architecture-spec
 ---
 
-> Converted from `LUI — RESEARCH Action Specification.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `LUI; RESEARCH Action Specification.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
-LUI — RESEARCH Action Specification
+LUI; RESEARCH Action Specification
 1. Definition
 RESEARCH is a universal first-class LUI action representing the trader's intent to perform research toward a defined objective.
 

@@ -8,7 +8,7 @@ related: [thesis-monitor-reassessment.md, research-flows.md, framework.md]
 
 **Related documents:** `thesis-monitor-reassessment.md` · `research-flows.md` · `framework.md`
 
-> Converted from `THESIS INTELLIGENCE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `THESIS INTELLIGENCE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 THESIS INTELLIGENCE
 

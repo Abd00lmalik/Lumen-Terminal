@@ -1,7 +1,7 @@
 /**
- * Saved research & memory — REAL artifacts and memory from the backend with explicit
+ * Saved research & memory; REAL artifacts and memory from the backend with explicit
  * status: STALE/HISTORICAL render demoted and never merged into current knowledge.
- * Reads only — SAVE happens through the LUI authorization boundary in a conversation,
+ * Reads only; SAVE happens through the LUI authorization boundary in a conversation,
  * never a client-side write.
  */
 import { useEffect, useState } from "react";
@@ -53,7 +53,7 @@ export function MemoryPage() {
         <h1 className="page-title">Saved research & memory</h1>
         <p className="page-sub">
           Artifacts you explicitly saved (through confirmed SAVE requests) plus the memory they
-          created. Status is explicit backend data — stale memory never automatically outranks
+          created. Status is explicit backend data; stale memory never automatically outranks
           fresh research.
         </p>
       </div>
@@ -64,7 +64,7 @@ export function MemoryPage() {
         <Panel kicker={`${artifacts.length} items`} title="Saved artifacts">
           <div>
             {loaded && error === undefined && artifacts.length === 0 && (
-              <Empty title="Nothing saved yet" hint='SAVE is explicit: e.g. "Save this research" in a conversation — with your confirmation.' />
+              <Empty title="Nothing saved yet" hint='SAVE is explicit: e.g. "Save this research" in a conversation; with your confirmation.' />
             )}
             {artifacts.map((a) => (
               <div className="ev-item" key={a.ref}>
@@ -89,14 +89,14 @@ export function MemoryPage() {
         <Panel kicker="how decay works" title="Memory is continuity, not authority">
           <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <Note tone="info">
-              <b>CURRENT</b> — validated against recent research and reusable now.
+              <b>CURRENT</b>; validated against recent research and reusable now.
             </Note>
             <Note tone="warn">
-              <b>STALE</b> — current research contradicts or supersedes it. Kept for audit,
+              <b>STALE</b>; current research contradicts or supersedes it. Kept for audit,
               demoted in influence, never silently rewritten.
             </Note>
             <Note>
-              <b>HISTORICAL</b> — past context preserved for the record. It informs history
+              <b>HISTORICAL</b>; past context preserved for the record. It informs history
               views; it does not inform current judgments.
             </Note>
           </div>
@@ -122,7 +122,7 @@ export function MemoryPage() {
 
       <Panel kicker={`${list.length} entries`} title="Memory entries">
         {loaded && error === undefined && memories.length === 0 && (
-          <Empty title="No memory yet" hint="Memory accumulates from confirmed SAVE requests — ordinary research never becomes memory automatically." />
+          <Empty title="No memory yet" hint="Memory accumulates from confirmed SAVE requests; ordinary research never becomes memory automatically." />
         )}
         {list.length === 0 && memories.length > 0 && <Empty title="Nothing matches" hint="Try a different search or category." />}
         <div>

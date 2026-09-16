@@ -1,18 +1,18 @@
 /**
- * Flow 5 historical-episode analysis — deterministic, look-ahead-safe.
+ * Flow 5 historical-episode analysis; deterministic, look-ahead-safe.
  *
  * Architectural basis:
  * - research-flows.md FLOW 5: the answer to "Has this happened before?" is a set of past
- *   analogous episodes with explained similarity and documented subsequent outcomes — NOT a
+ *   analogous episodes with explained similarity and documented subsequent outcomes; NOT a
  *   prediction. Mandate laws honored here:
  *   - §5 EXPLAINABILITY: similarity is never a bare score; every match names the dimensions
  *     that matched, the dimensions that differed, the compared periods, and the evidence.
  *   - §7 CURRENT SETUP: the comparison target is stated explicitly (trend/momentum/volatility/
- *     range position) — computed ONLY from the historical record itself (the trailing segment
+ *     range position); computed ONLY from the historical record itself (the trailing segment
  *     of the retrieved window), never invented, never silently pulled from other capabilities.
  *     When no current-setup evidence exists in the record, the analysis says so.
  *   - §8 OUTCOMES: subsequent windows (7/14/30 days here) report forward return, max favorable
- *     excursion (MFE), max adverse excursion (MAE), and whether direction persisted — historical
+ *     excursion (MFE), max adverse excursion (MAE), and whether direction persisted; historical
  *     description, not a trading strategy.
  *   - §9 LOOK-AHEAD BIAS: episode features are computed strictly from candles at or before the
  *     episode's anchor day. Future candles enter ONLY the outcome analysis. `analyzeEpisodes`
@@ -20,10 +20,10 @@
  *     reference segment is NEVER part of the episode candidate pool.
  * - Evidence integrity: everything here is arithmetic over REAL G1 candles (QUANTITATIVE_
  *   OBSERVATIONs). No model input, no invented data. Gemini may later interpret the validated
- *   result (§10) — it never produces it.
+ *   result (§10); it never produces it.
  *
  * Volume note: Bitget/Vision payloads carry baseVolume; if a candle lacks it, volume dimensions
- * are reported as unavailable — never substituted with another feature (mandate §5).
+ * are reported as unavailable; never substituted with another feature (mandate §5).
  */
 
 /** A single daily candle as stored by the G1 adapter (verbatim inside monthly chunks). */
@@ -75,7 +75,7 @@ export interface HistoricalEpisode {
   /** ISO dates of the feature window [start, end]. */
   readonly window: { from: string; to: string };
   readonly features: EpisodeFeatures;
-  /** Subsequent-outcome windows (computed from FUTURE candles — never used for matching). */
+  /** Subsequent-outcome windows (computed from FUTURE candles; never used for matching). */
   readonly outcomes: readonly OutcomeWindow[];
   /** Evidence references (tool-result-backed evidence ids) covering this episode. */
   readonly evidenceRefs: readonly string[];
@@ -90,7 +90,7 @@ export interface SimilarityDimension {
 
 export interface EpisodeMatch {
   readonly episode: HistoricalEpisode;
-  /** Count of matched dimensions — never surfaced alone, always with the breakdown. */
+  /** Count of matched dimensions; never surfaced alone, always with the breakdown. */
   readonly matchedCount: number;
   readonly dimensions: readonly SimilarityDimension[];
   readonly differences: readonly string[];
@@ -114,7 +114,7 @@ export interface EpisodeAnalysis {
 }
 
 // ---------------------------------------------------------------------------
-// Feature extraction — strictly uses candles up to and including the anchor.
+// Feature extraction; strictly uses candles up to and including the anchor.
 // ---------------------------------------------------------------------------
 
 const EPISODE_WINDOW_DAYS = 10;
@@ -213,7 +213,7 @@ export function extractEpisodeFeatures(
 }
 
 // ---------------------------------------------------------------------------
-// Outcome windows — the ONLY place future candles are touched.
+// Outcome windows; the ONLY place future candles are touched.
 // ---------------------------------------------------------------------------
 
 const OUTCOME_DAYS = [7, 14, 30] as const;
@@ -291,7 +291,7 @@ const DEFAULT_THRESHOLDS: EpisodeThresholds = {
  *
  * LOOK-AHEAD SAFETY: the caller passes `referenceFeatures` computed from a segment the episode
  * pool EXCLUDES (the pool only scans indices < referenceStart). Outcome windows use future
- * candles but are attached AFTER matching — matching itself never sees them.
+ * candles but are attached AFTER matching; matching itself never sees them.
  */
 export function detectEpisodes(
   series: CandleSeries,
@@ -313,7 +313,7 @@ export function detectEpisodes(
   for (let i = EPISODE_WINDOW_DAYS * 2 - 1; i < referenceStart; i++) {
     if (i + 1 >= series.candles.length) break;
     // Suppress near-duplicates: an anchor within EPISODE_WINDOW_DAYS-1 of an already-matched
-    // anchor describes a mostly-overlapping window — presenting both as independent analogues
+    // anchor describes a mostly-overlapping window; presenting both as independent analogues
     // would double-count one historical episode.
     if (i - lastMatchedAnchor < EPISODE_WINDOW_DAYS) continue;
     const features = extractEpisodeFeatures(series, i);
@@ -367,7 +367,7 @@ function scoreDimensions(
     ),
     dim("range position", `${round(ref.rangePosition * 100)}%`, `${round(ep.rangePosition * 100)}%`, Math.abs(ref.rangePosition - ep.rangePosition) <= t.rangePosition),
   ];
-  // Volume participates ONLY when both sides have it — never silently substituted (§5).
+  // Volume participates ONLY when both sides have it; never silently substituted (§5).
   if (ref.volumeAvailable && ep.volumeAvailable && ref.volumeRatio !== undefined && ep.volumeRatio !== undefined) {
     dims.push(dim(
       "volume vs baseline",
@@ -384,7 +384,7 @@ function dim(dimension: string, referenceValue: string, episodeValue: string, ma
 }
 
 // ---------------------------------------------------------------------------
-// Reference ("current") setup — computed from the record's trailing segment.
+// Reference ("current") setup; computed from the record's trailing segment.
 // ---------------------------------------------------------------------------
 
 /**
@@ -406,7 +406,7 @@ export function currentSetupFromRecord(series: CandleSeries): { setup: CurrentSe
       volatilityState: `average daily move ${fmt(features.volatilityPct)} with range expansion ${features.rangeExpansion}x baseline`,
       rangePositionState: `close at ${round(features.rangePosition * 100)}% of the 10-day range`,
       volumeState: features.volumeAvailable && features.volumeRatio !== undefined ? `volume ${features.volumeRatio}x the prior baseline` : "volume data unavailable in the retrieved record",
-      basis: `computed from the retrieved G1 candle record (final 10 days ending ${last.openTime.slice(0, 10)}) — not a live cross-capability reading`,
+      basis: `computed from the retrieved G1 candle record (final 10 days ending ${last.openTime.slice(0, 10)}); not a live cross-capability reading`,
     },
     features,
     endIndex,
@@ -491,7 +491,7 @@ export function analyzeEpisodes(
 
   const interpretiveNote =
     matches.length === 0
-      ? `No comparable episodes found among ${episodesEvaluated} candidate windows under the stated thresholds. "No comparable episodes" is a description of the historical record against THIS setup — it is not evidence about what happens next.`
+      ? `No comparable episodes found among ${episodesEvaluated} candidate windows under the stated thresholds. "No comparable episodes" is a description of the historical record against THIS setup; it is not evidence about what happens next.`
       : `${matches.length} comparable episode(s) found among ${episodesEvaluated} candidate windows. These are historical descriptions of what FOLLOWED similar setups; the historical record does not establish that any pattern must recur, and this analysis is not a prediction or a trading recommendation.`;
 
   return { currentSetup: ref.setup, episodesEvaluated, matches, interpretiveNote };
@@ -512,7 +512,7 @@ export function renderEpisodeAnalysis(analysis: EpisodeAnalysis): string[] {
   }
 
   if (analysis.matches.length === 0) {
-    lines.push(`**Historical analogues:** none comparable — ${analysis.interpretiveNote}`);
+    lines.push(`**Historical analogues:** none comparable; ${analysis.interpretiveNote}`);
     return lines;
   }
 
@@ -521,13 +521,13 @@ export function renderEpisodeAnalysis(analysis: EpisodeAnalysis): string[] {
     const ep = m.episode;
     const matched = m.dimensions.filter((d) => d.matched).map((d) => `${d.dimension} (${d.referenceValue} vs ${d.episodeValue})`);
     lines.push(
-      `- **${ep.window.from} → ${ep.window.to}** — matched: ${matched.join("; ")}. Differences: ${m.differences.length > 0 ? m.differences.join(", ") : "none within thresholds"}.`,
+      `- **${ep.window.from} → ${ep.window.to}**; matched: ${matched.join("; ")}. Differences: ${m.differences.length > 0 ? m.differences.join(", ") : "none within thresholds"}.`,
     );
     if (ep.outcomes.length > 0) {
       const o = ep.outcomes.map((w) => `${w.days}d: ${fmt(w.forwardReturnPct)} (best ${fmt(w.mfePct)}, worst ${fmt(w.maePct)})`).join("; ");
       lines.push(`  What followed: ${o}.`);
     } else {
-      lines.push("  What followed: outcome window extends beyond the retrieved record — unknown, not assumed.");
+      lines.push("  What followed: outcome window extends beyond the retrieved record; unknown, not assumed.");
     }
   }
   lines.push(`**What this does not establish:** ${analysis.interpretiveNote}`);

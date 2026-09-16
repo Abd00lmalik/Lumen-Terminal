@@ -1,5 +1,5 @@
 /**
- * Evidence service — evidence objects with the backend's epistemic class,
+ * Evidence service; evidence objects with the backend's epistemic class,
  * freshness, proxy basis, and support/contradiction relationships intact.
  * Claims and hypotheses come from the same workspace graph.
  */

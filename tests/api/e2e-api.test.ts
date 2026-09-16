@@ -1,5 +1,5 @@
 /**
- * F0 E2E seam test — proves the HTTP API is a REAL boundary over the existing research engine,
+ * F0 E2E seam test; proves the HTTP API is a REAL boundary over the existing research engine,
  * not a disconnected mock layer (F0 mandate §23).
  *
  * Path exercised: HTTP POST /api/research → ResearchApp → Lui.handle → adaptive loop / flow
@@ -114,7 +114,7 @@ beforeEach(() => resetIdCounters());
 
 describe("F0 end-to-end API seam (HTTP → engine → DTO → HTTP)", () => {
   // Full-engine integration test: explicit time budget so parallel-suite load can never
-  // make it flaky. Deterministic — fakes only.
+  // make it flaky. Deterministic; fakes only.
   it("carries a natural-language research request through the REAL engine and returns a safe DTO", { timeout: 30_000 }, async () => {
     const provider = new FakeModelProvider(new Map());
     scriptLuiDefaults(provider, ADAPTIVE_PLAN);
@@ -128,7 +128,7 @@ describe("F0 end-to-end API seam (HTTP → engine → DTO → HTTP)", () => {
     const body = res.json();
     expect(body.outcome).toBe("COMPLETED");
     expect(body.action).toBe("RESEARCH");
-    // The client sent NO flow — flow selection happened inside the LUI (internal routing).
+    // The client sent NO flow; flow selection happened inside the LUI (internal routing).
     expect(body.researchRef).toMatch(/^rs_/);
     // Evidence came through the REAL engine path: epistemic class preserved as data.
     expect(body.evidence.length).toBeGreaterThan(0);
@@ -149,7 +149,7 @@ describe("F0 end-to-end API seam (HTTP → engine → DTO → HTTP)", () => {
     await app.close();
   });
 
-  it("routes a Flow 4 thesis evaluation through the engine — judgment + auditable assessment exposed", async () => {
+  it("routes a Flow 4 thesis evaluation through the engine; judgment + auditable assessment exposed", async () => {
     const store = new MemoryStore();
     const thesisId = await storeWithThesis(store);
     const provider = new FakeModelProvider(new Map());
@@ -181,12 +181,12 @@ describe("F0 end-to-end API seam (HTTP → engine → DTO → HTTP)", () => {
     await app.close();
   });
 
-  it("routes a Flow 5 historical-comparison request through the engine — G1 evidence exposed in the DTO", { timeout: 30_000 }, async () => {
+  it("routes a Flow 5 historical-comparison request through the engine; G1 evidence exposed in the DTO", { timeout: 30_000 }, async () => {
     const provider = new FakeModelProvider(new Map());
     scriptLuiDefaults(provider, FLOW5_PLAN);
     provider.responses.set("research.plan", FLOW5_EVAL_PLAN);
     provider.responses.set("research.adaptive_decision", responses.adaptiveDecision("COMPLETE"));
-    // Historical fake carries the real G1 freshness verdict (HISTORICAL — intentionally in the past).
+    // Historical fake carries the real G1 freshness verdict (HISTORICAL; intentionally in the past).
     const registry = new CapabilityRegistry();
     registry.register({
       providerId: "fake/historical-comparison",
@@ -211,7 +211,7 @@ describe("F0 end-to-end API seam (HTTP → engine → DTO → HTTP)", () => {
     const body = res.json();
     expect(body.outcome).toBe("COMPLETED");
     expect(body.researchRef).toMatch(/^rs_/);
-    // REGRESSION (G1 phase): Flow 5 evidence was previously omitted from the research DTO —
+    // REGRESSION (G1 phase): Flow 5 evidence was previously omitted from the research DTO
     // the API's flow-outcome loop covered flows 2/3/4/6/7/8 but not flow5.
     expect(body.evidence.length).toBeGreaterThan(0);
     expect(body.evidence[0].evidenceClass).toBe("OBSERVATION");
@@ -220,7 +220,7 @@ describe("F0 end-to-end API seam (HTTP → engine → DTO → HTTP)", () => {
     await app.close();
   });
 
-  it("persists research through the WorkspaceStore — state survives across app instances", async () => {
+  it("persists research through the WorkspaceStore; state survives across app instances", async () => {
     const dir = mkdtempSync(join(tmpdir(), "f0-e2e-"));
     const filePath = join(dir, "ws.json");
     const store = new FileStore(filePath);
@@ -239,14 +239,14 @@ describe("F0 end-to-end API seam (HTTP → engine → DTO → HTTP)", () => {
 
     // New app instance over the SAME store: state recovers from persistence (continuity),
     // not from any conversation memory.
-    const provider2 = new FakeModelProvider(new Map()); // no scripts — reads must not need the model
+    const provider2 = new FakeModelProvider(new Map()); // no scripts; reads must not need the model
     const second = await buildApi({ provider: provider2, registry: registryWith("TECHNICAL_ANALYSIS"), store: new FileStore(filePath) });
     const ws = (await second.app.inject({ method: "GET", url: "/api/workspace" })).json();
     expect(ws.currentJudgment).toBeDefined();
     expect(ws.recentEvidence.length).toBeGreaterThan(0);
     expect(ws.activeThesis.ref).toBe(thesisId);
     expect(ws.latestThesisAssessment.assessment).toBe("SUPPORTED");
-    // Research history exposes explicit status (current vs historical) — never merged.
+    // Research history exposes explicit status (current vs historical); never merged.
     const history = (await second.app.inject({ method: "GET", url: "/api/research" })).json();
     expect(history.length).toBeGreaterThan(0);
     expect(typeof history[0].isCurrent).toBe("boolean");
@@ -270,7 +270,7 @@ describe("F0 end-to-end API seam (HTTP → engine → DTO → HTTP)", () => {
     expect(String(res.headers["content-type"] ?? res.headers["Content-Type"] ?? "")).toContain("text/event-stream");
 
     const raw = res.body;
-    // Named events only — no fabricated event vocabulary.
+    // Named events only; no fabricated event vocabulary.
     expect(raw).toContain("event: progress");
     expect(raw).toContain("event: final");
     // Progress events correspond to ACTUAL lifecycle transitions (engine-threaded).

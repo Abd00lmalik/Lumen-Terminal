@@ -1,5 +1,5 @@
 /**
- * Workspace aggregate root — owns the research graph and enforces cross-object rules.
+ * Workspace aggregate root; owns the research graph and enforces cross-object rules.
  *
  * Architectural basis:
  * - research-object-model.md §22 (research graph), §17 (ownership), §9 (one current judgment;
@@ -8,7 +8,7 @@
  *   an old judgment does not silently make it current.
  * - Final lock §11: contradictory evidence is retained, hypotheses are living objects.
  * - Final lock §12: judgments record what is observed/inferred/uncertain/would-change.
- * - Final lock §14: workspace survives beyond individual messages — persistence target.
+ * - Final lock §14: workspace survives beyond individual messages; persistence target.
  */
 
 import {
@@ -66,11 +66,11 @@ export class Workspace {
   private readonly monitors = new Map<string, Monitor>();
   private readonly thesisAssessments: ThesisAssessmentRecord[] = [];
   /** M6 (audit D1): the trader's EXPLICIT active-thesis selection (MANAGE_STATE set-active-thesis).
-   *  Without it, "active thesis" was inferred from updatedAt ordering — an inference, not state.
+   *  Without it, "active thesis" was inferred from updatedAt ordering; an inference, not state.
    *  Trader-owned working state must be recorded, never guessed. */
   private activeThesisId: string | undefined;
 
-  // ----- theses (trader-owned; system never silently mutates — thesis.md) -----
+  // ----- theses (trader-owned; system never silently mutates; thesis.md) -----
 
   addResearch(input: { objective: string; question: string; flow: string }, origin: ProvenanceOrigin, at?: Date): Research {
     const research = createResearch(input, origin, at);
@@ -174,7 +174,7 @@ export class Workspace {
 
   /**
    * Register an already-created evidence object (e.g. from `evidenceFromToolResult`) without
-   * re-creating it — identity, classification, and provenance are preserved exactly.
+   * re-creating it; identity, classification, and provenance are preserved exactly.
    */
   ingestEvidence(evidence: Evidence, researchRef?: string): Evidence {
     this.evidence.set(evidence.id, evidence);
@@ -352,7 +352,7 @@ export class Workspace {
 
   /**
    * Register a trader-authored thesis. Origin must be trader-kind (directly or via
-   * trader-confirmed import) — the system never silently creates or rewrites theses.
+   * trader-confirmed import); the system never silently creates or rewrites theses.
    */
   addThesis(
     input: Parameters<typeof createThesis>[0],
@@ -369,11 +369,11 @@ export class Workspace {
   }
 
   /** M6 (audit D1): record the trader's explicit active-thesis selection (MANAGE_STATE).
-   *  Unknown refs are rejected — no invented state. The thesis object itself is NOT mutated
+   *  Unknown refs are rejected; no invented state. The thesis object itself is NOT mutated
    *  (selection is working state, not a thesis lifecycle change). */
   setActiveThesis(id: string): Thesis {
     const thesis = this.theses.get(id);
-    if (thesis === undefined) throw new Error(`cannot activate unknown thesis ${id} — no invented state`);
+    if (thesis === undefined) throw new Error(`cannot activate unknown thesis ${id}; no invented state`);
     this.activeThesisId = id;
     return thesis;
   }
@@ -399,7 +399,7 @@ export class Workspace {
   }
 
   /**
-   * Revise a thesis — TRADER-ONLY operation (thesis.md: the system must never silently replace
+   * Revise a thesis; TRADER-ONLY operation (thesis.md: the system must never silently replace
    * the trader's thesis). The prior version remains fully preserved in theses map.
    */
   reviseThesis(
@@ -420,7 +420,7 @@ export class Workspace {
   transitionThesis(id: string, to: ThesisStatus, origin: ProvenanceOrigin, note: string, at?: Date): Thesis {
     const thesis = this.mustThesis(id);
     // Thesis status transitions are trader decisions; whatever origin executes the
-    // transition is recorded explicitly in provenance — never silently.
+    // transition is recorded explicitly in provenance; never silently.
     const atDate = at ?? new Date();
     const updated: Thesis = Object.freeze({
       ...thesis,
@@ -432,11 +432,11 @@ export class Workspace {
     return updated;
   }
 
-  // ----- saved artifacts (SAVE — first-class, confirmed; lui-save-action.md) ---
+  // ----- saved artifacts (SAVE; first-class, confirmed; lui-save-action.md) ---
 
   /**
    * Persist a SAVE proposal as a real artifact. Callers MUST pass a trader origin that
-   * records the confirmation — silent saves are forbidden (M3 §17).
+   * records the confirmation; silent saves are forbidden (M3 §17).
    */
   saveArtifact(
     input: Parameters<typeof createSavedArtifact>[0],
@@ -456,7 +456,7 @@ export class Workspace {
     return [...this.savedArtifacts.values()];
   }
 
-  // ----- research memory (M5 — memory.md; SAVE is the promotion path) --------
+  // ----- research memory (M5; memory.md; SAVE is the promotion path) --------
 
   /** Record a persistent memory entry. Only confirmed SAVEs may call this (M5 §6/§7). */
   addMemory(
@@ -481,7 +481,7 @@ export class Workspace {
     return this.listMemories().filter((m) => m.category === category);
   }
 
-  /** Decay a memory (STALE/HISTORICAL) — influence is reduced; the entry is NEVER deleted (M5 §5). */
+  /** Decay a memory (STALE/HISTORICAL); influence is reduced; the entry is NEVER deleted (M5 §5). */
   decayMemory(id: string, status: "STALE" | "HISTORICAL", reason: string, origin: ProvenanceOrigin, at?: Date): MemoryEntry {
     const entry = this.memories.get(id);
     if (entry === undefined) throw new Error(`Unknown memory: ${id}`);
@@ -490,7 +490,7 @@ export class Workspace {
     return decayed;
   }
 
-  /** Revalidate memory against current research — original preserved, outcome recorded (M5 §5). */
+  /** Revalidate memory against current research; original preserved, outcome recorded (M5 §5). */
   revalidateMemory(id: string, outcome: { confirmed: boolean; note: string; newStatus?: MemoryStatus }, origin: ProvenanceOrigin, at?: Date): MemoryEntry {
     const entry = this.memories.get(id);
     if (entry === undefined) throw new Error(`Unknown memory: ${id}`);
@@ -513,9 +513,9 @@ export class Workspace {
     );
   }
 
-  // ----- monitoring handoff (M5 — thesis-monitor-reassessment.md §21–§26) -----
+  // ----- monitoring handoff (M5; thesis-monitor-reassessment.md §21–§26) -----
 
-  /** Propose a monitor — status PROPOSED, inert until explicit trader confirmation (M5 §11). */
+  /** Propose a monitor; status PROPOSED, inert until explicit trader confirmation (M5 §11). */
   addMonitorProposal(
     input: {
       target: string;
@@ -543,13 +543,13 @@ export class Workspace {
   }
 
   /**
-   * Activate a monitor — TRADER-CONFIRMED operation only (M5 §11: activation requires the
+   * Activate a monitor; TRADER-CONFIRMED operation only (M5 §11: activation requires the
    * confirmation boundary). A non-trader origin is rejected; no silent activation exists.
-   * No background process is created — this is persistent handoff state only.
+   * No background process is created; this is persistent handoff state only.
    */
   activateMonitor(id: string, origin: ProvenanceOrigin, note: string, at?: Date): Monitor {
     if (origin.kind !== "trader") {
-      throw new Error("monitor activation requires explicit trader confirmation — system/model origins cannot activate monitors");
+      throw new Error("monitor activation requires explicit trader confirmation; system/model origins cannot activate monitors");
     }
     const monitor = this.monitors.get(id);
     if (monitor === undefined) throw new Error(`Unknown monitor: ${id}`);
@@ -566,7 +566,7 @@ export class Workspace {
     return transitioned;
   }
 
-  /** Source unavailability is a STATE — never a false invalidation alert (M5 §12). */
+  /** Source unavailability is a STATE; never a false invalidation alert (M5 §12). */
   recordMonitorSourceState(id: string, sourceRef: string, state: "SOURCE_UNAVAILABLE" | "OK", note: string, origin: ProvenanceOrigin, at?: Date): Monitor {
     const monitor = this.monitors.get(id);
     if (monitor === undefined) throw new Error(`Unknown monitor: ${id}`);
@@ -575,7 +575,7 @@ export class Workspace {
     return updated;
   }
 
-  /** Flag a monitor for review after reassessment — proposal for the trader, never silent change (M5 §15). */
+  /** Flag a monitor for review after reassessment; proposal for the trader, never silent change (M5 §15). */
   flagMonitorForReview(id: string, reason: string, origin: ProvenanceOrigin, at?: Date): Monitor {
     const monitor = this.monitors.get(id);
     if (monitor === undefined) throw new Error(`Unknown monitor: ${id}`);
@@ -584,11 +584,11 @@ export class Workspace {
     return flagged;
   }
 
-  // ----- thesis assessment history (M5 §9 — assessment ≠ mutation) ------------
+  // ----- thesis assessment history (M5 §9; assessment ≠ mutation) ------------
 
   /**
    * Record a thesis assessment: a research RESULT about the thesis (thesis.md §7 THESIS
-   * ASSESSMENT). It never mutates the thesis object — it accumulates in an auditable history.
+   * ASSESSMENT). It never mutates the thesis object; it accumulates in an auditable history.
    */
   recordThesisAssessment(input: {
     thesisId: string;
@@ -617,7 +617,7 @@ export class Workspace {
       confidence: input.confidence,
       ...(input.researchRef !== undefined ? { researchRef: input.researchRef } : {}),
       ...(input.researchQuality !== undefined ? { researchQuality: input.researchQuality } : {}),
-      provenance: createProvenance(origin, `thesis assessment recorded (${input.assessment}) — thesis object unchanged`, at),
+      provenance: createProvenance(origin, `thesis assessment recorded (${input.assessment}); thesis object unchanged`, at),
       createdAt: (at ?? new Date()).toISOString(),
     });
     this.thesisAssessments.push(record);
@@ -633,7 +633,7 @@ export class Workspace {
     return all[all.length - 1];
   }
 
-  // ----- workspace continuity (M5 §16 — domain representation for future UI) --
+  // ----- workspace continuity (M5 §16; domain representation for future UI) --
 
   /** The continuity view: everything a later request needs to recover research context. */
   getContinuitySnapshot(): {

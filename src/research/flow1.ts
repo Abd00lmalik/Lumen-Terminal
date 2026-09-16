@@ -1,21 +1,21 @@
 /**
- * Flow 1 — WHAT HAPPENED? (event reconstruction) — the first end-to-end research pipeline.
+ * Flow 1; WHAT HAPPENED? (event reconstruction); the first end-to-end research pipeline.
  *
  * Architectural basis:
  * - research-flows.md FLOW 1: reconstruct the event → build a timeline → identify candidate
  *   explanations → cross-check → identify contradictions → strongest-supported explanation →
  *   confidence. "It is primarily event reconstruction, not deep causal investigation."
- * - research-planning.md: the plan is a LIVING execution model — scope, tasks, capabilities,
- *   completion criteria, adaptation policy — preserved as first-class objects in the response.
+ * - research-planning.md: the plan is a LIVING execution model; scope, tasks, capabilities,
+ *   completion criteria, adaptation policy; preserved as first-class objects in the response.
  * - tool-skill-orchestration.md §2.1 + final lock §6: capability-first selection. The flow
  *   declares capabilities (NEWS_ANALYSIS, TECHNICAL_ANALYSIS); the registry resolves providers.
  *   No flow→tool hardcoding: swapping providers needs zero changes here.
  * - Final lock §7/§10: evidence classification is mandatory; failure is not negative evidence;
  *   completeness is never fabricated; QUALITY ≠ CONFIDENCE.
  * - Final lock §12 + progressive-disclosure.md: the response explains conclusions through
- *   observable evidence, sources, uncertainty, and structure only — no chain-of-thought.
+ *   observable evidence, sources, uncertainty, and structure only; no chain-of-thought.
  * - Final lock §13: research only. No trading/execution surface exists in this module.
- * - M2 scope (per authorization): the intent entry point is a narrow structured stub — full
+ * - M2 scope (per authorization): the intent entry point is a narrow structured stub; full
  *   natural-language LUI (intent detection, entity resolution, ambiguity, action classification)
  *   is M3. No LUI, no UI, no G1/G2 vendors.
  */
@@ -29,13 +29,13 @@ import type { WorkspaceStore } from "../persistence/index.js";
 import { evidenceFromToolResult } from "../domain/evidence.js";
 
 // ---------------------------------------------------------------------------
-// Narrow intent entry point (M2 stub — full LUI is M3)
+// Narrow intent entry point (M2 stub; full LUI is M3)
 // ---------------------------------------------------------------------------
 
 /**
  * Deliberately narrow, fully structured input for M2. The full natural-language LUI (intent
  * detection, entity resolution, ambiguity handling, action classification) is M3 per the phase
- * plan — this stub exists so the research path can be validated end-to-end first.
+ * plan; this stub exists so the research path can be validated end-to-end first.
  */
 export interface Flow1Request {
   /** The trader's question, preserved verbatim for provenance (never paraphrased). */
@@ -43,7 +43,7 @@ export interface Flow1Request {
   /** Asset under investigation, e.g. "BTC". */
   readonly asset: string;
   /**
-   * Rough event window: [from, to] as ISO strings. Optional — when absent the plan notes the
+   * Rough event window: [from, to] as ISO strings. Optional; when absent the plan notes the
    * window as unresolved and the response's uncertainty names it (no fabricated precision).
    */
   readonly window?: readonly [string, string];
@@ -75,7 +75,7 @@ export interface Flow1Plan {
   readonly researchRef: string;
   readonly objective: string;
   readonly scope: { readonly included: readonly string[]; readonly excluded: readonly string[] };
-  /** Task list with the required capabilities per task — the capability-first seam. */
+  /** Task list with the required capabilities per task; the capability-first seam. */
   readonly tasks: readonly {
     readonly type: string;
     readonly objective: string;
@@ -88,7 +88,7 @@ export interface Flow1Plan {
 
 /**
  * Build the living plan. Capability selection is requirement-driven: the plan names CAPABILITIES,
- * never providers — the registry decides who serves them (final lock §6/§11). Additional
+ * never providers; the registry decides who serves them (final lock §6/§11). Additional
  * capabilities join only when the plan determines material information value (final lock §3:
  * adaptive depth; here: a fourth task is added only when the window is resolved, because
  * cross-checking sentiment/positioning context is only meaningful for a bounded window).
@@ -132,7 +132,7 @@ export function buildFlow1Plan(request: Flow1Request, researchRef: string): Flow
       included: scopeIncluded,
       excluded: [
         "causal investigation (Flow 2 territory)",
-        "historical precedent (Flow 5 — G1 vendor not connected)",
+        "historical precedent (Flow 5; G1 vendor not connected)",
         "primary-source retrieval (G2 vendor not connected)",
         ...(request.constraints ?? []),
       ],
@@ -162,7 +162,7 @@ export interface Flow1Outcome {
   readonly research: Research;
   readonly plan: Flow1Plan;
   readonly target: Flow1Target;
-  /** What was executed, in order — full provenance path (request → tool → evidence → graph). */
+  /** What was executed, in order; full provenance path (request → tool → evidence → graph). */
   readonly executions: readonly Flow1ExecutionRecord[];
   readonly judgment: Judgment | undefined;
   readonly analysisId: string;
@@ -266,7 +266,7 @@ export async function runFlow1(
     }
   }
 
-  // 4. Claims — the propositions the judgment will weigh (one per reconstruction dimension).
+  // 4. Claims; the propositions the judgment will weigh (one per reconstruction dimension).
   const priceClaim = workspace.addClaim(
     { statement: `Price structure for ${target.asset} over the research window is established from market data.`, type: "EVENT_RECONSTRUCTION", researchRef: research.id },
     systemOrigin,
@@ -296,12 +296,12 @@ export async function runFlow1(
   }
 
   // 5. Contradiction/alternative handling (final lock §11): contradictions are OBSERVED, not
-  // manufactured — Flow 1 records them when the evidence itself carries opposing directions
+  // manufactured; Flow 1 records them when the evidence itself carries opposing directions
   // (news items whose text contradicts the dominant narrative direction). M2 keeps this honest
   // and minimal: a CONTRADICTION_CHECK analysis over news evidence classes.
   const contradictions = findContradictions(newsEvidence);
 
-  // 6. Analysis — deliberate analytical step with explicit uncertainty (object model §8).
+  // 6. Analysis; deliberate analytical step with explicit uncertainty (object model §8).
   const priceExec = executions.find((e) => e.capability === "TECHNICAL_ANALYSIS");
   const newsExec = executions.find((e) => e.capability === "NEWS_ANALYSIS");
   const priceAvailable = priceExec !== undefined && priceExec.result.failure.type === "NONE" && priceExec.evidenceIds.length > 0;
@@ -309,8 +309,8 @@ export async function runFlow1(
 
   const uncertainty: string[] = [];
   if (!target.windowResolved) uncertainty.push("event window was not specified; reconstruction covers the most recent data only");
-  if (!priceAvailable) uncertainty.push("exact price structure unavailable — market-data capability returned no usable evidence");
-  if (!newsAvailable) uncertainty.push("no news/narrative evidence was obtainable — absence of news evidence is NOT evidence of absence of events");
+  if (!priceAvailable) uncertainty.push("exact price structure unavailable; market-data capability returned no usable evidence");
+  if (!newsAvailable) uncertainty.push("no news/narrative evidence was obtainable; absence of news evidence is NOT evidence of absence of events");
   if (toolFailures > 0) uncertainty.push(`${toolFailures} capability invocation(s) failed; failed retrievals are not treated as negative evidence`);
 
   const analysis = workspace.addAnalysis(
@@ -330,7 +330,7 @@ export async function runFlow1(
       at(),
   );
 
-  // 7. Judgment (final lock §12): what is observed / inferred / uncertain / would-change —
+  // 7. Judgment (final lock §12): what is observed / inferred / uncertain / would-change
   // with confidence derived separately from evidence quality (QUALITY ≠ CONFIDENCE).
   let judgment: Judgment | undefined;
   let completion: Flow1Outcome["completion"] = "PARTIAL";
@@ -350,7 +350,7 @@ export async function runFlow1(
         confidence: confidenceFor(dated.length, newsEvidence.length),
         uncertainty,
         unresolvedQuestions: [
-          "which contemporaneous development (if any) causally explains the price movement — Flow 2 (WHY DID IT HAPPEN?) territory",
+          "which contemporaneous development (if any) causally explains the price movement; Flow 2 (WHY DID IT HAPPEN?) territory",
           ...(target.windowResolved ? [] : ["the precise event window"]),
         ],
         implications: ["Flow 2 can investigate causality on this reconstructed event"],
@@ -393,7 +393,7 @@ export async function runFlow1(
   workspace.transitionResearch(research.id, "COMPLETED", systemOrigin, `flow 1 ${completion}`, at());
   await options.store.save(workspace.toSnapshot());
 
-  // 9. Progressive-disclosure response — concise default (final lock §15): answer, strongest
+  // 9. Progressive-disclosure response; concise default (final lock §15): answer, strongest
   // reasons, meaningful opposition, confidence, key uncertainty. No chain-of-thought; deeper
   // levels remain available through the research state (workspace), not dumped here.
   const response = buildResponse({ target, executions, judgment, completion, uncertainty, contradictions });
@@ -402,7 +402,7 @@ export async function runFlow1(
 }
 
 // ---------------------------------------------------------------------------
-// Synthesis helpers — deterministic, auditable, no hidden reasoning
+// Synthesis helpers; deterministic, auditable, no hidden reasoning
 // ---------------------------------------------------------------------------
 
 function findContradictions(newsEvidence: readonly Evidence[]): readonly string[] {
@@ -421,7 +421,7 @@ function findContradictions(newsEvidence: readonly Evidence[]): readonly string[
   return contradictions;
 }
 
-/** News item observations are JSON-serialized item objects (see evidenceFromToolResult) — extract titles. */
+/** News item observations are JSON-serialized item objects (see evidenceFromToolResult); extract titles. */
 function newsTitlesFrom(newsEvidence: readonly Evidence[]): readonly string[] {
   const titles: string[] = [];
   for (const evidence of newsEvidence) {
@@ -429,7 +429,7 @@ function newsTitlesFrom(newsEvidence: readonly Evidence[]): readonly string[] {
       const parsed = JSON.parse(evidence.observation) as { title?: unknown };
       if (typeof parsed.title === "string") titles.push(parsed.title);
     } catch {
-      titles.push(evidence.observation); // non-JSON observation — use as-is
+      titles.push(evidence.observation); // non-JSON observation; use as-is
     }
   }
   return titles;
@@ -496,7 +496,7 @@ function buildResponse(input: {
   if (input.contradictions.length > 0) {
     lines.push(`**Contradictions:** ${input.contradictions.join("; ")}`);
   }
-  lines.push(`**Confidence:** ${judgment?.confidence ?? "LOW"}${(judgment?.uncertainty.length ?? 0) > 0 ? ` — key uncertainty: ${judgment!.uncertainty[0]}` : ""}`);
+  lines.push(`**Confidence:** ${judgment?.confidence ?? "LOW"}${(judgment?.uncertainty.length ?? 0) > 0 ? `; key uncertainty: ${judgment!.uncertainty[0]}` : ""}`);
   lines.push(`**What would change this conclusion:** causal analysis (Flow 2) on the reconstructed timeline; a resolved event window would tighten the reconstruction.`);
   return lines.join("\n");
 }

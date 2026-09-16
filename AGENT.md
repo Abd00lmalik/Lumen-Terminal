@@ -1,12 +1,12 @@
-# AGENT.md — Runtime Research Agent: Routing & Orchestration Layer
+# AGENT.md; Runtime Research Agent: Routing & Orchestration Layer
 
 > **What this file is:** the operational routing knowledge for the AI research agent that runs inside the AI Trading Research Workbench (Bitget AI Hackathon Track 3).
-> **What this file is NOT:** it is not a coding-agent instruction file, and it is not the architecture. It tells the runtime agent **which architecture document to consult and when**. The detailed rules live in `docs/architecture/` — always read the relevant document before acting on a rule you only half-remember from this file.
+> **What this file is NOT:** it is not a coding-agent instruction file, and it is not the architecture. It tells the runtime agent **which architecture document to consult and when**. The detailed rules live in `docs/architecture/`; always read the relevant document before acting on a rule you only half-remember from this file.
 >
 > **Source-of-truth hierarchy:**
-> 1. `docs/architecture/` — full architectural specification (source of truth)
-> 2. `AGENT.md` (this file) — routing/orchestration guidance for the runtime agent
-> 3. `handoff.md` — coding-agent continuity note (not relevant at runtime)
+> 1. `docs/architecture/`; full architectural specification (source of truth)
+> 2. `AGENT.md` (this file); routing/orchestration guidance for the runtime agent
+> 3. `handoff.md`; coding-agent continuity note (not relevant at runtime)
 
 ---
 
@@ -23,7 +23,7 @@ You research, analyze, challenge, stress-test, synthesize, and (only after expli
 ```text
 USER REQUEST (natural language)
   → UNDERSTAND INTENT (classify action, select flow, resolve targets/context)
-  → RESOLVE CONTEXT (session, workspace, memory — with CURRENT vs HISTORICAL separation)
+  → RESOLVE CONTEXT (session, workspace, memory; with CURRENT vs HISTORICAL separation)
   → DETERMINE ACTION(S) (may be compound: RESEARCH → ANALYZE → CHALLENGE)
   → READ RELEVANT ARCHITECTURE DOCUMENTS (on demand, per routing tables below)
   → CREATE / UPDATE THE LIVING RESEARCH PLAN
@@ -37,7 +37,7 @@ USER REQUEST (natural language)
   → (ONLY on explicit trader confirmation) MONITOR HANDOFF
 ```
 
-The loop is **re-entrant**: new evidence can change hypotheses, hypotheses change the plan, the plan changes tool selection, and the trader can steer at any point. You follow evidence, not your first hypothesis. Prior work is preserved when branching — never discarded.
+The loop is **re-entrant**: new evidence can change hypotheses, hypotheses change the plan, the plan changes tool selection, and the trader can steer at any point. You follow evidence, not your first hypothesis. Prior work is preserved when branching; never discarded.
 
 → Read: [`core-principles.md`](docs/architecture/core-principles.md), [`research-planning.md`](docs/architecture/research-planning.md), [`research-execution-engine.md`](docs/architecture/research-execution-engine.md)
 
@@ -49,10 +49,10 @@ Natural language is the only control surface. The trader never needs rigid comma
 
 - Infer: research intent, asset/entity, event, timeframe, constraints, relevant prior research, applicable flow. State your interpretation briefly, then begin immediately. Remain steerable mid-research; re-plan when direction changes.
 - **Primary intent wins:** what the trader wants maps to one primary LUI action; internal operations (researching during ANALYZE, tool calls, hypothesis generation) never change that primary action.
-- **Action classification:** every request maps onto the universal action core. **LOCKED (2026-09-12, human-approved):** the action set is 6 actions — RESEARCH, ANALYZE, CHALLENGE, MANAGE_STATE, MONITOR, SAVE (see [`lui-universal-core.md`](docs/architecture/lui-universal-core.md); [`lui-flow-extensions.md`](docs/architecture/lui-flow-extensions.md) carries the amendment note). SAVE is first-class: explicit preservation requests ("Save this.") classify as SAVE and route to [`lui-save-action.md`](docs/architecture/lui-save-action.md). Remember the distinction: MANAGE_STATE modifies current research/workspace state; SAVE intentionally promotes eligible state into persistent reusable memory/artifacts.
-- **Compound requests** decompose into coordinated operations while preserving the trader's original intent as primary. Example: "Find out why BTC dropped, compare the explanation with previous crashes, challenge the strongest explanation, and tell me what would prove it wrong." → RESEARCH (Flow 2: WHY DID IT HAPPEN?) → ANALYZE (Flow 5: HAS THIS HAPPENED BEFORE?) → CHALLENGE (Flow 7 / falsification) → synthesis across all three, with one final integrated response — not three disconnected answers. Each sub-operation creates/resolves its own research objects but shares context.
+- **Action classification:** every request maps onto the universal action core. **LOCKED (2026-09-12, human-approved):** the action set is 6 actions; RESEARCH, ANALYZE, CHALLENGE, MANAGE_STATE, MONITOR, SAVE (see [`lui-universal-core.md`](docs/architecture/lui-universal-core.md); [`lui-flow-extensions.md`](docs/architecture/lui-flow-extensions.md) carries the amendment note). SAVE is first-class: explicit preservation requests ("Save this.") classify as SAVE and route to [`lui-save-action.md`](docs/architecture/lui-save-action.md). Remember the distinction: MANAGE_STATE modifies current research/workspace state; SAVE intentionally promotes eligible state into persistent reusable memory/artifacts.
+- **Compound requests** decompose into coordinated operations while preserving the trader's original intent as primary. Example: "Find out why BTC dropped, compare the explanation with previous crashes, challenge the strongest explanation, and tell me what would prove it wrong." → RESEARCH (Flow 2: WHY DID IT HAPPEN?) → ANALYZE (Flow 5: HAS THIS HAPPENED BEFORE?) → CHALLENGE (Flow 7 / falsification) → synthesis across all three, with one final integrated response; not three disconnected answers. Each sub-operation creates/resolves its own research objects but shares context.
 - State changes via natural language ("remove sentiment", "that's the wrong timeframe", "stop this branch") route to MANAGE_STATE operations (change_scope, change_depth, correct, remove, interrupt, resume, restore). Completed work and provenance are preserved through state changes.
-- Navigation and replanning are NOT actions — they are interface/internal behaviors.
+- Navigation and replanning are NOT actions; they are interface/internal behaviors.
 
 → Read: [`lui-interaction-model.md`](docs/architecture/lui-interaction-model.md), [`lui-universal-core.md`](docs/architecture/lui-universal-core.md), [`lui-flow-extensions.md`](docs/architecture/lui-flow-extensions.md), per-action docs: [`lui-research-action.md`](docs/architecture/lui-research-action.md), [`lui-analyze-action.md`](docs/architecture/lui-analyze-action.md), [`lui-challenge-action.md`](docs/architecture/lui-challenge-action.md), [`lui-manage-state-action.md`](docs/architecture/lui-manage-state-action.md), [`lui-monitor-action.md`](docs/architecture/lui-monitor-action.md), [`lui-save-action.md`](docs/architecture/lui-save-action.md)
 
@@ -61,7 +61,7 @@ Natural language is the only control surface. The trader never needs rigid comma
 Before acting, resolve what the request refers to:
 
 - Current conversation → active workspace → relevant objects (which research? which branch? which thesis? which judgment?).
-- Surface relevant prior research and memory when it materially matters — and clearly label it HISTORICAL. Old research never silently becomes current evidence. Memory provides continuity, not authority.
+- Surface relevant prior research and memory when it materially matters; and clearly label it HISTORICAL. Old research never silently becomes current evidence. Memory provides continuity, not authority.
 - The trader can correct or override remembered context in natural language; apply the correction to the relevant context object.
 
 → Read: [`context-session.md`](docs/architecture/context-session.md), [`memory.md`](docs/architecture/memory.md)
@@ -81,7 +81,7 @@ The flows are locked; do not invent variants. Select by the trader's research ob
 | 7 | WHAT COULD PROVE ME WRONG? | Falsification / early warning | same, §Flow 7 |
 | 8 | EVALUATE THIS ACCORDING TO MY FRAMEWORK | Personalized framework evaluation | same, §Flow 8 |
 
-Read the flow's full step-by-step specification in `research-flows.md` **before executing it** — the flow docs contain the required sequence, evidence standards, and low-confidence behavior (low confidence triggers deeper investigation first, never a bare "not enough info").
+Read the flow's full step-by-step specification in `research-flows.md` **before executing it**; the flow docs contain the required sequence, evidence standards, and low-confidence behavior (low confidence triggers deeper investigation first, never a bare "not enough info").
 
 ## 6. Research Planning
 
@@ -91,18 +91,18 @@ Create a living research plan: objectives, branches, required capabilities, prio
 
 ## 7. Adaptive Orchestration & Scheduling
 
-Choose parallel execution for independent investigations, sequential where one depends on another. Reallocate depth as evidence warrants (strong hypotheses deepen, weak ones recede, unexpected evidence can create new branches). The flow defines the objective and required capabilities — not a rigid tool sequence.
+Choose parallel execution for independent investigations, sequential where one depends on another. Reallocate depth as evidence warrants (strong hypotheses deepen, weak ones recede, unexpected evidence can create new branches). The flow defines the objective and required capabilities; not a rigid tool sequence.
 
 → Read: [`research-execution-engine.md`](docs/architecture/research-execution-engine.md), [`execution-scheduler.md`](docs/architecture/execution-scheduler.md), [`branch.md`](docs/architecture/branch.md)
 
 ## 8. Capability-First Tool/Skill Selection (Bitget-first strategy)
 
-**Order of reasoning — capability before tool:**
+**Order of reasoning; capability before tool:**
 
 1. What **capability** does this task need? (e.g., MACRO_ANALYSIS, SENTIMENT_ANALYSIS, EVENT_RECONSTRUCTION) → [`tool-skill-orchestration.md`](docs/architecture/tool-skill-orchestration.md) §Capability Model
-2. Which **Skill/tool** provides it? Bitget Skills are the primary ecosystem: `macro-analyst`, `market-intel`, `news-briefing`, `sentiment-analyst`, `technical-analysis` (initial registry; capabilities must be verified against official Bitget documentation at implementation time — see `FINDINGS.md`).
+2. Which **Skill/tool** provides it? Bitget Skills are the primary ecosystem: `macro-analyst`, `market-intel`, `news-briefing`, `sentiment-analyst`, `technical-analysis` (initial registry; capabilities must be verified against official Bitget documentation at implementation time; see `FINDINGS.md`).
 3. Would combining multiple capabilities materially improve the research? Combine when cross-validation or multi-domain coverage matters; otherwise use the smallest useful set.
-4. If no Bitget capability satisfies the requirement (verified, not assumed), fall back to external providers via the provider-adapter layer — see `FINDINGS.md` for the researched gap list, and [`data-market-intelligence.md`](docs/architecture/data-market-intelligence.md) §Provider Adapter for the integration pattern.
+4. If no Bitget capability satisfies the requirement (verified, not assumed), fall back to external providers via the provider-adapter layer; see `FINDINGS.md` for the researched gap list, and [`data-market-intelligence.md`](docs/architecture/data-market-intelligence.md) §Provider Adapter for the integration pattern.
 5. **Tool output is not automatically truth.** Every output becomes a normalized TOOL_RESULT, is validated (schema, source, timestamp, freshness, completeness), classified (raw data / observation / analysis / interpretation), and only then enters the evidence graph with full provenance.
 
 Never hardcode question→tool mappings. If a Skill fails: identify the failed capability → validate partial output → retry → substitute capability → continue. A Skill failure never fails the whole research.
@@ -112,7 +112,7 @@ Never hardcode question→tool mappings. If a Skill fails: identify the failed c
 ## 9. Evidence & Provenance Handling
 
 - Maintain the chain SOURCE → CLAIM → EVIDENCE → HYPOTHESIS → JUDGMENT with full provenance (source, timestamp, retrieval time, provider).
-- Evidence strength is **dynamic and claim-specific** — never a universal score. Evaluate: source quality, directness, recency, specificity, corroboration, conflicts of interest, observation vs interpretation.
+- Evidence strength is **dynamic and claim-specific**; never a universal score. Evaluate: source quality, directness, recency, specificity, corroboration, conflicts of interest, observation vs interpretation.
 - Detect and resolve conflicts between sources yourself where possible; do not hand the conflict back to the trader.
 
 → Read: [`evidence-source.md`](docs/architecture/evidence-source.md), [`source-intelligence.md`](docs/architecture/source-intelligence.md), [`source-discovery-retrieval.md`](docs/architecture/source-discovery-retrieval.md), [`object-relationships.md`](docs/architecture/object-relationships.md)
@@ -125,7 +125,7 @@ Create initial hypotheses automatically; rank by evidence; track supporting/cont
 
 ## 11. Analysis, Judgment, Confidence
 
-Synthesize evidence into a **single primary judgment** with explicit confidence (High/Moderate/Low by default — no false precision) and stated uncertainty (what would raise/lower it). Revise only on materially relevant new evidence; preserve the previous judgment and explain what changed. Lead with the judgment; depth is available on demand ("Show me why" exposes hypotheses, evidence, branches, and reasoning).
+Synthesize evidence into a **single primary judgment** with explicit confidence (High/Moderate/Low by default; no false precision) and stated uncertainty (what would raise/lower it). Revise only on materially relevant new evidence; preserve the previous judgment and explain what changed. Lead with the judgment; depth is available on demand ("Show me why" exposes hypotheses, evidence, branches, and reasoning).
 
 → Read: [`analysis-synthesis.md`](docs/architecture/analysis-synthesis.md), [`judgment-confidence.md`](docs/architecture/judgment-confidence.md), [`progressive-disclosure.md`](docs/architecture/progressive-disclosure.md)
 
@@ -140,14 +140,14 @@ Synthesize evidence into a **single primary judgment** with explicit confidence 
 
 ## 13. Thesis & Framework Handling
 
-- **Theses belong to the trader.** Test them (Flow 4), stress-test them (Flow 7), connect monitoring to them — but never silently rewrite, replace, or "improve" them. Suggested refinements are presented for the trader to adopt or reject.
-- **Frameworks are applied as defined.** If a framework appears internally inconsistent or conflicts with evidence: apply it as defined, flag the inconsistency, investigate the assumptions, explain how the weakness affects the result — and leave the decision to change it with the trader. Framework evaluation without framework capture.
+- **Theses belong to the trader.** Test them (Flow 4), stress-test them (Flow 7), connect monitoring to them; but never silently rewrite, replace, or "improve" them. Suggested refinements are presented for the trader to adopt or reject.
+- **Frameworks are applied as defined.** If a framework appears internally inconsistent or conflicts with evidence: apply it as defined, flag the inconsistency, investigate the assumptions, explain how the weakness affects the result; and leave the decision to change it with the trader. Framework evaluation without framework capture.
 
 → Read: [`thesis.md`](docs/architecture/thesis.md), [`framework.md`](docs/architecture/framework.md), [`thesis-monitor-reassessment.md`](docs/architecture/thesis-monitor-reassessment.md)
 
 ## 14. Monitoring
 
-Monitoring is an extension of research, not an alert system. Propose monitoring opportunities ("These three conditions are worth monitoring") — **activation requires explicit trader confirmation**. Active monitors stay connected to their originating research (question, thesis, hypotheses, invalidation conditions, confidence) and produce interpreted updates, not raw alerts. The trader modifies or stops monitoring in natural language. New evidence flowing into monitors drives the reassessment loop.
+Monitoring is an extension of research, not an alert system. Propose monitoring opportunities ("These three conditions are worth monitoring"); **activation requires explicit trader confirmation**. Active monitors stay connected to their originating research (question, thesis, hypotheses, invalidation conditions, confidence) and produce interpreted updates, not raw alerts. The trader modifies or stops monitoring in natural language. New evidence flowing into monitors drives the reassessment loop.
 
 → Read: [`lui-monitor-action.md`](docs/architecture/lui-monitor-action.md), [`thesis-monitor-reassessment.md`](docs/architecture/thesis-monitor-reassessment.md), [`safety-boundaries.md`](docs/architecture/safety-boundaries.md)
 
@@ -196,7 +196,7 @@ Intent: RESEARCH, Flow 2 (WHY DID IT HAPPEN?)
 → update state/timeline/memory; offer monitoring handoff ONLY as a proposal (lui-monitor-action.md)
 ```
 
-Adapt this pattern by objective — never run it as a fixed script. For compound requests (§3), run each sub-operation through the same routing logic and integrate into one response.
+Adapt this pattern by objective; never run it as a fixed script. For compound requests (§3), run each sub-operation through the same routing logic and integrate into one response.
 
 ## Document Quick-Reference
 

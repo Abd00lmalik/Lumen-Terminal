@@ -1,5 +1,5 @@
 /**
- * M4 cross-flow tests — routing through the LUI, capability-first behavior, failure semantics,
+ * M4 cross-flow tests; routing through the LUI, capability-first behavior, failure semantics,
  * safety boundary, and persistence across Flow 2 / Flow 6 / Flow 7.
  *
  * Architectural basis:
@@ -180,7 +180,7 @@ describe("cross-flow: natural-language routing through the LUI", () => {
     expect(result.response?.answer).toContain("consolidation");
   });
 
-  it("routes CHALLENGE with a falsification objective to Flow 7 — thesis never mutated", async () => {
+  it("routes CHALLENGE with a falsification objective to Flow 7; thesis never mutated", async () => {
     const provider = new FakeModelProvider(new Map());
     scriptDefaults(provider, [
       { action: "CHALLENGE", description: "falsify the thesis", capabilities: [], params: { flow: "WHAT_COULD_PROVE_ME_WRONG", objective: "What could prove me wrong?" } },
@@ -216,12 +216,12 @@ describe("cross-flow: natural-language routing through the LUI", () => {
 });
 
 describe("cross-flow: capability-first execution (no Flow→Tool hardcoding)", () => {
-  it("the engine only executes capabilities in the validated plan — never a fixed flow kit", async () => {
+  it("the engine only executes capabilities in the validated plan; never a fixed flow kit", async () => {
     const provider = new FakeModelProvider(new Map());
     scriptDefaults(provider, [
       { action: "RESEARCH", description: "explain move", capabilities: [], params: { flow: "WHY_IT_HAPPENED", objective: "Why?" } },
     ]);
-    // Plan deliberately excludes macro/sentiment — the engine must not add them.
+    // Plan deliberately excludes macro/sentiment; the engine must not add them.
     provider.responses.set("research.plan", JSON.stringify({
       objective: "Why?",
       scopeIncluded: ["technicals"],
@@ -282,7 +282,7 @@ describe("cross-flow: failure semantics and safety", () => {
     ]);
     provider.responses.set("research.plan", FLOW_PLANS["WHY_IT_HAPPENED"]);
     provider.responses.set("research.adaptive_decision", responses.adaptiveDecision("COMPLETE"));
-    // Synthesis call fails as provider unavailability — typed failure must survive (M4 §33).
+    // Synthesis call fails as provider unavailability; typed failure must survive (M4 §33).
     provider.responses.set("flow2.causal_synthesis", () => {
       throw new ModelFailure("PROVIDER_UNAVAILABLE", "gemini 503", true);
     });
@@ -319,7 +319,7 @@ describe("cross-flow: failure semantics and safety", () => {
     expect(result.flow2?.synthesis?.citedObjectRefs).toEqual([]);
   });
 
-  it("execution-like model output is rejected before dispatch — no trading surface via flows", async () => {
+  it("execution-like model output is rejected before dispatch; no trading surface via flows", async () => {
     const provider = new FakeModelProvider(new Map());
     provider.responses.set("lui.normalized_request", responses.normalizedRequest({ primaryAction: "RESEARCH", objective: "buy BTC" }));
     provider.responses.set("lui.resolved_target", responses.resolvedTarget());
@@ -337,7 +337,7 @@ describe("cross-flow: failure semantics and safety", () => {
 });
 
 describe("cross-flow: persistence", () => {
-  it("flow research state persists through the existing WorkspaceStore — no second storage path", async () => {
+  it("flow research state persists through the existing WorkspaceStore; no second storage path", async () => {
     const store = new MemoryStore();
     const provider = new FakeModelProvider(new Map());
     scriptDefaults(provider, [
@@ -360,7 +360,7 @@ describe("cross-flow: persistence", () => {
 });
 
 // ===========================================================================
-// M4b cross-flow additions — Flows 3/4/8
+// M4b cross-flow additions; Flows 3/4/8
 // ===========================================================================
 
 function flow3Synthesis(overrides: Record<string, unknown> = {}): string {
@@ -440,13 +440,13 @@ const M4B_PLANS: Record<string, string> = {
 beforeEach(() => resetIdCounters());
 
 describe("M4b cross-flow: shared runner + no Flow→Tool hardcoding", () => {
-  it("Flows 3/4/8 are registered as flow objectives — objectives live with flows, execution with the engine", () => {
+  it("Flows 3/4/8 are registered as flow objectives; objectives live with flows, execution with the engine", () => {
     // All five implemented flows are known to the runner's objective registry (metadata only).
     expect(Object.keys(FLOW_OBJECTIVES)).toEqual(expect.arrayContaining([
       "WHY_IT_HAPPENED", "WHAT_DOES_ALL_INFORMATION_SAY", "WHAT_COULD_PROVE_ME_WRONG",
       "WHAT_COULD_AFFECT_IT", "DOES_MY_THESIS_HOLD", "EVALUATE_WITH_MY_FRAMEWORK",
     ]));
-    // Objectives carry analytical mode + guidance — never capability lists.
+    // Objectives carry analytical mode + guidance; never capability lists.
     expect(FLOW3_OBJECTIVE.mode).toBe("EXPLORATORY");
     expect(FLOW4_OBJECTIVE.mode).toBe("EVALUATION");
     expect(FLOW8_OBJECTIVE.mode).toBe("EVALUATION");
@@ -470,7 +470,7 @@ describe("M4b cross-flow: shared runner + no Flow→Tool hardcoding", () => {
     expect(result.response?.answer).toContain("macro liquidity");
   });
 
-  it("routes thesis-evaluation to Flow 4 — thesis stays trader-owned, distinct from Flow 7 falsification", async () => {
+  it("routes thesis-evaluation to Flow 4; thesis stays trader-owned, distinct from Flow 7 falsification", async () => {
     const provider = new FakeModelProvider(new Map());
     scriptDefaults(provider, [
       { action: "RESEARCH", description: "evaluate thesis", capabilities: [], params: { flow: "DOES_MY_THESIS_HOLD", objective: "Does my thesis still hold?" } },
@@ -487,7 +487,7 @@ describe("M4b cross-flow: shared runner + no Flow→Tool hardcoding", () => {
     expect(workspace.getThesis(thesis.id)?.version).toBe(1);
   });
 
-  it("routes framework evaluation to Flow 8 — no framework → no silent generic fallback", async () => {
+  it("routes framework evaluation to Flow 8; no framework → no silent generic fallback", async () => {
     const provider = new FakeModelProvider(new Map());
     scriptDefaults(provider, [
       { action: "RESEARCH", description: "framework eval", capabilities: [], params: { flow: "EVALUATE_WITH_MY_FRAMEWORK", objective: "Evaluate BTC with my framework" } },
@@ -503,7 +503,7 @@ describe("M4b cross-flow: shared runner + no Flow→Tool hardcoding", () => {
     expect(result.flow8?.evaluation?.scoringUsed).toBe("QUALITATIVE");
   });
 
-  it("Flow 8 without a saved framework fails honestly — never substitutes a generic framework", async () => {
+  it("Flow 8 without a saved framework fails honestly; never substitutes a generic framework", async () => {
     const provider = new FakeModelProvider(new Map());
     scriptDefaults(provider, [
       { action: "RESEARCH", description: "framework eval", capabilities: [], params: { flow: "EVALUATE_WITH_MY_FRAMEWORK", objective: "Evaluate with my framework" } },

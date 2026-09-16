@@ -1,5 +1,5 @@
 /**
- * F0 error mapping — transport-safe typed errors (F0 mandate §17).
+ * F0 error mapping; transport-safe typed errors (F0 mandate §17).
  *
  * Distinctions preserved (never collapsed into HTTP 500):
  * - invalid request → 400 INVALID_REQUEST

@@ -8,7 +8,7 @@ related: [research-object-model.md, object-relationships.md, lui-manage-state-ac
 
 **Related documents:** `research-object-model.md` · `object-relationships.md` · `lui-manage-state-action.md`
 
-> Converted from `OBJECT LIFECYCLE  STATE MACHINE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `OBJECT LIFECYCLE  STATE MACHINE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 OBJECT LIFECYCLE / STATE MACHINE
 

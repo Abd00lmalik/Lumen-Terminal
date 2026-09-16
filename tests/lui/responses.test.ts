@@ -29,7 +29,7 @@ function fakeCapability(capability: string, value: string): ProviderAdapter {
 beforeEach(() => resetIdCounters());
 
 describe("progressive disclosure responses (M3 §11)", () => {
-  it("default response is concise: answer, ≤4 reasons, confidence, uncertainty — no graph dump", async () => {
+  it("default response is concise: answer, ≤4 reasons, confidence, uncertainty; no graph dump", async () => {
     const provider = new FakeModelProvider(new Map([
       ["research.plan", JSON.stringify({
         objective: "o", scopeIncluded: [], scopeExcluded: [],
@@ -105,7 +105,7 @@ describe("progressive disclosure responses (M3 §11)", () => {
     expect(workspace.getEvidence("ev_000001")).toBeDefined();
   });
 
-  it("model polish failure falls back to the deterministic response — never fabricates", async () => {
+  it("model polish failure falls back to the deterministic response; never fabricates", async () => {
     const provider = new FakeModelProvider(new Map([
       ["research.plan", JSON.stringify({
         objective: "o", scopeIncluded: [], scopeExcluded: [],
@@ -162,7 +162,7 @@ describe("failure semantics (M3 §19/§20)", () => {
     expect(result.response?.confidence).toBe("UNKNOWN");
   });
 
-  it("persistence failure is a persistence failure — never reported as research success", async () => {
+  it("persistence failure is a persistence failure; never reported as research success", async () => {
     const { runAdaptiveResearch } = await import("../../src/research/adaptive.js");
     const provider = new FakeModelProvider(new Map([
       ["research.plan", JSON.stringify({

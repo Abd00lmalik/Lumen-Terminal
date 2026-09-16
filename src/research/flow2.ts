@@ -1,11 +1,11 @@
 /**
- * Flow 2 — WHY DID IT HAPPEN? (causal investigation) — M4.
+ * Flow 2; WHY DID IT HAPPEN? (causal investigation); M4.
  *
  * Architectural basis: research-flows.md FLOW 2.
- * - Event definition (what/when/magnitude/direction/context) from AVAILABLE evidence only —
+ * - Event definition (what/when/magnitude/direction/context) from AVAILABLE evidence only
  *   no invented values (M4 §6).
  * - Candidate-cause map: MULTIPLE competing hypotheses generated BEFORE any is favored;
- *   every hypothesis is an explicit living object (hypothesis.md) — never a fact because the
+ *   every hypothesis is an explicit living object (hypothesis.md); never a fact because the
  *   model generated it (M4 §24/§28). Candidates that cannot be materialized into real
  *   workspace objects (e.g. no asset resolved) are reported as unresolved possibilities,
  *   never fabricated.
@@ -28,20 +28,20 @@ import type { ProvenanceOrigin } from "../domain/provenance.js";
 import type { Evidence } from "../domain/objects.js";
 
 // ---------------------------------------------------------------------------
-// Causal synthesis schema — the model's causal read over validated evidence
+// Causal synthesis schema; the model's causal read over validated evidence
 // ---------------------------------------------------------------------------
 
 export interface CausalSynthesis {
   /** Factual event definition grounded in cited evidence (what/when/direction/magnitude). */
   readonly eventDefinition: string;
   readonly leadingExplanation: string;
-  /** Evidence-backed reasons for the leading explanation (refs must exist — validated below). */
+  /** Evidence-backed reasons for the leading explanation (refs must exist; validated below). */
   readonly supportingReasons: readonly string[];
   /** Other plausible explanations that were NOT eliminated. */
   readonly competingExplanations: readonly string[];
   /** Evidence that weakens the leading explanation (contradictions preserved, not deleted). */
   readonly contradictions: readonly string[];
-  /** The causal status the evidence actually supports — never stronger than justified. */
+  /** The causal status the evidence actually supports; never stronger than justified. */
   readonly causalStatus: "TEMPORAL_ASSOCIATION" | "CORRELATION" | "PLAUSIBLE_MECHANISM" | "STRONG_CAUSAL_EVIDENCE" | "INCONCLUSIVE";
   readonly confidence: "HIGH" | "MODERATE" | "LOW";
   readonly uncertainty: readonly string[];
@@ -74,16 +74,17 @@ export const CAUSAL_SYNTHESIS_SCHEMA_DESC = [
 ].join("\n");
 
 const CAUSAL_SYNTHESIS_SYSTEM = [
-  "You are the causal analyst of a trading RESEARCH workbench (Flow 2 — WHY DID IT HAPPEN?).",
+  "You are the causal analyst of a trading RESEARCH workbench (Flow 2; WHY DID IT HAPPEN?).",
   "You receive the VALIDATED research context (epistemic classes preserved) for a causal question.",
   "Hard rules:",
-  "- Event definition ONLY from cited evidence. If magnitude/time is not in the evidence, say it is unknown — never invent values.",
+  "- Event definition ONLY from cited evidence. If magnitude/time is not in the evidence, say it is unknown; never invent values.",
   "- Correlation is not causation. Choose the WEAKEST causalStatus the evidence supports: temporal association ≠ correlation ≠ mechanism ≠ strong causal evidence.",
-  "- Competing explanations that were not eliminated remain competing — do not erase them to make the answer cleaner.",
+  "- Competing explanations that were not eliminated remain competing; do not erase them to make the answer cleaner.",
   "- Contradictions must be reported, not resolved by deletion.",
-  "- LIMITATIONS (tool failures, empty feeds) are NOT negative evidence — never cite them against an explanation.",
+  "- LIMITATIONS (tool failures, empty feeds) are NOT negative evidence; never cite them against an explanation.",
   "- Only cite evidence ids present in the context. No fabricated citations.",
   "- No chain-of-thought: reasons are evidence-backed statements, not private reasoning.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 // ---------------------------------------------------------------------------
@@ -99,13 +100,18 @@ export interface Flow2Options {
   readonly asset?: string;
   readonly constraints?: readonly string[];
   readonly maxRounds?: number;
+  /**
+   * Wall-clock deadline for the whole run (epoch ms); forwarded to the shared flow runner's
+   * honest TIME_BUDGET_EXHAUSTED stop. Optional; tests omit it.
+   */
+  readonly deadlineMs?: number;
   readonly now?: () => Date;
 }
 
 export interface Flow2Result {
   readonly outcome: FlowOutcome;
   readonly synthesis: CausalSynthesis | undefined;
-  /** Typed model failure — the flow ends honestly rather than fabricating a causal claim. */
+  /** Typed model failure; the flow ends honestly rather than fabricating a causal claim. */
   readonly modelFailure?: ModelFailure;
   readonly response: string;
 }
@@ -127,7 +133,7 @@ export async function runFlow2(objective: string, options: Flow2Options): Promis
   workspace.transitionResearch(research.id, "ACTIVE", systemOrigin, "research activated", at());
 
   const flowObjective = FLOW_OBJECTIVES.WHY_IT_HAPPENED;
-  if (flowObjective === undefined) throw new Error("Flow 2 objective metadata missing — architecture inconsistency");
+  if (flowObjective === undefined) throw new Error("Flow 2 objective metadata missing; architecture inconsistency");
   const outcome = await runFlow(objective, flowObjective, research.id, {
     provider: options.provider,
     registry: options.registry,
@@ -136,6 +142,7 @@ export async function runFlow2(objective: string, options: Flow2Options): Promis
     ...(options.constraints !== undefined ? { constraints: options.constraints } : {}),
     capabilityParams: options.asset !== undefined ? { asset: options.asset } : {},
     ...(options.maxRounds !== undefined ? { maxRounds: options.maxRounds } : {}),
+    ...(options.deadlineMs !== undefined ? { deadlineMs: options.deadlineMs } : {}),
     ...(options.now !== undefined ? { now: options.now } : {}),
   }).catch((error: unknown) => ({ modelFailure: error instanceof ModelFailure ? error : new ModelFailure("INVALID_OUTPUT", String(error), false) }));
 
@@ -143,7 +150,7 @@ export async function runFlow2(objective: string, options: Flow2Options): Promis
     return {
       outcome: {
         researchId: research.id, flow: "WHY_IT_HAPPENED", mode: "CAUSAL",
-        plan: { objective, scopeIncluded: [], scopeExcluded: [], tasks: [], completionCriteria: [], adaptationPolicy: "n/a — planning failed" },
+        plan: { objective, scopeIncluded: [], scopeExcluded: [], tasks: [], completionCriteria: [], adaptationPolicy: "n/a; planning failed" },
         rounds: [], executions: [], hypotheses: [], evidence: [],
         finalDecision: { decision: "INSUFFICIENT_EVIDENCE", rationale: `research could not start: ${outcome.modelFailure.message}`, nextTasks: [] },
         stoppedBecause: "MODEL_FAILURE",
@@ -162,22 +169,22 @@ export async function runFlow2(objective: string, options: Flow2Options): Promis
   try {
     synthesis = await synthesizeCausally(flowOutcome, options, systemOrigin, at);
   } catch (error) {
-    // M4 §33: provider-level failure keeps its type — never laundered into a validation failure.
+    // M4 §33: provider-level failure keeps its type; never laundered into a validation failure.
     const failure = error instanceof ModelFailure ? error : new ModelFailure("INVALID_OUTPUT", String(error), false);
     return { outcome: flowOutcome, synthesis: undefined, modelFailure: failure, response: causalFailureResponse(failure) };
   }
   if (synthesis === undefined) {
-    const failure = new ModelFailure("INVALID_OUTPUT", "causal synthesis failed validation — no causal claim is asserted", false);
+    const failure = new ModelFailure("INVALID_OUTPUT", "causal synthesis failed validation; no causal claim is asserted", false);
     return { outcome: flowOutcome, synthesis: undefined, modelFailure: failure, response: causalFailureResponse(failure) };
   }
 
   linkEvidenceToHypotheses(workspace, synthesis, flowOutcome, systemOrigin, at);
 
-  // Judgment — Flow 2 output structure (M4 §10) using the existing judgment model (§22/§24).
+  // Judgment; Flow 2 output structure (M4 §10) using the existing judgment model (§22/§24).
   const judgment = workspace.addJudgment(
     {
       researchRef: research.id,
-      statement: `LEADING EXPLANATION: ${synthesis.leadingExplanation} CAUSAL STATUS: ${synthesis.causalStatus} — correlation is not asserted as causation beyond this status.`,
+      statement: `LEADING EXPLANATION: ${synthesis.leadingExplanation} CAUSAL STATUS: ${synthesis.causalStatus}; correlation is not asserted as causation beyond this status.`,
       basis: {
         supportingEvidence: synthesis.citedObjectRefs,
         opposingEvidence: flowOutcome.evidence.filter((e) => e.contradicts.length > 0).map((e) => e.id),
@@ -219,7 +226,7 @@ async function synthesizeCausally(
       system: CAUSAL_SYNTHESIS_SYSTEM,
       prompt: [
         `Causal question: ${flowOutcome.plan.objective}`,
-        `Research status: ${flowOutcome.stoppedBecause} — ${flowOutcome.finalDecision.rationale}`,
+        `Research status: ${flowOutcome.stoppedBecause}; ${flowOutcome.finalDecision.rationale}`,
         "VALIDATED RESEARCH CONTEXT:",
         (await import("./context.js")).renderResearchContext(flowOutcome.context),
       ].join("\n"),
@@ -279,7 +286,7 @@ function buildFlow2Response(synthesis: CausalSynthesis, flowOutcome: FlowOutcome
   if (synthesis.contradictions.length > 0) {
     lines.push(`**Contradictions:** ${synthesis.contradictions.slice(0, 3).join("; ")}`);
   }
-  lines.push(`**Confidence:** ${synthesis.confidence} — evidence objects: ${flowOutcome.evidence.length}${flowOutcome.hypotheses.length > 0 ? `, hypotheses tracked: ${flowOutcome.hypotheses.length}` : ""}`);
+  lines.push(`**Confidence:** ${synthesis.confidence}; evidence objects: ${flowOutcome.evidence.length}${flowOutcome.hypotheses.length > 0 ? `, hypotheses tracked: ${flowOutcome.hypotheses.length}` : ""}`);
   if (synthesis.uncertainty.length > 0) {
     lines.push(`**What remains uncertain:** ${synthesis.uncertainty.slice(0, 3).join("; ")}`);
   }

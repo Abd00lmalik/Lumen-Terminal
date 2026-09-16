@@ -113,7 +113,7 @@ function workspaceWithFramework(content?: string): { workspace: Workspace; frame
   return { workspace, frameworkId };
 }
 
-describe("Flow 8 — EVALUATE THIS ACCORDING TO MY FRAMEWORK (framework-constrained evaluation)", () => {
+describe("Flow 8; EVALUATE THIS ACCORDING TO MY FRAMEWORK (framework-constrained evaluation)", () => {
   beforeEach(() => resetIdCounters());
 
   it("resolves the most recent saved framework artifact and evaluates by it", async () => {
@@ -144,7 +144,7 @@ describe("Flow 8 — EVALUATE THIS ACCORDING TO MY FRAMEWORK (framework-constrai
     expect(result.response).toContain("[INSUFFICIENT_EVIDENCE]");
   });
 
-  it("missing evidence is reported as INSUFFICIENT_EVIDENCE with what is needed — never manufactured", async () => {
+  it("missing evidence is reported as INSUFFICIENT_EVIDENCE with what is needed; never manufactured", async () => {
     const provider = newProvider();
     const result = await runFlow8("Evaluate with my framework", { provider, registry: newRegistry(), workspace: workspaceWithFramework().workspace, store: new MemoryStore(), target: "BTC" });
     const missing = result.evaluation?.criteria.find((c) => c.status === "INSUFFICIENT_EVIDENCE");
@@ -157,7 +157,7 @@ describe("Flow 8 — EVALUATE THIS ACCORDING TO MY FRAMEWORK (framework-constrai
     const provider = newProvider(frameworkEval({
       criteria: [
         { criterion: "1. Liquidity", status: "CONTRADICTED", rationale: "direct counterevidence: liquidity contracting", supportingRefs: [], contradictingRefs: ["ev_000001"], evidenceNeeded: undefined },
-        { criterion: "2. Structure", status: "NOT_SATISFIED", rationale: "price below 200d MA — simply not met", supportingRefs: [], contradictingRefs: [], evidenceNeeded: undefined },
+        { criterion: "2. Structure", status: "NOT_SATISFIED", rationale: "price below 200d MA; simply not met", supportingRefs: [], contradictingRefs: [], evidenceNeeded: undefined },
       ],
       overallAssessment: "criteria not met; one contradicted by evidence",
     }));
@@ -168,12 +168,12 @@ describe("Flow 8 — EVALUATE THIS ACCORDING TO MY FRAMEWORK (framework-constrai
     expect(result.evaluation?.criteria[1]?.contradictingRefs).toEqual([]);
   });
 
-  it("qualitative framework stays qualitative — no invented numeric scores", async () => {
+  it("qualitative framework stays qualitative; no invented numeric scores", async () => {
     const provider = newProvider();
     const result = await runFlow8("Evaluate with my framework", { provider, registry: newRegistry(), workspace: workspaceWithFramework().workspace, store: new MemoryStore(), target: "BTC" });
     expect(result.evaluation?.scoringUsed).toBe("QUALITATIVE");
     expect(result.evaluation?.frameworkScore).toBeUndefined();
-    expect(result.response).toContain("qualitative — the framework defines no numeric scoring");
+    expect(result.response).toContain("qualitative; the framework defines no numeric scoring");
   });
 
   it("framework-defined scoring is used when the framework itself defines it", async () => {
@@ -184,7 +184,7 @@ describe("Flow 8 — EVALUATE THIS ACCORDING TO MY FRAMEWORK (framework-constrai
     const { workspace, frameworkId } = workspaceWithFramework(numericFramework);
     const provider = newProvider(frameworkEval({
       scoringUsed: "FRAMEWORK_DEFINED",
-      frameworkScore: "24/30 — favorable",
+      frameworkScore: "24/30; favorable",
       overallAssessment: "favorable per the framework's own sum scoring",
       criteria: [
         { criterion: "1. Liquidity trend", status: "SATISFIED", rationale: "8/10 per framework scale", supportingRefs: ["ev_000001"], contradictingRefs: [] },
@@ -194,8 +194,8 @@ describe("Flow 8 — EVALUATE THIS ACCORDING TO MY FRAMEWORK (framework-constrai
     }));
     const result = await runFlow8("Evaluate with my framework", { provider, registry: newRegistry(), workspace, store: new MemoryStore(), frameworkRef: frameworkId, target: "BTC" });
     expect(result.evaluation?.scoringUsed).toBe("FRAMEWORK_DEFINED");
-    expect(result.evaluation?.frameworkScore).toBe("24/30 — favorable");
-    expect(result.response).toContain("framework score: 24/30 — favorable");
+    expect(result.evaluation?.frameworkScore).toBe("24/30; favorable");
+    expect(result.response).toContain("framework score: 24/30; favorable");
   });
 
   it("a numeric score with a qualitative framework is REJECTED (guard against invented scoring)", async () => {

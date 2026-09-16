@@ -21,7 +21,7 @@ describe("resilience primitives (failure-recovery.md §11–15)", () => {
       { policy: { maxAttempts: 4, baseDelayMs: 1, maxDelayMs: 10 }, sleep: () => Promise.resolve() },
     ).catch((e) => e);
 
-    expect(attempts).toBe(4); // bounded — never indefinite (failure-recovery.md §12)
+    expect(attempts).toBe(4); // bounded; never indefinite (failure-recovery.md §12)
     expect(error).toBeInstanceOf(RetryExhaustedError);
     expect(error.lastError.failureType).toBe("PROVIDER_ERROR");
     expect(error.attempts).toBe(4);

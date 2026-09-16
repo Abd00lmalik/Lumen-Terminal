@@ -12,7 +12,7 @@
  * - failure-recovery.md §12–15: bounded retries with backoff; provider substitution happens at
  *   the registry, not inside the transport.
  *
- * DISCOVERED (live, 2026-09-13 — M2 validation, supersedes the M1 assumption of stateless calls):
+ * DISCOVERED (live, 2026-09-13; M2 validation, supersedes the M1 assumption of stateless calls):
  * - The endpoint implements streamable-HTTP MCP **with sessions**. A bare `tools/call` returns
  *   HTTP 400 / JSON-RPC -32600 "Bad Request: Missing session ID".
  * - Handshake: POST `initialize` → response header `mcp-session-id` → POST
@@ -24,7 +24,7 @@
  *   and replays the call once per attempt.
  *
  * This boundary stays deliberately small: callTool + raw capture + resilience. If the official
- * SDK is adopted later, it replaces the internals — the adapter-facing surface does not change.
+ * SDK is adopted later, it replaces the internals; the adapter-facing surface does not change.
  */
 
 import {
@@ -69,7 +69,7 @@ export interface McpCallOutcome {
   readonly content: readonly unknown[];
   readonly isError: boolean;
   readonly rawReference: string;
-  /** Attempts actually made (1 = no retry engaged) — provenance for the TOOL_RESULT. */
+  /** Attempts actually made (1 = no retry engaged); provenance for the TOOL_RESULT. */
   readonly attempts?: number;
   readonly durationMs?: number;
   /** Live provenance: server identity reported during initialize (when observed). */
@@ -97,7 +97,7 @@ export class McpTransport {
   private readonly fetchImpl: typeof fetch;
   /** JSON-RPC id monotonic per transport. */
   private nextId = 0;
-  /** Session state — established lazily on first call, re-established when the server drops it. */
+  /** Session state; established lazily on first call, re-established when the server drops it. */
   private sessionId: string | undefined;
   private serverInfo: McpCallOutcome["serverInfo"];
 
@@ -117,7 +117,7 @@ export class McpTransport {
   /**
    * Invoke one MCP tool (`tools/call`). Establishes/reuses the MCP session transparently
    * (DISCOVERED: the endpoint requires initialize → mcp-session-id → notifications/initialized).
-   * Failures throw typed TransportErrors; adapters convert them into failed TOOL_RESULTs —
+   * Failures throw typed TransportErrors; adapters convert them into failed TOOL_RESULTs
    * they never fabricate outputs (final lock §18).
    */
   async callTool(toolName: string, args: Record<string, unknown> = {}): Promise<McpCallOutcome> {
@@ -231,7 +231,7 @@ export class McpTransport {
       throw new TransportError("SCHEMA_ERROR", `MCP response for ${toolName} has no result`, { retriable: false });
     }
     if (parsed.result.isError === true) {
-      // Tool-level error. FINDINGS.md documents neutral per-source failures — transient for our
+      // Tool-level error. FINDINGS.md documents neutral per-source failures; transient for our
       // skills; bounded retry decides, and adapters never fabricate over failures (lock §18).
       throw new TransportError("PROVIDER_ERROR", `MCP tool ${toolName} reported isError: ${summarizeContent(parsed.result.content ?? [])}`, { retriable: true });
     }

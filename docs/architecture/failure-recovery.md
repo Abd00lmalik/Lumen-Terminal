@@ -8,7 +8,7 @@ related: [quality-control.md, tool-skill-orchestration.md, execution-scheduler.m
 
 **Related documents:** `quality-control.md` · `tool-skill-orchestration.md` · `execution-scheduler.md`
 
-> Converted from `ERROR, FAILURE & RECOVERY INTELLIGE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `ERROR, FAILURE & RECOVERY INTELLIGE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 ERROR, FAILURE & RECOVERY INTELLIGENCE
 

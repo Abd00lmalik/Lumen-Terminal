@@ -4,7 +4,7 @@
  * Architectural basis:
  * - FINDINGS.md §2.4: `technical-analysis` reads **direct Bitget public REST**:
  *   `api.bitget.com/api/v2/spot/market/candles` (spot) and `/api/v2/mix/market/candles`
- *   (USDT-futures). Public endpoints — no auth for this capability. Rate limits are UNKNOWN
+ *   (USDT-futures). Public endpoints; no auth for this capability. Rate limits are UNKNOWN
  *   (FINDINGS.md §2.4) → client-side throttling + bounded retry (failure-recovery.md §12–14).
  * - Final lock §9: technical-analysis supplies exact market timestamps and price structure;
  *   preserve timeframe, kline count, timestamps, data source. Lock §3: indicators are
@@ -125,7 +125,7 @@ export class RestTransport {
 
     const text = await response.text();
     // Capture the raw payload BEFORE parsing: even unparseable/failed responses must remain
-    // inspectable for provenance (final lock §7) — nothing is silently swallowed.
+    // inspectable for provenance (final lock §7); nothing is silently swallowed.
     const rawReference = this.rawCapture.capture("rest", `GET ${path}${url.search}`, text);
     let body: unknown;
     try {

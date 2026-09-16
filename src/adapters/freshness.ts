@@ -1,12 +1,12 @@
 /**
- * Freshness profiles for the Bitget skills — derived from FINDINGS.md §2 (CONFIRMED lags)
+ * Freshness profiles for the Bitget skills; derived from FINDINGS.md §2 (CONFIRMED lags)
  * and exposed per adapter (final lock §8: "Add freshness profiles based on FINDINGS.md").
  *
- * Freshness is metadata on every TOOL_RESULT — assessed, never assumed. Each profile maps a
+ * Freshness is metadata on every TOOL_RESULT; assessed, never assumed. Each profile maps a
  * documented data lag to a verdict:
- *   CURRENT    — within the profile's freshness window
- *   STALE      — outside the window (still usable, but the limitation must travel with it)
- *   HISTORICAL — explicitly historical request (event time intentionally in the past)
+ *   CURRENT   ; within the profile's freshness window
+ *   STALE     ; outside the window (still usable, but the limitation must travel with it)
+ *   HISTORICAL; explicitly historical request (event time intentionally in the past)
  *
  * Tool failure is never freshness: a failed call produces no evidence at all (lock §10).
  */
@@ -24,12 +24,12 @@ export interface FreshnessProfile {
   readonly historicalAfterMs?: number;
 }
 
-/** FINDINGS.md §2 — all CONFIRMED, with the source dimension noted. */
+/** FINDINGS.md §2; all CONFIRMED, with the source dimension noted. */
 export const FRESHNESS_PROFILES = {
-  /** §2.5 news-briefing: RSS updates every 15–60 min — not real-time. */
+  /** §2.5 news-briefing: RSS updates every 15–60 min; not real-time. */
   rss: {
     id: "rss:15-60min",
-    documentedLag: "RSS feed updates every 15-60 minutes (FINDINGS.md §2.5) — not real-time",
+    documentedLag: "RSS feed updates every 15-60 minutes (FINDINGS.md §2.5); not real-time",
     staleAfterMs: 60 * 60 * 1000,
   },
   /** §2.3 sentiment-analyst: community data ~15 min lag. */

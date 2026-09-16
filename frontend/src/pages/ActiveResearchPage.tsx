@@ -1,5 +1,5 @@
 /**
- * Active research — the REAL SSE progress surface. Every stage line is a backend
+ * Active research; the REAL SSE progress surface. Every stage line is a backend
  * progress event (stage id, summary, safe data); capabilities appear when the engine
  * actually starts/completes them; the only timer is real elapsed time. When the run
  * finishes, the backend's final ResearchResponseDTO renders verbatim.
@@ -39,7 +39,7 @@ export function ActiveResearchPage() {
           <div className="rail-section">
             <div className="rail-title">Honesty rules</div>
             <div style={{ fontSize: 12, color: "var(--text-3)", lineHeight: 1.6 }}>
-              Every stage below is a real backend event — none are simulated. A capability
+              Every stage below is a real backend event; none are simulated. A capability
               returning nothing is recorded as unavailability, never as evidence against you.
             </div>
           </div>
@@ -68,7 +68,7 @@ export function ActiveResearchPage() {
       </div>
 
       {!started && (
-        <Empty title="No run in progress" hint="Submit a question above — the pipeline stages shown here come from the backend's own event stream." />
+        <Empty title="No run in progress" hint="Submit a question above; the pipeline stages shown here come from the backend's own event stream." />
       )}
 
       {run.error !== undefined && (
@@ -87,7 +87,7 @@ export function ActiveResearchPage() {
           <div className="page-head">
             <h1 className="page-title" style={{ fontSize: 20 }}>{run.question}</h1>
             <p className="page-sub" style={{ marginBottom: 0 }}>
-              {run.running ? "Research is running — stages appear as the backend reports them." : "Run finished — the final result below is the backend's own response."}
+              {run.running ? "Research is running; stages appear as the backend reports them." : "Run finished; the final result below is the backend's own response."}
             </p>
           </div>
 

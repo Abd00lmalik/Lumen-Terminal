@@ -8,7 +8,7 @@ related: [quality-control.md, research-planning.md, research-execution-engine.md
 
 **Related documents:** `quality-control.md` · `research-planning.md` · `research-execution-engine.md`
 
-> Converted from `RESEARCH COMPLETION & STOPPING INTE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `RESEARCH COMPLETION & STOPPING INTE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 RESEARCH COMPLETION & STOPPING INTELLIGENCE
 

@@ -1,19 +1,19 @@
 /**
- * Gemini adapter — the first concrete ModelProvider (M3 §2).
+ * Gemini adapter; the first concrete ModelProvider (M3 §2).
  *
  * Architectural basis:
  * - M3 §2/§3: Gemini is an implementation detail behind `ModelProvider`. Nothing outside this
  *   file knows Google's API shape. A future provider implements the same interface.
  * - M3 §2: credentials ONLY from environment (`GEMINI_API_KEY`), model via `GEMINI_MODEL`.
- *   The key must never appear in logs, errors, snapshots, test output, or provenance — all
+ *   The key must never appear in logs, errors, snapshots, test output, or provenance; all
  *   failure messages here are key-free by construction (the key is never interpolated).
  * - M3 §6: the adapter returns raw text; SCHEMA validation happens in provider.ts/schemas.ts
  *   (shared across providers) so every provider is held to the same validation gate.
- * - M3 §19/§20: failures are typed ModelFailure — provider unavailability never becomes a
+ * - M3 §19/§20: failures are typed ModelFailure; provider unavailability never becomes a
  *   fabricated response, and never becomes research evidence.
  *
  * Transport: official Generative Language REST API (`generativelanguage.googleapis.com`,
- * `:generateContent`) via native fetch — matching the repo's zero-runtime-dependency setup.
+ * `:generateContent`) via native fetch; matching the repo's zero-runtime-dependency setup.
  * `responseMimeType: application/json` is requested so the model returns JSON when supported.
  */
 
@@ -27,7 +27,7 @@ import {
 } from "./provider.js";
 
 /**
- * Safe default model ID — the ONLY place in the codebase where a model name appears.
+ * Safe default model ID; the ONLY place in the codebase where a model name appears.
  * Overridable via GEMINI_MODEL (configuration layer resolves it; nothing else hardcodes a model).
  */
 /**
@@ -42,7 +42,7 @@ const API_ROOT = "https://generativelanguage.googleapis.com/v1beta/models";
 const DEFAULT_TIMEOUT_MS = 60_000;
 
 export interface GeminiOptions {
-  /** Defaults to process.env — injectable for tests. Values are never persisted or logged. */
+  /** Defaults to process.env; injectable for tests. Values are never persisted or logged. */
   readonly env?: NodeJS.ProcessEnv;
   /** Injectable fetch (tests). Defaults to globalThis.fetch. */
   readonly fetchImpl?: typeof fetch;
@@ -72,7 +72,7 @@ export class GeminiProvider implements ModelProvider {
   private readonly maxRawBytes: number;
   /** Bounded retry for TRANSIENT provider conditions (5xx / 429 / network), mirroring the
    *  M1 resilience law: retriable failures get a few spaced attempts, permanent ones do not.
-   *  Self-contained here — the model layer does not import transport code. */
+   *  Self-contained here; the model layer does not import transport code. */
   private readonly transientRetry: { attempts: number; baseDelayMs: number; sleep?: (ms: number) => Promise<void> };
 
   constructor(options: GeminiOptions = {}) {
@@ -155,7 +155,7 @@ export class GeminiProvider implements ModelProvider {
       // metadata, so we include only the status + a fixed category string, never the body.
       const category = this.mapStatus(response.status);
       // Quota discrimination (Phase 4 law): a 429 whose body names a PER-DAY quota bucket must
-      // fail FAST and honestly — retrying for hours/days is not resilience, it is a stall. Only
+      // fail FAST and honestly; retrying for hours/days is not resilience, it is a stall. Only
       // rate-shape conditions (per-minute buckets, 5xx overload, network) are retriable. The
       // body is parsed for the quota id ONLY; message content still never enters the error.
       if (response.status === 429) {
@@ -164,7 +164,7 @@ export class GeminiProvider implements ModelProvider {
           throw new ModelFailure(
             "RATE_LIMITED",
             `Gemini free-tier daily quota is exhausted for ${this.modelId}; the bucket resets within 24h. Fail fast: nothing was executed and no state changed.`,
-            false, // permanent for this request cycle — the caller must not retry-stall
+            false, // permanent for this request cycle; the caller must not retry-stall
           );
         }
       }
@@ -202,7 +202,7 @@ export class GeminiProvider implements ModelProvider {
       ...(payload.usageMetadata?.totalTokenCount !== undefined ? { totalTokens: payload.usageMetadata.totalTokenCount } : {}),
     };
 
-    // NOTE: `raw` is returned unvalidated here — validateModelOutput(schema, response.raw) is the
+    // NOTE: `raw` is returned unvalidated here; validateModelOutput(schema, response.raw) is the
     // mandatory next step for every caller (see schemas.ts). Providers never self-certify.
     return {
       data: raw as unknown as T,
@@ -218,8 +218,8 @@ export class GeminiProvider implements ModelProvider {
       request.system,
       "",
       `OUTPUT CONTRACT: respond with exactly one JSON object conforming to schema "${request.schemaName}".`,
-      `OPTIONAL FIELDS: when a field is optional and you have no value for it, OMIT the key entirely — never send null, never send an empty string in its place.`,
-      `REQUIRED LIST FIELDS: always include every required key — when a list has no items, send an empty array [] rather than omitting the key.`,
+      `OPTIONAL FIELDS: when a field is optional and you have no value for it, OMIT the key entirely; never send null, never send an empty string in its place.`,
+      `REQUIRED LIST FIELDS: always include every required key; when a list has no items, send an empty array [] rather than omitting the key.`,
       `Schema: ${request.schemaDescription}`,
       "No prose outside the JSON object. No markdown fences.",
     ].join("\n");

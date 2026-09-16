@@ -8,7 +8,7 @@ related: [memory.md, workspace-presentation.md, lui-interaction-model.md]
 
 **Related documents:** `memory.md` · `workspace-presentation.md` · `lui-interaction-model.md`
 
-> Converted from `RESEARCH CONTEXT & SESSION INTELLIG.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `RESEARCH CONTEXT & SESSION INTELLIG.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 RESEARCH CONTEXT & SESSION INTELLIGENCE
 

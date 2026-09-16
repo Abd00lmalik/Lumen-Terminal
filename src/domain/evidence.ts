@@ -1,5 +1,5 @@
 /**
- * Evidence classification and quality — the boundary between a TOOL_RESULT and the research graph.
+ * Evidence classification and quality; the boundary between a TOOL_RESULT and the research graph.
  *
  * Architectural basis:
  * - evidence-source.md: evidence carries class (observation/interpretation/speculation),
@@ -37,21 +37,21 @@ export function evidenceClassForOutput(output: ToolOutput): EvidenceClass {
 }
 
 export interface EvidenceQuality {
-  /** 0..1 — how directly the observation bears on the claim (primary data > narration). */
+  /** 0..1; how directly the observation bears on the claim (primary data > narration). */
   directness: number;
-  /** 0..1 — source/observation reliability estimate. */
+  /** 0..1; source/observation reliability estimate. */
   reliability: number;
-  /** 0..1 — recency given the research requirement's freshness needs. */
+  /** 0..1; recency given the research requirement's freshness needs. */
   recency: number;
-  /** 0..1 — specificity to the researched target/event. */
+  /** 0..1; specificity to the researched target/event. */
   specificity: number;
-  /** 0..1 — independent corroboration (source count is NOT strength; independence matters). */
+  /** 0..1; independent corroboration (source count is NOT strength; independence matters). */
   corroboration: number;
 }
 
 /**
  * QUALITY ≠ CONFIDENCE: this assesses the evidence itself. Confidence lives on judgments and
- * is derived separately (judgment-confidence.md). None of these numbers are fabricated by M0 —
+ * is derived separately (judgment-confidence.md). None of these numbers are fabricated by M0
  * the caller (research engine, M2) supplies them from source quality + requirement context.
  */
 export function assessEvidenceQuality(e: Evidence): EvidenceQuality {
@@ -72,7 +72,7 @@ export interface EvidenceFromToolResultOptions {
   claimRefs?: { supports?: readonly string[]; contradicts?: readonly string[] };
   evidenceType?: string;
   /**
-   * Override the default provenance refs ([rawReference]) — used by flow orchestration to point
+   * Override the default provenance refs ([rawReference]); used by flow orchestration to point
    * at real SOURCE objects created per item (M2 Flow 1). The raw reference should normally be
    * included; it keeps the raw payload reachable via the evidence's sourceRefs.
    */
@@ -82,10 +82,10 @@ export interface EvidenceFromToolResultOptions {
 /**
  * Convert one validated TOOL_RESULT output into an EVIDENCE object.
  * Rules enforced:
- * - interpretation-class outputs are recorded as DERIVED_OBSERVATION with interpretationBasis —
+ * - interpretation-class outputs are recorded as DERIVED_OBSERVATION with interpretationBasis
  *   never as OBSERVATION (lock §7).
  * - failed tool results produce NO evidence (lock §10: failure is not negative evidence).
- * - invalid results are rejected — they must not enter the research graph (orchestration §20).
+ * - invalid results are rejected; they must not enter the research graph (orchestration §20).
  * - proxy classification is preserved with its limitation (lock §3).
  */
 export function evidenceFromToolResult(
@@ -110,7 +110,7 @@ export function evidenceFromToolResult(
     evidenceClass = "PROXY_EVIDENCE";
     proxyBasis = options.forceProxy.basis;
   } else if (output.proxyBasis !== undefined) {
-    // Adapter boundary marked this output as proxy-derived — the label survives into the graph
+    // Adapter boundary marked this output as proxy-derived; the label survives into the graph
     // no matter what downstream callers want (lock §3; M1 adapter contract).
     evidenceClass = "PROXY_EVIDENCE";
     proxyBasis = output.proxyBasis;

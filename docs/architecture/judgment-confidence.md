@@ -8,7 +8,7 @@ related: [analysis-synthesis.md, hypothesis.md, research-flows.md]
 
 **Related documents:** `analysis-synthesis.md` · `hypothesis.md` · `research-flows.md`
 
-> Converted from `JUDGMENT & CONFIDENCE INTELLIGENCE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `JUDGMENT & CONFIDENCE INTELLIGENCE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 JUDGMENT & CONFIDENCE INTELLIGENCE
 

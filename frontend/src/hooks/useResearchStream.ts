@@ -1,12 +1,12 @@
 /**
- * useResearchStream — drives a REAL research run over the backend SSE stream.
+ * useResearchStream; drives a REAL research run over the backend SSE stream.
  *
  * Honest-progress rules (integration mandate §5):
  * - Every displayed stage is a backend progress event; nothing is simulated, no
  *   timers fake progress, no percentages are invented. The only timer is real elapsed time.
  * - Backend stage vocabulary is displayed verbatim (stage id + summary + safe data).
  * - Completed stages keep their artifacts (summary lines); the final result is the
- *   backend's ResearchResponseDTO rendered by the workspace — never synthesized in React.
+ *   backend's ResearchResponseDTO rendered by the workspace; never synthesized in React.
  */
 import { useCallback, useRef, useState } from "react";
 import { streamResearchRequest } from "../api/index.js";
@@ -29,6 +29,8 @@ export interface StreamState {
   readonly findings: readonly string[];
   readonly result: ResearchResponseDto | undefined;
   readonly error: { code: string; message: string } | undefined;
+  /** Unique per terminal error arrival; lets the page record exactly one failure turn. */
+  readonly errorId: number;
   readonly elapsedSeconds: number;
 }
 
@@ -63,6 +65,7 @@ export function useResearchStream() {
     findings: [],
     result: undefined,
     error: undefined,
+    errorId: 0,
     elapsedSeconds: 0,
   });
   const startedAt = useRef<number>(0);
@@ -85,7 +88,7 @@ export function useResearchStream() {
       capsRef.current = new Map();
       stagesRef.current = [];
       startedAt.current = Date.now();
-      patch(() => ({
+      patch((prev) => ({
         running: true,
         question,
         stages: [],
@@ -93,6 +96,7 @@ export function useResearchStream() {
         findings: [],
         result: undefined,
         error: undefined,
+        errorId: prev.errorId,
         elapsedSeconds: 0,
       }));
       timer.current = setInterval(() => {
@@ -136,11 +140,16 @@ export function useResearchStream() {
           },
           onError: (error) => {
             stopTimer();
-            patch((prev) => ({ ...prev, running: false, error }));
+            patch((prev) => ({ ...prev, running: false, error, errorId: prev.errorId + 1 }));
           },
           onConnectionLost: () => {
             stopTimer();
-            patch((prev) => ({ ...prev, running: false, error: { code: "NETWORK", message: "Connection to the research backend was lost mid-run." } }));
+            patch((prev) => ({
+              ...prev,
+              running: false,
+              error: { code: "NETWORK", message: "Connection to the research backend was lost mid-run. The research object (if it completed) is in Research history." },
+              errorId: prev.errorId + 1,
+            }));
           },
         },
         options,

@@ -1,5 +1,5 @@
 /**
- * Memory service — read-only over saved artifacts and persistent memory.
+ * Memory service; read-only over saved artifacts and persistent memory.
  * There is deliberately NO client write path: SAVE happens through the LUI's
  * authorization boundary (a natural-language request via /api/research), never a
  * direct HTTP shortcut. STALE/HISTORICAL arrive with explicit status data.

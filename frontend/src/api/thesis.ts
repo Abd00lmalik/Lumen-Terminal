@@ -1,5 +1,5 @@
 /**
- * Thesis service — read theses/assessments; selection is the only write and goes
+ * Thesis service; read theses/assessments; selection is the only write and goes
  * through the backend domain boundary (setActiveThesis). The frontend NEVER mutates
  * a thesis: assessments are research results, not edits.
  */

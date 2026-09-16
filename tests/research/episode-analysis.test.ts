@@ -1,16 +1,16 @@
 /**
- * Flow 5 historical-episode analysis — deterministic tests.
+ * Flow 5 historical-episode analysis; deterministic tests.
  *
  * Laws under test (G1-analysis mandate):
  * - §4 EPISODES: real candle-derived episodes with window, features, outcomes, evidence refs.
- * - §5 EXPLAINABILITY: similarity is a per-dimension breakdown (matched vs differing) — never
+ * - §5 EXPLAINABILITY: similarity is a per-dimension breakdown (matched vs differing); never
  *   a bare score; unavailable volume is never substituted.
  * - §8 OUTCOMES: forward return / MFE / MAE / direction-persistence over supported windows.
  * - §9 LOOK-AHEAD: episode MATCHING may only use candles at/before the anchor; the reference
  *   segment is excluded from the candidate pool; outcomes touch future candles ONLY. The
  *   leakage test mutates ONLY future candles of one candidate and asserts the match is
  *   unchanged (it would flip if similarity saw the future).
- * - §10 MODEL ROLE: the analysis is pure arithmetic over parsed candles — no model anywhere.
+ * - §10 MODEL ROLE: the analysis is pure arithmetic over parsed candles; no model anywhere.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -178,7 +178,7 @@ describe("episode-analysis: full analysis + look-ahead protection", () => {
     // are the MUTATION ZONE (future relative to the anchor, but BEFORE the trailing reference
     // so the reference itself is identical in both records). If similarity saw future data,
     // the day-39 match would differ between the calm and wild records. Outcomes legitimately
-    // differ — they are the ONLY thing allowed to touch those candles.
+    // differ; they are the ONLY thing allowed to touch those candles.
     const build = (mutate: boolean) => {
       const candles: AnalysisCandle[] = [];
       let price = 100;
@@ -214,7 +214,7 @@ describe("episode-analysis: full analysis + look-ahead protection", () => {
     // The match (features + per-dimension breakdown) is IDENTICAL despite the extreme future move.
     expect(wildAnchor!.episode.features).toEqual(calmAnchor!.episode.features);
     expect(wildAnchor!.dimensions).toEqual(calmAnchor!.dimensions);
-    // Outcomes DO differ — they are the only consumer of post-anchor candles.
+    // Outcomes DO differ; they are the only consumer of post-anchor candles.
     expect(wildAnchor!.episode.outcomes.map((o) => o.forwardReturnPct))
       .not.toEqual(calmAnchor!.episode.outcomes.map((o) => o.forwardReturnPct));
   });

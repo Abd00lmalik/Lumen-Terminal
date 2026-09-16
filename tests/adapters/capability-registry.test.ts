@@ -44,7 +44,7 @@ function fakeAdapter(
 describe("capability registry (tool-skill-orchestration.md, lock §6)", () => {
   beforeEach(() => resetIdCounters());
 
-  it("resolves providers by capability — the registry API has no flow concept (no hardcoded Flow→Tool maps, lock §18)", () => {
+  it("resolves providers by capability; the registry API has no flow concept (no hardcoded Flow→Tool maps, lock §18)", () => {
     const registry = new CapabilityRegistry();
     registry.register(fakeAdapter({ id: "a/news" }), 10);
     const api = Object.getOwnPropertyNames(Object.getPrototypeOf(registry));
@@ -53,7 +53,7 @@ describe("capability registry (tool-skill-orchestration.md, lock §6)", () => {
     expect(api).not.toContain("executeForFlow");
   });
 
-  it("ranks providers by priority (ranking is a hint, not a rule — orchestration §8)", () => {
+  it("ranks providers by priority (ranking is a hint, not a rule; orchestration §8)", () => {
     const registry = new CapabilityRegistry();
     registry.register(fakeAdapter({ id: "a/secondary" }), 200);
     registry.register(fakeAdapter({ id: "a/primary" }), 10);

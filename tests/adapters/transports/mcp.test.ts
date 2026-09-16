@@ -6,7 +6,7 @@ import { TransportError, Throttler } from "../../../src/adapters/transports/resi
  * Handshake-aware fetch stub (live-discovered 2026-09-13, see module doc in mcp.ts):
  * - POST initialize → 200, `mcp-session-id` header, SSE-framed initialize result
  * - POST notifications/initialized → 202, empty body
- * - everything else consumes the next scripted step (steps are tool-call outcomes only —
+ * - everything else consumes the next scripted step (steps are tool-call outcomes only
  *   handshake requests do NOT consume steps).
  */
 function sessionAwareFetch(
@@ -55,7 +55,7 @@ function okJsonRpc(content: unknown[], isError = false): string {
   return JSON.stringify({ jsonrpc: "2.0", id: 99, result: { content, isError } });
 }
 
-describe("MCP transport — session handshake (DISCOVERED live 2026-09-13)", () => {
+describe("MCP transport; session handshake (DISCOVERED live 2026-09-13)", () => {
   let sleeps: number[];
   let fakeSleep: (ms: number) => Promise<void>;
 
@@ -118,7 +118,7 @@ describe("MCP transport — session handshake (DISCOVERED live 2026-09-13)", () 
     expect(outcome.attempts).toBe(2); // replay after re-handshake, bounded retry engaged
   });
 
-  it("initialize without an mcp-session-id header is INVALID_RESPONSE (permanent — retry cannot fix it)", async () => {
+  it("initialize without an mcp-session-id header is INVALID_RESPONSE (permanent; retry cannot fix it)", async () => {
     const transport = new McpTransport({
       fetchImpl: sessionAwareFetch([], undefined, { sessionHeader: false }),
       retryOptions: { sleep: fakeSleep },
@@ -303,7 +303,7 @@ describe("MCP transport boundary (final lock §7, failure-recovery.md §12–14)
     // happen synchronously before any await, so concurrent calls serialize with min spacing.
     // Uses real timers because the guarantee is about real elapsed spacing. The interval is
     // sized so a scheduled 5ms sleep CANNOT overshoot the spacing even under full parallel
-    // suite load — the law under test is slot spacing, not machine speed (a tight 20ms
+    // suite load; the law under test is slot spacing, not machine speed (a tight 20ms
     // interval measured the load, not the throttler, and flaked under parallelism).
     const minIntervalMs = 60;
     const throttler = new Throttler({ minIntervalMs });

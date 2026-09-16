@@ -1,14 +1,14 @@
 /**
- * G1 — Historical market data provider (vendor selected 2026-09-15, human-approved).
+ * G1; Historical market data provider (vendor selected 2026-09-15, human-approved).
  *
  * Architectural basis:
  * - capability-registry.ts `HistoricalDataProvider` / `HistoricalQuery` (the interface was
- *   defined in M0 and is unchanged); final lock §4: externals only for G1/G2 — this module
+ *   defined in M0 and is unchanged); final lock §4: externals only for G1/G2; this module
  *   is the G1 implementation, still behind the registry (no Flow→Tool hardcoding).
  * - FINDINGS.md R4/R1: Flow 5 is Bitget-crippled without deep history; the public MCP hub
  *   is a single point of failure. Mitigation: an independent historical source.
  * - Live-verified 2026-09-15 from this machine: `api.bitget.com` is network-unreachable
- *   (HTTP 000); `data-api.binance.vision` (Binance's official Market-Data-Only URL —
+ *   (HTTP 000); `data-api.binance.vision` (Binance's official Market-Data-Only URL
  *   "do not require any authentication and serve only public market data") serves REAL
  *   multi-year OHLCV (BTC 2020-01-01 @ $7,200.85; the 2021-05-19 crash bar: low 30,000,
  *   close 36,690). CoinGecko anonymous caps at 365d; all other exchange APIs blocked here.
@@ -20,7 +20,7 @@
  * Epistemic laws preserved:
  * - raw OHLCV candles are QUANTITATIVE_OBSERVATIONs with exact timestamps (final lock §9);
  * - failure/absence never becomes evidence: unmirrored metrics (funding/open_interest/
- *   liquidations) return honest UNAVAILABLE-class outputs with failure set — nothing invented;
+ *   liquidations) return honest UNAVAILABLE-class outputs with failure set; nothing invented;
  * - all resilience primitives reused (throttle, bounded retry, raw capture).
  */
 
@@ -160,7 +160,7 @@ function dedupeAndSort(candles: readonly HistoricalCandle[]): readonly Historica
   return [...byOpen.values()].sort((a, b) => Date.parse(a.openTime) - Date.parse(b.openTime));
 }
 
-/** Group candles into calendar-month blocks (packaging only — values untouched). */
+/** Group candles into calendar-month blocks (packaging only; values untouched). */
 function chunkByMonth(candles: readonly HistoricalCandle[]): readonly { month: string; candles: readonly HistoricalCandle[] }[] {
   const chunks: { month: string; candles: HistoricalCandle[] }[] = [];
   let current: { month: string; candles: HistoricalCandle[] } | undefined;
@@ -210,7 +210,7 @@ function parseBitgetCandles(body: unknown, path: string): readonly BitgetCandle[
 
 function parseBinanceKlines(body: unknown): readonly BinanceKline[] {
   if (!Array.isArray(body)) {
-    // Binance errors come as { code, msg } — non-array means a failure the transport missed.
+    // Binance errors come as { code, msg }; non-array means a failure the transport missed.
     throw new TransportError("SCHEMA_ERROR", "Binance Vision klines payload is not an array", { retriable: false });
   }
   return body as readonly BinanceKline[];
@@ -242,7 +242,7 @@ export class G1HistoricalDataAdapter implements HistoricalDataProvider {
    *
    * Capability defaults (reliability-phase precedent): a plan that names the capability without
    * supplying a full HistoricalQuery (e.g. the generic adaptive loop passes only `{asset}`)
-   * gets a valid default envelope — symbol from asset, metric ohlcv, 3-year daily lookback —
+   * gets a valid default envelope; symbol from asset, metric ohlcv, 3-year daily lookback
    * instead of an opaque SCHEMA failure. Explicit params always win.
    */
   async execute(capability: string, params: Record<string, unknown>): Promise<ToolResultInput> {
@@ -290,7 +290,7 @@ export class G1HistoricalDataAdapter implements HistoricalDataProvider {
       }
       return this.successResult(query, interval, fetch, at);
     } catch (error) {
-      // Both venues failed: honest typed failure — never an empty "no data" answer.
+      // Both venues failed: honest typed failure; never an empty "no data" answer.
       const message = error instanceof Error ? error.message : String(error);
       return {
         tool: this.providerId,
@@ -389,10 +389,10 @@ export class G1HistoricalDataAdapter implements HistoricalDataProvider {
 
   /** Success result: candles as QUANTITATIVE_OBSERVATIONs with exact timestamps + provenance.
    *
-   * Packaging law: candles are chunked into MONTHLY blocks — one evidence object per candle
+   * Packaging law: candles are chunked into MONTHLY blocks; one evidence object per candle
    * floods the research graph (2190 objects for a 3-year daily query) and degrades every
    * downstream context build. Each candle is preserved VERBATIM inside its block (exact ISO
-   * timestamps, numeric OHLCV) — chunking changes packaging, never values or classification.
+   * timestamps, numeric OHLCV); chunking changes packaging, never values or classification.
    */
   private successResult(query: HistoricalQuery, interval: string, fetch: VenueFetch, _at: Date): ToolResultInput {
     const symbol = restSymbol(query.symbol);
@@ -441,7 +441,7 @@ export class G1HistoricalDataAdapter implements HistoricalDataProvider {
     };
   }
 
-  /** Unmirrored metric: honest UNAVAILABLE outputs — the absence is stated, not papered over. */
+  /** Unmirrored metric: honest UNAVAILABLE outputs; the absence is stated, not papered over. */
   private unavailableResult(query: HistoricalQuery, _at: Date, message: string): ToolResultInput {
     return {
       tool: this.providerId,

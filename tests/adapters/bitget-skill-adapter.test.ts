@@ -84,7 +84,7 @@ describe("Bitget skill adapters (final lock §3/§7/§8)", () => {
     expect(input.completeness).toBe("COMPLETE");
   });
 
-  it("classifies narrative text as interpretation — never silently as observation (lock §7)", async () => {
+  it("classifies narrative text as interpretation; never silently as observation (lock §7)", async () => {
     const transport = new FakeMcpTransport();
     transport.script({ content: [textBlock("Risk sentiment deteriorates; RISK-OFF regime likely")] });
     const adapter = makeAdapter(transport);
@@ -119,7 +119,7 @@ describe("Bitget skill adapters (final lock §3/§7/§8)", () => {
     transport.script({ content: [textBlock(JSON.stringify({ metric: "etf_flow_proxy", value: 120 })) ] });
     const adapter = makeAdapter(transport, {
       descriptor: { providerId: "bitget-signal/market-intel", limitations: ["not on-chain"] },
-      mapping: { proxyBasis: "dominance-derived proxy — NOT direct on-chain or ETF-flow observation" },
+      mapping: { proxyBasis: "dominance-derived proxy; NOT direct on-chain or ETF-flow observation" },
     });
 
     const input = await adapter.execute("MARKET_DATA_ANALYSIS", {});
@@ -166,7 +166,7 @@ describe("Bitget skill adapters (final lock §3/§7/§8)", () => {
 
     const input = await adapter.execute("NEWS_ANALYSIS", {});
     expect(input.completeness).toBe("EMPTY");
-    expect(input.failure).toBeUndefined(); // adapter-level input has no failure — call succeeded
+    expect(input.failure).toBeUndefined(); // adapter-level input has no failure; call succeeded
     expect(input.outputs).toEqual([]);
   });
 

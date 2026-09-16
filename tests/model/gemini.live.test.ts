@@ -1,5 +1,5 @@
 /**
- * LIVE Gemini validation — M3 §21/§22. Run explicitly:
+ * LIVE Gemini validation; M3 §21/§22. Run explicitly:
  *
  *   FREEBUFF_LIVE_GEMINI=1 (with GEMINI_API_KEY in the environment or .env) npx vitest run tests/model/gemini.live.test.ts
  *
@@ -16,7 +16,7 @@ const LIVE = process.env.FREEBUFF_LIVE_GEMINI === "1" && !!process.env.GEMINI_AP
 describe.skipIf(!LIVE)("live Gemini (env-gated; skipped without FREEBUFF_LIVE_GEMINI + GEMINI_API_KEY)", () => {
   it("performs one real structured round-trip conforming to a validated schema", async () => {
     const provider = new GeminiProvider(); // real env credentials
-    // §2: the configured model must be gemini-3.5-flash-lite (free-tier audit default) — via
+    // §2: the configured model must be gemini-3.5-flash-lite (free-tier audit default); via
     // GEMINI_MODEL or the config-layer default. An explicit env override is also valid configuration.
     expect(["gemini-3.5-flash-lite", process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite"]).toContain(provider.modelId);
     const response = await provider.structured<string>({
@@ -27,7 +27,7 @@ describe.skipIf(!LIVE)("live Gemini (env-gated; skipped without FREEBUFF_LIVE_GE
       preferJson: true,
       timeoutMs: 30_000,
     });
-    // Validate through the shared gate — the live path must pass the same validation as mocks.
+    // Validate through the shared gate; the live path must pass the same validation as mocks.
     const { data } = validateModelOutput<{ answer: string; confidence: string }>(FINAL_RESPONSE_SCHEMA, response.raw);
     expect(typeof data.answer).toBe("string");
     expect(data.answer.length).toBeGreaterThan(0);
@@ -44,7 +44,7 @@ describe.skipIf(!LIVE)("live Gemini (env-gated; skipped without FREEBUFF_LIVE_GE
       await provider.structured({
         schemaName: "s", schemaDescription: "{}", system: "sys", prompt: "p", timeoutMs: 20_000,
       });
-      // If it somehow succeeds, fail honestly — the model id should not exist.
+      // If it somehow succeeds, fail honestly; the model id should not exist.
       expect.unreachable("invalid model id unexpectedly succeeded");
     } catch (error) {
       expect(error).toBeInstanceOf(ModelFailure);

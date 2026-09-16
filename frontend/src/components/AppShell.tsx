@@ -1,5 +1,5 @@
 /**
- * AppShell — persistent sidebar + topbar + content + (optional) contextual right panel.
+ * AppShell; persistent sidebar + topbar + content + (optional) contextual right panel.
  * Responsive: sidebar and context rail collapse into drawers below their breakpoints.
  */
 import { useState, type ReactNode } from "react";
@@ -37,7 +37,7 @@ export function AppShell({ title, children, contextRail }: {
         <button className="ws-select" onClick={() => navigate("/home")}>
           <span>
             <span className="ws-label">WORKSPACE</span>
-            <span className="ws-name">Q4 · BTC/ETH</span>
+            <span className="ws-name">Default</span>
           </span>
           <span className="mono" style={{ color: "var(--text-3)" }}>⌄</span>
         </button>
@@ -57,7 +57,7 @@ export function AppShell({ title, children, contextRail }: {
         </nav>
 
         <div className="sidebar-foot">
-          research only — no execution
+          research only; no execution
           <br />
           live backend · F0 API
         </div>

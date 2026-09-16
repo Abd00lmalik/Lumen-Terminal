@@ -54,7 +54,7 @@ describe("file-backed persistence (lock §14)", () => {
 
   it("restored graph never re-mints persisted ids (restart collision regression)", async () => {
     // Regression (G1-analysis phase): a fresh process restarted counters at 1, so its first new
-    // research object got `rs_000001` — OVERWRITING the persisted rs_000001. Counter continuity
+    // research object got `rs_000001`; OVERWRITING the persisted rs_000001. Counter continuity
     // must be restored from the loaded graph before any new object is minted.
     const first = new Workspace();
     const r1 = first.addResearch(

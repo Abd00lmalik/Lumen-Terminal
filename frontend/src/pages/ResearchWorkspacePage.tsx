@@ -1,5 +1,5 @@
 /**
- * Research workspace — the primary screen, wired to the REAL backend.
+ * Research workspace; the primary screen, wired to the REAL backend.
  *
  * - The ask-bar submits natural language to the backend (no keyword routing here).
  * - While running, the page renders the real SSE progress stages; when finished,
@@ -17,7 +17,7 @@ import {
   ProxyNote, UnavailableNote, KV, Note, Empty, timeAgo,
 } from "../components/ui.js";
 import { evidenceFromDto, judgmentFromDto } from "../data/adapters.js";
-import { submitResearch, getWorkspace } from "../api/index.js";
+import { getWorkspace } from "../api/index.js";
 import type { EvidenceItem, JudgmentView, ThesisView } from "../data/types.js";
 import type { ResearchResponseDto, ContinuitySnapshotDto, HistoricalAnalysisDto } from "../api/index.js";
 import { useResearchStream } from "../hooks/useResearchStream.js";
@@ -42,8 +42,50 @@ export function ResearchWorkspacePage() {
   const [submitting, setSubmitting] = useState(false);
   const [runs, setRuns] = useState<readonly Turn[]>([]);
   const [ws, setWs] = useState<WorkspaceData>({ evidence: [], judgment: undefined, thesis: undefined, snapshot: undefined, loadError: undefined as unknown });
-  const { state: stream } = useResearchStream();
+  const { state: stream, submit } = useResearchStream();
   const askedFromHome = useRef(""); // guards double-submission of a home-hero example in StrictMode
+
+  // Every terminal stream event lands as a visible turn: success shows the backend's DTO;
+  // typed errors (including a lost connection) render honest failure turns. Nothing leaves
+  // the page silently "still researching" while history already holds the result.
+  const streamDone = stream.result !== undefined;
+  useEffect(() => {
+    if (streamDone) {
+      setRuns((prev) => [...prev, { question: stream.question, run: stream.result! }]);
+      void refresh();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamDone, stream.result]);
+
+  useEffect(() => {
+    if (stream.errorId > 0) {
+      setRuns((prev) => [...prev, {
+        question: stream.question,
+        run: {
+          requestId: crypto.randomUUID(),
+          action: "RESEARCH",
+          outcome: stream.error!.code === "AWAITING_CONFIRMATION" ? "AWAITING_CONFIRMATION" : stream.error!.code === "INVALID_REQUEST" ? "REJECTED" : "MODEL_FAILURE",
+          ...(stream.error!.code !== "AWAITING_CONFIRMATION" && stream.error!.code !== "INVALID_REQUEST"
+            ? { modelFailure: { type: stream.error!.code, message: stream.error!.message } }
+            : {}),
+          answer: {
+            answer: stream.error!.message,
+            supportingReasons: [],
+            opposingReasons: [],
+            confidence: "UNKNOWN",
+            keyUncertainty: "",
+            implication: "",
+            citedObjectRefs: [],
+          },
+          limitations: [],
+          evidence: [],
+          judgments: [],
+          evidenceRefs: [],
+        },
+      }]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stream.errorId]);
 
   const refresh = useCallback(async () => {
     try {
@@ -85,42 +127,26 @@ export function ResearchWorkspacePage() {
     if (typeof q === "string" && q.length > 0 && askedFromHome.current !== q) {
       askedFromHome.current = q;
       navigate(location.pathname, { replace: true }); // clear the state so refresh/resubmit doesn't re-ask
-      void ask(q);
+      ask(q);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state]);
 
-  const ask = async (question: string, confirmed = false) => {
+  // Submission drives the REAL SSE stream: progress stages render live; every terminal path
+  // (final / typed error / connection lost) lands as a turn so the page NEVER returns to an
+  // empty state while the backend holds the result (it is always in Research history too).
+  const ask = useCallback((question: string, confirmed = false) => {
     const q = question.trim();
     if (q.length === 0 || stream.running || submitting) return;
     setInput("");
     setSubmitting(true);
-    try {
-      const dto = await submitResearch(q, confirmed);
-      setRuns((prev) => [...prev, { question: q, run: dto }]);
-      await refresh();
-    } catch (err) {
-      // JSON-path failures render as a typed failure turn — the backend's own
-      // error vocabulary, never mock content standing in for a failure.
-      const code = (err as { code?: string }).code ?? "NETWORK";
-      const message = err instanceof Error ? err.message : String(err);
-      setRuns((prev) => [...prev, {
-        question: q,
-        run: {
-          requestId: crypto.randomUUID(),
-          action: "RESEARCH",
-          outcome: code === "MODEL_FAILURE" ? "MODEL_FAILURE" : code === "AWAITING_CONFIRMATION" ? "AWAITING_CONFIRMATION" : code === "INVALID_REQUEST" ? "REJECTED" : "MODEL_FAILURE",
-          answer: { answer: message, supportingReasons: [], opposingReasons: [], confidence: "UNKNOWN", keyUncertainty: "", implication: "", citedObjectRefs: [] },
-          limitations: [],
-          evidence: [],
-          judgments: [],
-          evidenceRefs: [],
-        },
-      }]);
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    void submit(q, { confirmed })
+      .catch((err: unknown) => {
+        // Defensive: streamResearchRequest resolves (never rejects) on handled failures.
+        console.error("research stream submission threw", err);
+      })
+      .finally(() => setSubmitting(false));
+  }, [stream.running, submitting, submit]);
 
   const evidenceById = new Map(ws.evidence.map((e) => [e.ref, e]));
 
@@ -168,16 +194,16 @@ export function ResearchWorkspacePage() {
         <div className="search-wrap" style={{ maxWidth: "none" }}>
           <input
             className="search"
-            placeholder="Ask a research question — e.g. why did BTC drop this morning?"
+            placeholder="Ask a research question; e.g. why did BTC drop this morning?"
             aria-label="Ask a research question"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && void ask(input)}
+            onKeyDown={(e) => e.key === "Enter" && ask(input)}
             disabled={stream.running || submitting}
           />
         </div>
-        <button className="btn primary" onClick={() => void ask(input)} disabled={stream.running || submitting || input.trim().length === 0}>
-          {stream.running || submitting ? "Researching…" : "Research"}
+        <button className="btn primary" onClick={() => ask(input)} disabled={stream.running || submitting || input.trim().length === 0}>
+          {stream.running || submitting ? `Researching… ${stream.elapsedSeconds > 0 ? `(${stream.elapsedSeconds}s)` : ""}` : "Research"}
         </button>
       </div>
 
@@ -202,7 +228,7 @@ export function ResearchWorkspacePage() {
       )}
 
       {runs.length === 0 && !stream.running && ws.loadError === undefined && (
-        <Empty title="No research in this workspace yet" hint="Type a natural-language question above — the agent plans and investigates." />
+        <Empty title="No research in this workspace yet" hint="Type a natural-language question above; the agent plans and investigates." />
       )}
 
       {runs.map((turn) => <RunView key={turn.run.requestId} turn={turn} evidenceById={evidenceById} onInspectEvidence={() => navigate("/evidence")} onConfirm={() => void ask(turn.question, true)} />)}
@@ -226,7 +252,7 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
         <div className="bubble">{turn.question}</div>
       </div>
 
-      {/* §8A: the JUDGMENT is the visual focal point — elevated surface, larger type.
+      {/* §8A: the JUDGMENT is the visual focal point; elevated surface, larger type.
           Failure/ambiguous states keep honest panel treatment (not a celebratory verdict). */}
       {run.outcome === "COMPLETED" ? (
         <section className="surface-judgment" aria-label="Research judgment">
@@ -269,7 +295,7 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
 
       {run.modelFailure !== undefined && (
         <Note tone="warn">
-          <b>Model failure ({run.modelFailure.type}).</b> {run.modelFailure.message} — no evidence was fabricated to cover it.
+          <b>Model failure ({run.modelFailure.type}).</b> {run.modelFailure.message}; no evidence was fabricated to cover it.
         </Note>
       )}
 
@@ -367,7 +393,7 @@ function Finding({ text, tone }: { text: string; tone: "sup" | "opp" }) {
 }
 
 /**
- * §8D — Flow 5 historical-research presentation. Renders the SERVER-COMPUTED structured
+ * §8D; Flow 5 historical-research presentation. Renders the SERVER-COMPUTED structured
  * analysis: CURRENT SETUP → HISTORICAL ANALOGUES (explained, per-dimension) → FORWARD
  * OUTCOMES → what the record does NOT establish. Timeline-flavored; never a bare
  * "similarity score"; never a prediction.
@@ -400,7 +426,7 @@ function HistoricalAnalysisView({ a }: { a: HistoricalAnalysisDto }) {
         <div>
           {a.matches.length === 0 && (
             <div className="panel-body" style={{ color: "var(--text-2)", fontSize: 13 }}>
-              No comparable episodes met the similarity threshold — the current setup may be genuinely novel, or the feature comparison too narrow.
+              No comparable episodes met the similarity threshold; the current setup may be genuinely novel, or the feature comparison too narrow.
             </div>
           )}
           {a.matches.map((m) => (
@@ -441,7 +467,7 @@ function HistoricalAnalysisView({ a }: { a: HistoricalAnalysisDto }) {
       </Panel>
 
       <Note tone="info">
-        <b>What this does not establish:</b> {a.interpretiveNote} Historical precedent describes what happened before — it does not predict and does not recommend any action.
+        <b>What this does not establish:</b> {a.interpretiveNote} Historical precedent describes what happened before; it does not predict and does not recommend any action.
       </Note>
     </>
   );

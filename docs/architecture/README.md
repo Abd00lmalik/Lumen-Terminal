@@ -2,18 +2,18 @@
 
 Converted 2026-09-12 from the 39 root `*.txt` specification files (one-to-one; originals preserved at repo root). See [`conversion_log.md`](conversion_log.md) for the file-by-file mapping, fidelity verification, and the one documented formatting exception.
 
-**Source of truth:** these documents carry the full architectural specification. Formatting was normalized (fences, diagram runs, line endings); architectural content was not re-worded, reordered, or removed. Where this tree and the root `.txt` files ever diverge, flag it — do not silently resolve.
+**Source of truth:** these documents carry the full architectural specification. Formatting was normalized (fences, diagram runs, line endings); architectural content was not re-worded, reordered, or removed. Where this tree and the root `.txt` files ever diverge, flag it; do not silently resolve.
 
-**RESOLVED CONTRADICTION (final architecture lock, human-approved 2026-09-12):** the LUI universal action set is now locked as **6 actions: RESEARCH, ANALYZE, CHALLENGE, MANAGE_STATE, MONITOR, SAVE** — SAVE is a first-class action. Rationale: `MANAGE_STATE` modifies current research/workspace state; `SAVE` intentionally promotes eligible state into persistent reusable memory/artifacts (different semantics and confirmation requirements). [`lui-universal-core.md`](lui-universal-core.md) and [`lui-save-action.md`](lui-save-action.md) define the locked model; [`lui-flow-extensions.md`](lui-flow-extensions.md) (originally 5-action, excluding SAVE) carries an amendment note and internally consistent updates. The root `.txt` originals remain preserved unmodified.
+**RESOLVED CONTRADICTION (final architecture lock, human-approved 2026-09-12):** the LUI universal action set is now locked as **6 actions: RESEARCH, ANALYZE, CHALLENGE, MANAGE_STATE, MONITOR, SAVE**; SAVE is a first-class action. Rationale: `MANAGE_STATE` modifies current research/workspace state; `SAVE` intentionally promotes eligible state into persistent reusable memory/artifacts (different semantics and confirmation requirements). [`lui-universal-core.md`](lui-universal-core.md) and [`lui-save-action.md`](lui-save-action.md) define the locked model; [`lui-flow-extensions.md`](lui-flow-extensions.md) (originally 5-action, excluding SAVE) carries an amendment note and internally consistent updates. The root `.txt` originals remain preserved unmodified.
 
 ## Reading order (first pass)
 
-1. [`research-flows.md`](research-flows.md) — the 8 locked research flows (canonical product behavior)
-2. [`core-principles.md`](core-principles.md) — Common Intelligence Layer shared by all flows + global design principles
-3. [`research-object-model.md`](research-object-model.md) — the research object hierarchy
-4. [`lui-universal-core.md`](lui-universal-core.md) + [`lui-flow-extensions.md`](lui-flow-extensions.md) — LUI architecture (6-action locked model incl. SAVE; see lock note above)
-5. [`tool-skill-orchestration.md`](tool-skill-orchestration.md) + [`data-market-intelligence.md`](data-market-intelligence.md) — capability/tool/provider model
-6. [`safety-boundaries.md`](safety-boundaries.md) — decision boundary and confirmation rules
+1. [`research-flows.md`](research-flows.md); the 8 locked research flows (canonical product behavior)
+2. [`core-principles.md`](core-principles.md); Common Intelligence Layer shared by all flows + global design principles
+3. [`research-object-model.md`](research-object-model.md); the research object hierarchy
+4. [`lui-universal-core.md`](lui-universal-core.md) + [`lui-flow-extensions.md`](lui-flow-extensions.md); LUI architecture (6-action locked model incl. SAVE; see lock note above)
+5. [`tool-skill-orchestration.md`](tool-skill-orchestration.md) + [`data-market-intelligence.md`](data-market-intelligence.md); capability/tool/provider model
+6. [`safety-boundaries.md`](safety-boundaries.md); decision boundary and confirmation rules
 
 ## Document map
 
@@ -68,15 +68,15 @@ Converted 2026-09-12 from the 39 root `*.txt` specification files (one-to-one; o
 ### LUI (language user interface)
 | Document | Original source | Covers |
 |---|---|---|
-| [`lui-universal-core.md`](lui-universal-core.md) | `# UNIVERSAL LUI CORE.txt` | Universal LUI core actions — **locked 6-action model incl. SAVE** |
-| [`lui-flow-extensions.md`](lui-flow-extensions.md) | `LUI — Universal Core + Flow-Specifi.txt` | Universal core + flow extensions (originally 5-action excl. SAVE; amended to the locked 6-action model — see lock note above) |
-| [`lui-research-action.md`](lui-research-action.md) | `LUI — RESEARCH Action Specification.txt` | RESEARCH action detail |
-| [`lui-analyze-action.md`](lui-analyze-action.md) | `ANALYZE — Universal Core Action.txt` | ANALYZE action detail |
-| [`lui-challenge-action.md`](lui-challenge-action.md) | `# CHALLENGE — Universal Core Action.txt` | CHALLENGE action detail |
+| [`lui-universal-core.md`](lui-universal-core.md) | `# UNIVERSAL LUI CORE.txt` | Universal LUI core actions; **locked 6-action model incl. SAVE** |
+| [`lui-flow-extensions.md`](lui-flow-extensions.md) | `LUI; Universal Core + Flow-Specifi.txt` | Universal core + flow extensions (originally 5-action excl. SAVE; amended to the locked 6-action model; see lock note above) |
+| [`lui-research-action.md`](lui-research-action.md) | `LUI; RESEARCH Action Specification.txt` | RESEARCH action detail |
+| [`lui-analyze-action.md`](lui-analyze-action.md) | `ANALYZE; Universal Core Action.txt` | ANALYZE action detail |
+| [`lui-challenge-action.md`](lui-challenge-action.md) | `# CHALLENGE; Universal Core Action.txt` | CHALLENGE action detail |
 | [`lui-manage-state-action.md`](lui-manage-state-action.md) | `MANAGE_STATE.txt` | MANAGE_STATE action detail |
 | [`lui-monitor-action.md`](lui-monitor-action.md) | `# MONITOR.txt` | MONITOR action detail |
 | [`lui-save-action.md`](lui-save-action.md) | `# SAVE.txt` | SAVE action detail |
-| [`lui-interaction-model.md`](lui-interaction-model.md) | `# LUI Layer — Natural Language Inte.txt` | NL as control system, not chat |
+| [`lui-interaction-model.md`](lui-interaction-model.md) | `# LUI Layer; Natural Language Inte.txt` | NL as control system, not chat |
 
 ### Presentation, context, personalization, safety
 | Document | Original source | Covers |
@@ -90,6 +90,6 @@ Converted 2026-09-12 from the 39 root `*.txt` specification files (one-to-one; o
 
 ## Related layers
 
-- `AGENT.md` (repo root) — runtime research-agent routing/orchestration over this documentation.
-- `FINDINGS.md` (repo root) — Bitget capability research, flow mapping, gaps, and the findings report.
-- `handoff.md` (repo root) — concise continuity note for future coding agents (does not duplicate architecture).
+- `AGENT.md` (repo root); runtime research-agent routing/orchestration over this documentation.
+- `FINDINGS.md` (repo root); Bitget capability research, flow mapping, gaps, and the findings report.
+- `handoff.md` (repo root); concise continuity note for future coding agents (does not duplicate architecture).

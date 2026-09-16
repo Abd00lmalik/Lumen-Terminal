@@ -1,13 +1,13 @@
 /**
- * Research Object Model — the M0 object subset.
+ * Research Object Model; the M0 object subset.
  *
  * Architectural basis: docs/architecture/research-object-model.md
  * - Object schemas (SOURCE/EVIDENCE/CLAIM/HYPOTHESIS/ANALYSIS/JUDGMENT/BRANCH/RESEARCH) per §2–9.
  * - §23 distinctions: Evidence ≠ Claim, Claim ≠ Hypothesis, Judgment ≠ Thesis, Research ≠ Conversation.
- * - §17 ownership: judgment belongs to a research context and has historical versions — one current.
+ * - §17 ownership: judgment belongs to a research context and has historical versions; one current.
  * - §19/§7 (object-lifecycle-state-machine.md): superseded judgments remain fully preserved.
  * - THESIS/FRAMEWORK/MONITOR/SNAPSHOT/ANNOTATION/SAVED_ARTIFACT are architecture objects but are
- *   deliberately NOT implemented in M0 — they arrive with M3–M5 per IMPLEMENTATION_PLAN.md.
+ *   deliberately NOT implemented in M0; they arrive with M3–M5 per IMPLEMENTATION_PLAN.md.
  */
 
 import { newId, idPrefixes } from "./ids.js";
@@ -17,7 +17,7 @@ import { applyTransition, type ObjectKind, type ObjectStatus } from "./lifecycle
 export type ISO = string; // ISO-8601 timestamp
 
 // ---------------------------------------------------------------------------
-// SOURCE — the origin from which information was obtained (§6)
+// SOURCE; the origin from which information was obtained (§6)
 // ---------------------------------------------------------------------------
 
 export interface Source {
@@ -54,10 +54,10 @@ export function createSource(
 }
 
 // ---------------------------------------------------------------------------
-// EVIDENCE — observed/retrieved information bearing on a claim/hypothesis (§5)
+// EVIDENCE; observed/retrieved information bearing on a claim/hypothesis (§5)
 // ---------------------------------------------------------------------------
 
-/** Evidence class — observation vs interpretation is an architectural rule, not a nice-to-have. */
+/** Evidence class; observation vs interpretation is an architectural rule, not a nice-to-have. */
 export type EvidenceClass =
   | "RAW_DATA"
   | "OBSERVATION"
@@ -103,7 +103,7 @@ export function createEvidence(
   at = new Date(),
 ): Evidence {
   if (input.evidenceClass === "PROXY_EVIDENCE" && !input.proxyBasis) {
-    // Lock §5: "Proxy evidence must be explicitly labeled" — an unlabeled proxy must not exist.
+    // Lock §5: "Proxy evidence must be explicitly labeled"; an unlabeled proxy must not exist.
     throw new Error("PROXY_EVIDENCE requires proxyBasis (what the proxy actually measures)");
   }
   return Object.freeze({
@@ -124,7 +124,7 @@ export function createEvidence(
 }
 
 // ---------------------------------------------------------------------------
-// CLAIM — a proposition that requires evidence; not necessarily true (§4)
+// CLAIM; a proposition that requires evidence; not necessarily true (§4)
 // ---------------------------------------------------------------------------
 
 export interface Claim {
@@ -154,7 +154,7 @@ export function createClaim(
 }
 
 // ---------------------------------------------------------------------------
-// HYPOTHESIS — candidate explanation; living object (§7)
+// HYPOTHESIS; candidate explanation; living object (§7)
 // ---------------------------------------------------------------------------
 
 export interface Hypothesis {
@@ -191,7 +191,7 @@ export function createHypothesis(
 }
 
 // ---------------------------------------------------------------------------
-// ANALYSIS — deliberate analytical operation; result of the ANALYZE action (§8)
+// ANALYSIS; deliberate analytical operation; result of the ANALYZE action (§8)
 // ---------------------------------------------------------------------------
 
 export interface Analysis {
@@ -234,7 +234,7 @@ export function createAnalysis(
 }
 
 // ---------------------------------------------------------------------------
-// JUDGMENT — current best-supported assessment; versioned through history (§9)
+// JUDGMENT; current best-supported assessment; versioned through history (§9)
 // ---------------------------------------------------------------------------
 
 export interface JudgmentBasis {
@@ -286,7 +286,7 @@ function implicationsOf(input: { implications?: readonly string[] }): readonly s
 }
 
 // ---------------------------------------------------------------------------
-// BRANCH — independent line of investigation (§3)
+// BRANCH; independent line of investigation (§3)
 // ---------------------------------------------------------------------------
 
 export interface Branch {
@@ -324,7 +324,7 @@ export function createBranch(
 }
 
 // ---------------------------------------------------------------------------
-// RESEARCH — the primary investigation object (§2)
+// RESEARCH; the primary investigation object (§2)
 // ---------------------------------------------------------------------------
 
 export interface Research {
@@ -367,7 +367,7 @@ export function createResearch(
 }
 
 // ---------------------------------------------------------------------------
-// Mutation helpers — immutable updates that preserve provenance and history.
+// Mutation helpers; immutable updates that preserve provenance and history.
 // These keep frozen objects ergonomic without ever overwriting the past.
 // ---------------------------------------------------------------------------
 

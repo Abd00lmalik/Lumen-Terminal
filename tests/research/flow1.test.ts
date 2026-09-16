@@ -1,5 +1,5 @@
 /**
- * Flow 1 — WHAT HAPPENED? — end-to-end behavioral tests with REALISTIC Bitget response fixtures.
+ * Flow 1; WHAT HAPPENED?; end-to-end behavioral tests with REALISTIC Bitget response fixtures.
  *
  * The fixtures replicate the shapes DISCOVERED live on 2026-09-13 (see FINDINGS.md §7):
  * - MCP: session handshake (handled by the transport), `news_feed` returning a JSON array of
@@ -42,7 +42,7 @@ function newsFeedFixture(feeds: Array<{ feed: string; error?: string; titles?: s
         title,
         link: `https://example.com/${f.feed}/${i}`,
         published: new Date(NOW - (fi * 2 + i + 1) * 1_800_000).toISOString(), // staggered, recent
-        summary: `${title} — full text`,
+        summary: `${title}; full text`,
       })),
     })),
   );
@@ -64,7 +64,7 @@ const TECHNICAL_FIXTURE = JSON.stringify({
 });
 
 function makeRegistry(mcp: FakeMcpTransport, rest: FakeRestTransport): CapabilityRegistry {
-  // fallbacks disabled: these fixtures assert PRIMARY-provider laws deterministically —
+  // fallbacks disabled: these fixtures assert PRIMARY-provider laws deterministically
   // enabling the live fallback adapters here would fetch real RSS feeds in unit tests.
   // Fallback-specific laws are covered in tests/adapters/fallback-providers.test.ts.
   return createBitgetAdapterSet({ mcp: mcp as never, rest: rest as never, fallbacks: false }).registry;
@@ -87,7 +87,7 @@ const baseRequest = {
   window: ["2026-09-13T06:00:00.000Z", "2026-09-13T12:00:00.000Z"] as const,
 };
 
-describe("Flow 1 — intent/target stub (M2 scope: narrow, structured; full LUI is M3)", () => {
+describe("Flow 1; intent/target stub (M2 scope: narrow, structured; full LUI is M3)", () => {
   beforeEach(() => resetIdCounters());
 
   it("resolves the target; window stays unresolved when not provided (no fabricated precision)", () => {
@@ -103,7 +103,7 @@ describe("Flow 1 — intent/target stub (M2 scope: narrow, structured; full LUI 
     expect(allCapabilities).toContain("TECHNICAL_ANALYSIS");
     expect(allCapabilities).toContain("NEWS_ANALYSIS");
     // capability-first: no skill or tool names leak into the plan (final lock §6/§11).
-    // (Tool names checked exactly — "TECHNICAL_ANALYSIS" is both a capability and the MCP tool
+    // (Tool names checked exactly; "TECHNICAL_ANALYSIS" is both a capability and the MCP tool
     // name, so a case-insensitive substring test would false-positive on the capability itself.)
     const toolNames = ["news_feed", "macro_indicators", "derivatives_sentiment", "crypto_market"];
     for (const capability of allCapabilities) {
@@ -118,7 +118,7 @@ describe("Flow 1 — intent/target stub (M2 scope: narrow, structured; full LUI 
   });
 });
 
-describe("Flow 1 — end-to-end with realistic Bitget fixtures (mocked transport)", () => {
+describe("Flow 1; end-to-end with realistic Bitget fixtures (mocked transport)", () => {
   beforeEach(() => resetIdCounters());
 
   it("executes the full path: request → target → plan → capabilities → evidence → claims → analysis → judgment → persistence → response", async () => {
@@ -171,7 +171,7 @@ describe("Flow 1 — end-to-end with realistic Bitget fixtures (mocked transport
     expect(outcome.judgment!.provenance[0]!.origin.kind).toBe("agent");
 
     // persistence: workspace saved and reloadable with the full graph (MemoryStore.load
-    // already returns a reconstructed Workspace — no manual re-hydration needed)
+    // already returns a reconstructed Workspace; no manual re-hydration needed)
     const restored = await env.store.load();
     expect(restored).toBeDefined();
     expect(restored!.listEvidence().length).toBe(env.workspace.listEvidence().length);
@@ -237,7 +237,7 @@ describe("Flow 1 — end-to-end with realistic Bitget fixtures (mocked transport
     expect(taExecution.evidenceIds).toHaveLength(0);
 
     const taEvidence = env.workspace.listEvidence().filter((e) => e.evidenceType === "TECHNICAL_ANALYSIS");
-    expect(taEvidence).toHaveLength(0); // failure created NO evidence — neither positive nor negative
+    expect(taEvidence).toHaveLength(0); // failure created NO evidence; neither positive nor negative
 
     // graceful insufficient-evidence completion with honest framing
     expect(outcome.completion).toBe("INSUFFICIENT_EVIDENCE");
@@ -358,7 +358,7 @@ describe("Flow 1 — end-to-end with realistic Bitget fixtures (mocked transport
       expect(["TECHNICAL_ANALYSIS", "NEWS_ANALYSIS", "SENTIMENT_ANALYSIS", "MARKET_DATA_ANALYSIS"]).toContain(execution.capability);
     }
     // the suggested_stop / verdict fields from the TA fixture never trigger any order-like object.
-    // (Key names checked exactly — "trader" is a legitimate provenance origin kind.)
+    // (Key names checked exactly; "trader" is a legitimate provenance origin kind.)
     const snapshot = env.workspace.toSnapshot();
     const serialized = JSON.stringify(snapshot).toLowerCase();
     const forbiddenObjectKeys = ["\"order\"", "\"placeorder\"", "\"trade\"", "\"execution\"", "\"position\""];

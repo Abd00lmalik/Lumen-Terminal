@@ -1,5 +1,5 @@
 /**
- * Capability registry — the capability-first seam between the research engine and providers.
+ * Capability registry; the capability-first seam between the research engine and providers.
  *
  * Architectural basis:
  * - tool-skill-orchestration.md §2.1 capability-before-tool, §4 TOOL model, §8 selection ranking,
@@ -7,7 +7,7 @@
  * - Final lock §6: provider-independent capability layer; Bitget-specific logic lives in adapters;
  *   the engine asks "what capability do I need?", never "which Bitget tool should I call?".
  * - Final lock §18: hardcoded Flow→Tool mappings are forbidden. This registry therefore has no
- *   flow keys — flows (M2) declare capability requirements, the registry resolves providers.
+ *   flow keys; flows (M2) declare capability requirements, the registry resolves providers.
  * - Final lock §4: G1 (historical data) and G2 (web retrieval) are interfaces + stubs until a
  *   vendor is selected. No invented data. On-chain gets no dedicated provider (lock §5).
  */
@@ -31,11 +31,11 @@ export type CapabilityName =
   | "FALSIFICATION"
   | "DERIVATIVES_ANALYSIS"
   | "CROSS_DOMAIN_SYNTHESIS"
-  | (string & {}); // extensible — new capabilities register without engine changes
+  | (string & {}); // extensible; new capabilities register without engine changes
 
 /**
  * The one interface every provider adapter satisfies. Adapters own transport, auth, throttling,
- * normalization, and classification — the engine never sees provider specifics.
+ * normalization, and classification; the engine never sees provider specifics.
  */
 export interface ProviderAdapter {
   readonly providerId: string; // e.g. "bitget-signal/news-briefing"
@@ -64,7 +64,7 @@ export class CapabilityRegistry {
     }
   }
 
-  /** All providers able to satisfy a capability, ranked. Selection may pick any — ranking is a hint, not a rule (orchestration §8: highest-ranked is not always selected). */
+  /** All providers able to satisfy a capability, ranked. Selection may pick any; ranking is a hint, not a rule (orchestration §8: highest-ranked is not always selected). */
   resolve(capability: CapabilityName): readonly Registration[] {
     return this.byCapability.get(capability) ?? [];
   }
@@ -112,7 +112,7 @@ export class CapabilityRegistry {
             limitations: [
               ...adapter.limitations,
               ...(input.limitations ?? []),
-              ...(servedAfterAttempts ? [`provider fallback: ${trailText} — research continued using ${adapter.providerId}`] : []),
+              ...(servedAfterAttempts ? [`provider fallback: ${trailText}; research continued using ${adapter.providerId}`] : []),
             ],
             ...(servedAfterAttempts ? { attemptedProviders: [...attempts] } : {}),
           },
@@ -120,7 +120,7 @@ export class CapabilityRegistry {
           at,
         );
         // Fallback law (provider-failover policy §4): a candidate "serves" only when it
-        // provides actual coverage — at least one output that is not an UNAVAILABLE
+        // provides actual coverage; at least one output that is not an UNAVAILABLE
         // diagnostic. NONE + empty coverage is INSUFFICIENT COVERAGE, not success: the
         // next provider gets a chance, and the empty result is preserved as lastFailure
         // so an all-empty outcome stays an honest EMPTY (never fabricated evidence).
@@ -162,12 +162,12 @@ export class CapabilityRegistry {
 }
 
 // ---------------------------------------------------------------------------
-// G1 — Historical market data: interface + stub. Vendor NOT selected (lock §4).
+// G1; Historical market data: interface + stub. Vendor NOT selected (lock §4).
 // ---------------------------------------------------------------------------
 
 export class NotConnectedError extends Error {
   constructor(providerId: string) {
-    super(`${providerId} is not connected: no vendor has been selected yet (final lock §4 — dependency documented in IMPLEMENTATION_PLAN.md §11). Do not fabricate data.`);
+    super(`${providerId} is not connected: no vendor has been selected yet (final lock §4; dependency documented in IMPLEMENTATION_PLAN.md §11). Do not fabricate data.`);
     this.name = "NotConnectedError";
   }
 }
@@ -203,7 +203,7 @@ export class HistoricalDataStub implements HistoricalDataProvider {
 }
 
 // ---------------------------------------------------------------------------
-// G2 — Web / primary-source retrieval: interface + stub. Vendor NOT selected (lock §4).
+// G2; Web / primary-source retrieval: interface + stub. Vendor NOT selected (lock §4).
 // Pipeline: DISCOVER → RETRIEVE → VALIDATE → EXTRACT → SOURCE → EVIDENCE (lock §4).
 // ---------------------------------------------------------------------------
 
@@ -219,7 +219,7 @@ export interface RetrievedSource {
   author?: string;
   publishedAt?: string;
   retrievedAt: string;
-  contentReference: string; // reference to retrieved content — snippets are not authoritative evidence
+  contentReference: string; // reference to retrieved content; snippets are not authoritative evidence
   sourceClass: string; // e.g. "primary/official-announcement", "secondary/news-report"
 }
 

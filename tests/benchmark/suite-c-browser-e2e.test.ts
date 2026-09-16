@@ -1,5 +1,5 @@
 /**
- * BENCHMARK SUITE C — BROWSER E2E through the REAL frontend + REAL API (env-gated).
+ * BENCHMARK SUITE C; BROWSER E2E through the REAL frontend + REAL API (env-gated).
  *
  * Run explicitly with both servers up:
  *   FREEBUFF_LIVE=1 FRONTEND_URL=http://localhost:5173 API_URL=http://127.0.0.1:3001 \
@@ -7,9 +7,9 @@
  *
  * Proves (BENCHMARK.md D11): user types a natural-language question into the REAL ask-bar →
  * the REAL API receives it → the REAL LUI/engine run → the REAL response renders in the DOM
- * with confidence/uncertainty visible. Uses CDP over the browser's built-in WebSocket —
+ * with confidence/uncertainty visible. Uses CDP over the browser's built-in WebSocket
  * no extra dependencies. Deterministic assertions about PRODUCT behavior; the research
- * outcome may be COMPLETED or honestly insufficient — both are passes; fabrication is not.
+ * outcome may be COMPLETED or honestly insufficient; both are passes; fabrication is not.
  *
  * When FREEBUFF_LIVE is unset the suite reports skipped (never a silent pass).
  */
@@ -27,7 +27,7 @@ interface CdpConn { send(method: string, params?: object): Promise<Record<string
 async function connectCdp(): Promise<{ conn: CdpConn; targetId: string }> {
   const list = (await (await fetch(`${CDP_URL}/json/list`)).json()) as { type: string; webSocketDebuggerUrl: string; id: string }[];
   const page = list.find((t) => t.type === "page");
-  if (!page) throw new Error(`no page target on ${CDP_URL} — start Chrome with --remote-debugging-port=9222`);
+  if (!page) throw new Error(`no page target on ${CDP_URL}; start Chrome with --remote-debugging-port=9222`);
   const ws = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise<void>((resolve, reject) => { ws.onopen = () => resolve(); ws.onerror = () => reject(new Error("cdp ws failed")); });
   let seq = 0;
@@ -85,7 +85,7 @@ describe.skipIf(!LIVE)("BENCH-C: browser E2E (real frontend → real API → rea
     }
     if (!hasInput) {
       const debug = String(await evaluate(conn, `document.body.innerText.slice(0, 400)`));
-      throw new Error(`ask-bar not found — page rendered: ${debug}`);
+      throw new Error(`ask-bar not found; page rendered: ${debug}`);
     }
 
     // Type the question and click the real submit control.
@@ -109,7 +109,7 @@ describe.skipIf(!LIVE)("BENCH-C: browser E2E (real frontend → real API → rea
       })()
     `);
 
-    // ANTI-FALSE-PASS: the research count on the backend must INCREASE — the submission
+    // ANTI-FALSE-PASS: the research count on the backend must INCREASE; the submission
     // must reach the real API before any rendered output can count as the answer.
     const before = Number(await evaluate(conn, `
       fetch('${API_URL}/api/research').then(r => r.json()).then(j => (j.research ?? j).length)
@@ -136,7 +136,7 @@ describe.skipIf(!LIVE)("BENCH-C: browser E2E (real frontend → real API → rea
       `)) ?? before;
       if (after > before) { submissionLanded = true; break; }
       // A typed failure/rejection renders its card without persisting a research object
-      // (quota exhaustion, invalid request) — that is an honest, truthful render too.
+      // (quota exhaustion, invalid request); that is an honest, truthful render too.
       if (FAILURE_RENDER.test(rendered) && /research/i.test(rendered)) break;
     }
     expect(submissionLanded || FAILURE_RENDER.test(rendered)).toBe(true);
@@ -150,7 +150,7 @@ describe.skipIf(!LIVE)("BENCH-C: browser E2E (real frontend → real API → rea
       if (ANSWER_RENDER.test(rendered) && /uncertain|limitation|evidence|failed/i.test(rendered)) { ok = true; break; }
       if (FAILURE_RENDER.test(rendered)) { ok = true; break; }
     }
-    // The product contract: an answer with epistemic framing rendered — or a truthful
+    // The product contract: an answer with epistemic framing rendered; or a truthful
     // failure state. Silence/error-page/fabricated numbers are failures.
     expect(ok).toBe(true);
     expect(rendered).not.toContain("Application error");

@@ -1,11 +1,11 @@
 /**
- * Flow 5 — HAS THIS HAPPENED BEFORE? (historical comparison).
+ * Flow 5; HAS THIS HAPPENED BEFORE? (historical comparison).
  *
  * Architectural basis: research-flows.md FLOW 5 + M6 audit law ("Do not fake, stub as
  * successful, or substitute Gemini background knowledge or current-data capabilities for
  * historical research").
  * - Historical comparison is defined by its OBJECT: past analogous episodes. Only the
- *   HISTORICAL_COMPARISON capability can satisfy it — that is the flow's analytical
+ *   HISTORICAL_COMPARISON capability can satisfy it; that is the flow's analytical
  *   definition, not Flow→Tool hardcoding (the capability resolves through the registry;
  *   today it resolves to the G1 stub, which throws NotConnectedError).
  * - Until a G1 vendor is selected (final lock §4), this flow therefore ends in HONEST
@@ -30,10 +30,10 @@ export const FLOW5_OBJECTIVE: FlowObjective = {
   flow: "HAS_THIS_HAPPENED_BEFORE",
   mode: "HISTORICAL",
   schedulerGuidance: [
-    "HISTORICAL MODE (Flow 5 — HAS THIS HAPPENED BEFORE?): the objective is genuine historical comparison.",
+    "HISTORICAL MODE (Flow 5; HAS THIS HAPPENED BEFORE?): the objective is genuine historical comparison.",
     "- Only the HISTORICAL_COMPARISON capability can produce historical-episode evidence. Plan ONLY tasks whose capabilities include HISTORICAL_COMPARISON.",
     "- NEVER plan current-data capabilities (NEWS_ANALYSIS, TECHNICAL_ANALYSIS, SENTIMENT_ANALYSIS, MARKET_DATA_ANALYSIS, MACRO_ANALYSIS, ONCHAIN_ANALYSIS) for this flow: a current reading is not a historical precedent, and dressing one up as comparison is fabrication.",
-    "- Model background knowledge is NOT historical evidence. If the historical capability is unavailable, the correct outcome is UNAVAILABLE/INSUFFICIENT_EVIDENCE — never a substitute answer.",
+    "- Model background knowledge is NOT historical evidence. If the historical capability is unavailable, the correct outcome is UNAVAILABLE/INSUFFICIENT_EVIDENCE; never a substitute answer.",
     "- PRIORITY: analogous episodes with defined outcome windows, similarity basis, and divergence conditions once historical data is available.",
   ].join("\n"),
 };
@@ -52,18 +52,23 @@ export interface Flow5Options {
   readonly asset?: string;
   /**
    * Historical query envelope override (tests / advanced use). Default: daily OHLCV for the
-   * resolved asset over a 3-year lookback ending today — a research-engine decision, never
+   * resolved asset over a 3-year lookback ending today; a research-engine decision, never
    * model-decided and never client-supplied.
    */
   readonly historicalWindow?: { from: string; to: string; interval?: string };
   readonly constraints?: readonly string[];
   readonly maxRounds?: number;
+  /**
+   * Wall-clock deadline for the whole run (epoch ms); forwarded to the shared flow runner's
+   * honest TIME_BUDGET_EXHAUSTED stop. Optional; tests omit it.
+   */
+  readonly deadlineMs?: number;
   readonly now?: () => Date;
 }
 
 export interface Flow5Result {
   readonly outcome: FlowOutcome;
-  /** Typed model failure — planning/decision failures never become historical findings. */
+  /** Typed model failure; planning/decision failures never become historical findings. */
   readonly modelFailure?: ModelFailure;
   readonly response: string;
   /** Structured episode analysis (API DTO seam): the deterministic CURRENT SETUP →
@@ -155,7 +160,7 @@ function chunkBoundsOf(observation: string): { count: number } {
     const parsed = JSON.parse(observation) as { candleCount?: unknown };
     if (typeof parsed.candleCount === "number") return { count: parsed.candleCount };
   } catch {
-    // malformed chunk — treated as zero-width by the analysis module anyway
+    // malformed chunk; treated as zero-width by the analysis module anyway
   }
   return { count: 0 };
 }
@@ -163,7 +168,7 @@ function chunkBoundsOf(observation: string): { count: number } {
 /**
  * Deterministic coverage summary of the retrieved historical record: window span, candle
  * count, and period extremes (min low / max high with their exact dates). Extremes are
- * arithmetic over retrieved observations — no interpretation, no fabrication.
+ * arithmetic over retrieved observations; no interpretation, no fabrication.
  */
 function historicalCoverageSummary(evidence: readonly { observation: string }[]): string | undefined {
   interface Candle {
@@ -234,6 +239,7 @@ export async function runFlow5(objective: string, options: Flow5Options): Promis
     ...(options.constraints !== undefined ? { constraints: options.constraints } : {}),
     capabilityParams: historicalQueryEnvelope(options.asset, options.historicalWindow, at()),
     ...(options.maxRounds !== undefined ? { maxRounds: options.maxRounds } : {}),
+    ...(options.deadlineMs !== undefined ? { deadlineMs: options.deadlineMs } : {}),
     ...(options.now !== undefined ? { now: options.now } : {}),
   }).catch((error: unknown) => ({ modelFailure: error instanceof ModelFailure ? error : new ModelFailure("INVALID_OUTPUT", String(error), false) }));
 
@@ -241,7 +247,7 @@ export async function runFlow5(objective: string, options: Flow5Options): Promis
     return {
       outcome: {
         researchId: research.id, flow: "HAS_THIS_HAPPENED_BEFORE", mode: "HISTORICAL",
-        plan: { objective, scopeIncluded: [], scopeExcluded: [], tasks: [], completionCriteria: [], adaptationPolicy: "n/a — planning failed" },
+        plan: { objective, scopeIncluded: [], scopeExcluded: [], tasks: [], completionCriteria: [], adaptationPolicy: "n/a; planning failed" },
         rounds: [], executions: [], hypotheses: [], evidence: [],
         finalDecision: { decision: "INSUFFICIENT_EVIDENCE", rationale: `research could not start: ${outcome.modelFailure.message}`, nextTasks: [] },
         stoppedBecause: "MODEL_FAILURE",
@@ -260,7 +266,7 @@ export async function runFlow5(objective: string, options: Flow5Options): Promis
   const { outcome: scoped, excludedCapabilities } = enforceHistoricalScope(outcome as FlowOutcome);
 
   // Deliberate analytical step (object model §8): every flow records a Judgment over its
-  // findings. Flow 5's judgment is DETERMINISTIC — coverage/similarity computed from the
+  // findings. Flow 5's judgment is DETERMINISTIC; coverage/similarity computed from the
   // retrieved record, never model sentiment, and it never reads as prediction.
   const analysis = analyzeRetrievedRecord(scoped.evidence);
   const judgmentInput = {
@@ -268,7 +274,7 @@ export async function runFlow5(objective: string, options: Flow5Options): Promis
     statement:
         analysis === undefined
           ? `HISTORICAL ANALOGY UNAVAILABLE for "${objective.slice(0, 120)}": no historical evidence could be retrieved (G1 unavailable), so no precedent can be established. This is a data availability condition, not a market finding.`
-          : `HISTORICAL ANALOGY for "${objective.slice(0, 120)}": ${analysis.matches.length} comparable historical episode(s) identified across ${scoped.evidence.length} retrieved monthly block(s). ${analysis.interpretiveNote} Historical precedent is evidence of what happened before — it does not establish recurrence and does not predict.`,
+          : `HISTORICAL ANALOGY for "${objective.slice(0, 120)}": ${analysis.matches.length} comparable historical episode(s) identified across ${scoped.evidence.length} retrieved monthly block(s). ${analysis.interpretiveNote} Historical precedent is evidence of what happened before; it does not establish recurrence and does not predict.`,
       basis: {
         supportingEvidence: scoped.evidence.map((e) => e.id),
         opposingEvidence: [],
@@ -277,13 +283,13 @@ export async function runFlow5(objective: string, options: Flow5Options): Promis
       },
       ...(analysis !== undefined && analysis.matches.length > 0 ? { confidence: "MODERATE" as const } : { confidence: "LOW" as const }),
       uncertainty: [
-        "similarity is computed from the retrieved price/volume record only — no fundamental context",
+        "similarity is computed from the retrieved price/volume record only; no fundamental context",
         "historical precedent does not establish that a similar outcome follows",
         ...(scoped.stoppedBecause !== "EVIDENCE_SUFFICIENT" ? [`research ended early (${scoped.stoppedBecause})`] : []),
       ],
       unresolvedQuestions:
         analysis !== undefined && analysis.matches.length === 0
-          ? ["no comparable episodes met the similarity threshold — is the current setup genuinely novel, or is the feature comparison too narrow?"]
+          ? ["no comparable episodes met the similarity threshold; is the current setup genuinely novel, or is the feature comparison too narrow?"]
           : [],
       implications: ["historical precedent informs context; it does not recommend", "no trading action follows from this research"],
   };

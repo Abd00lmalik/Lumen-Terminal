@@ -8,7 +8,7 @@ related: [lui-monitor-action.md, lui-save-action.md, framework.md, memory.md]
 
 **Related documents:** `lui-monitor-action.md` · `lui-save-action.md` · `framework.md` · `memory.md`
 
-> Converted from `SAFETY & DECISION BOUNDARY INTELLIG.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `SAFETY & DECISION BOUNDARY INTELLIG.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 SAFETY & DECISION BOUNDARY INTELLIGENCE
 

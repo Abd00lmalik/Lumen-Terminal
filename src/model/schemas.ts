@@ -1,16 +1,16 @@
 /**
- * Schemas — the validated structured-output contracts between the model and the system (M3 §6).
+ * Schemas; the validated structured-output contracts between the model and the system (M3 §6).
  *
  * Architectural basis:
  * - M3 §6: "Do not rely on free-form model text for machine-critical routing." Every schema here
  *   is validated by `validateModelOutput` before the LUI or engine acts on it. Invalid output is
- *   a model/interpretation failure — never an execution command.
+ *   a model/interpretation failure; never an execution command.
  * - M3 §4/§5: the six LUI actions (RESEARCH/ANALYZE/CHALLENGE/MANAGE_STATE/MONITOR/SAVE) come
  *   from the locked architecture (lui-universal-core.md + lui-flow-extensions.md amendment).
  *   Model outputs PROPOSE; the LUI validates, checks ambiguity/consequence, and the engine
  *   executes. The model never dispatches directly.
  * - M3 §9: context objects keep their epistemic classes; schemas here never let the model
- *   upgrade interpretation → fact — the model can only REFERENCE evidence/objects.
+ *   upgrade interpretation → fact; the model can only REFERENCE evidence/objects.
  */
 
 import { validateModelOutput, type OutputSchema } from "./provider.js";
@@ -58,7 +58,7 @@ export type ConsequenceLevel = "INFORMATIONAL" | "STATE_MUTATION" | "CONSEQUENTI
 // Schemas
 // ---------------------------------------------------------------------------
 
-/** 1. Request understanding — the first model call for every user message (M3 §5). */
+/** 1. Request understanding; the first model call for every user message (M3 §5). */
 export interface NormalizedRequest {
   readonly primaryAction: LuiAction;
   /** Secondary/dependent actions for compound requests, in execution order (M3 §12). */
@@ -75,24 +75,24 @@ export const NORMALIZED_REQUEST_SCHEMA: OutputSchema = {
   name: "lui.normalized_request",
   properties: {
     primaryAction: "string",
-    compoundActions: "record[]", // array of {action, purpose} — shape-checked by parseNormalizedRequest
+    compoundActions: "record[]", // array of {action, purpose}; shape-checked by parseNormalizedRequest
     objective: "string",
     isExplanationOnly: "boolean",
     disclosureLevel: "number",
   },
   // A simple (non-compound) request legitimately has no compound steps; models express that by
-  // omitting the key. parseNormalizedRequest defaults it to [] — absence is an empty list.
+  // omitting the key. parseNormalizedRequest defaults it to []; absence is an empty list.
   optional: ["compoundActions"],
 };
 
-/** 2. Context/target resolution — what the request is about (M3 §5/§13). */
+/** 2. Context/target resolution; what the request is about (M3 §5/§13). */
 export interface ResolvedTarget {
   readonly asset?: string;
   readonly flow?: ResearchFlow;
   readonly researchRef?: string;
   /** Other object references the request targets (claims, judgments, hypotheses…). */
   readonly objectRefs: readonly string[];
-  /** What could not be resolved from context — feeds the ambiguity check (never invented). */
+  /** What could not be resolved from context; feeds the ambiguity check (never invented). */
   readonly unresolved: readonly string[];
 }
 
@@ -107,7 +107,7 @@ export const RESOLVED_TARGET_SCHEMA: OutputSchema = {
   },
   // asset/flow/researchRef are genuinely optional in the domain type: a fresh workspace has
   // no research to reference and not every request names an asset or maps to a flow. The
-  // LUI normalizes absent values (validateTarget drops empty/undefined) — the live model
+  // LUI normalizes absent values (validateTarget drops empty/undefined); the live model
   // correctly omitted `researchRef` for a brand-new workspace, which the old all-required
   // schema wrongly rejected (masked by deterministic fakes that always sent every key).
   optional: ["asset", "flow", "researchRef"],
@@ -135,7 +135,7 @@ export const AMBIGUITY_SCHEMA: OutputSchema = {
 export interface ConsequenceAssessment {
   readonly level: ConsequenceLevel;
   readonly rationale: string;
-  /** True for SAVE/MONITOR/thesis-change — persistent or consequential per architecture. */
+  /** True for SAVE/MONITOR/thesis-change; persistent or consequential per architecture. */
   readonly requiresConfirmation: boolean;
 }
 
@@ -148,10 +148,10 @@ export const CONSEQUENCE_SCHEMA: OutputSchema = {
   },
 };
 
-/** 5. Action plan — the LUI's validated execution plan (M3 §5 ARCHITECTURE DISPATCH input). */
+/** 5. Action plan; the LUI's validated execution plan (M3 §5 ARCHITECTURE DISPATCH input). */
 export interface PlannedStep {
   readonly action: LuiAction;
-  /** Human-readable statement of what this step does (exposed, auditable — no hidden CoT). */
+  /** Human-readable statement of what this step does (exposed, auditable; no hidden CoT). */
   readonly description: string;
   /** Capability requirements this step needs (capability-first; registry resolves providers). */
   readonly capabilities: readonly string[];
@@ -173,7 +173,7 @@ export const ACTION_PLAN_SCHEMA: OutputSchema = {
   },
 };
 
-/** 6. Research plan — model-PROPOSED, engine-executed (M3 §7). Capabilities, never providers. */
+/** 6. Research plan; model-PROPOSED, engine-executed (M3 §7). Capabilities, never providers. */
 export interface ProposedResearchPlan {
   readonly objective: string;
   readonly scopeIncluded: readonly string[];
@@ -181,7 +181,7 @@ export interface ProposedResearchPlan {
   readonly tasks: readonly {
     readonly type: string;
     readonly objective: string;
-    /** CAPABILITY names only — hardcoding provider/tool here is forbidden (final lock §6/§11). */
+    /** CAPABILITY names only; hardcoding provider/tool here is forbidden (final lock §6/§11). */
     readonly capabilities: readonly string[];
     readonly completion: string;
   }[];
@@ -201,7 +201,7 @@ export const RESEARCH_PLAN_SCHEMA: OutputSchema = {
   },
 };
 
-/** 7. Adaptive decision — continue or complete the living loop (M3 §8). */
+/** 7. Adaptive decision; continue or complete the living loop (M3 §8). */
 export interface AdaptiveDecision {
   readonly decision: "CONTINUE" | "COMPLETE" | "INSUFFICIENT_EVIDENCE";
   /** Information-value rationale (progressive-disclosure.md §56/§57 vocabulary). */
@@ -229,12 +229,12 @@ export interface ModelAnalysis {
   readonly conclusion: string;
   /** What the evidence shows to support the conclusion (observable reasons only). */
   readonly supportingReasons: readonly string[];
-  /** Strongest opposition/contradiction — required to be present when context has any. */
+  /** Strongest opposition/contradiction; required to be present when context has any. */
   readonly opposingReasons: readonly string[];
   readonly uncertainty: readonly string[];
-  /** What would change the conclusion — derived from research, not invented (§35). */
+  /** What would change the conclusion; derived from research, not invented (§35). */
   readonly whatWouldChange: readonly string[];
-  /** Evidence/object ids the reasons rest on — validated against the workspace (no fake citations). */
+  /** Evidence/object ids the reasons rest on; validated against the workspace (no fake citations). */
   readonly citedObjectRefs: readonly string[];
 }
 
@@ -251,7 +251,7 @@ export const ANALYSIS_SCHEMA: OutputSchema = {
   },
 };
 
-/** 9. CHALLENGE result — falsification-oriented, not generic criticism (M3 §16). */
+/** 9. CHALLENGE result; falsification-oriented, not generic criticism (M3 §16). */
 export interface ChallengeResult {
   readonly targetedStatement: string;
   readonly vulnerableAssumptions: readonly string[];
@@ -277,7 +277,7 @@ export const CHALLENGE_SCHEMA: OutputSchema = {
   },
 };
 
-/** 10. Thesis assessment — evidence vs the trader's thesis; never a rewrite (M3 §15). */
+/** 10. Thesis assessment; evidence vs the trader's thesis; never a rewrite (M3 §15). */
 export interface ThesisAssessment {
   readonly thesisStatusAssessment: "SUPPORTED" | "MIXED" | "CONTESTED" | "INSUFFICIENT_EVIDENCE";
   readonly supportingEvidenceRefs: readonly string[];
@@ -301,7 +301,7 @@ export const THESIS_ASSESSMENT_SCHEMA: OutputSchema = {
   },
 };
 
-/** 11. Monitoring contract — conditions identified only; activation is confirmed (M3 §18). */
+/** 11. Monitoring contract; conditions identified only; activation is confirmed (M3 §18). */
 export interface MonitorProposal {
   readonly conditions: readonly string[];
   readonly invalidationConditions: readonly string[];
@@ -323,7 +323,7 @@ export const MONITOR_SCHEMA: OutputSchema = {
   },
 };
 
-/** 12. SAVE content — what the trader asked to persist (M3 §17). Confirmation required. */
+/** 12. SAVE content; what the trader asked to persist (M3 §17). Confirmation required. */
 export interface SaveProposal {
   readonly artifactType: string;
   readonly content: string;
@@ -342,7 +342,7 @@ export const SAVE_SCHEMA: OutputSchema = {
   },
 };
 
-/** 13. MANAGE_STATE change — working-state mutation proposal (M3 §17). */
+/** 13. MANAGE_STATE change; working-state mutation proposal (M3 §17). */
 export interface StateChangeProposal {
   readonly changeType: string;
   readonly description: string;
@@ -360,7 +360,7 @@ export const STATE_CHANGE_SCHEMA: OutputSchema = {
   },
 };
 
-/** 14. Safety screen — runs on every plan before dispatch (M3 §14). */
+/** 14. Safety screen; runs on every plan before dispatch (M3 §14). */
 export interface SafetyScreen {
   readonly isExecutionCommand: boolean;
   readonly detectedViolations: readonly string[];
@@ -376,7 +376,7 @@ export const SAFETY_SCHEMA: OutputSchema = {
   },
 };
 
-/** 15. Final response — concise default per progressive-disclosure.md §5 (M3 §11). */
+/** 15. Final response; concise default per progressive-disclosure.md §5 (M3 §11). */
 export interface FinalResponse {
   readonly answer: string;
   readonly supportingReasons: readonly string[]; // 2–4 strongest
@@ -384,7 +384,7 @@ export interface FinalResponse {
   readonly confidence: "HIGH" | "MODERATE" | "LOW" | "UNKNOWN";
   readonly keyUncertainty: string;
   readonly implication: string;
-  /** Object refs backing statements — validated against the workspace before display. */
+  /** Object refs backing statements; validated against the workspace before display. */
   readonly citedObjectRefs: readonly string[];
 }
 
@@ -407,7 +407,7 @@ export const FINAL_RESPONSE_SCHEMA: OutputSchema = {
 
 export class ActionClassificationError extends Error {
   constructor(value: string) {
-    super(`model proposed unknown LUI action "${value}" — must be one of ${LUI_ACTIONS.join(", ")}`);
+    super(`model proposed unknown LUI action "${value}"; must be one of ${LUI_ACTIONS.join(", ")}`);
     this.name = "ActionClassificationError";
   }
 }
@@ -421,13 +421,13 @@ export function parseLuiAction(value: string): LuiAction {
 export function parseResearchFlow(value: string): ResearchFlow {
   const flow = RESEARCH_FLOWS.find((f) => f === value);
   if (flow === undefined) {
-    throw new Error(`model proposed unknown research flow "${value}" — must be one of ${RESEARCH_FLOWS.join(", ")}`);
+    throw new Error(`model proposed unknown research flow "${value}"; must be one of ${RESEARCH_FLOWS.join(", ")}`);
   }
   return flow;
 }
 
 // ---------------------------------------------------------------------------
-// Typed parse helpers — validate + shape-check compound structures
+// Typed parse helpers; validate + shape-check compound structures
 // ---------------------------------------------------------------------------
 
 /** Validate and shape-check `NormalizedRequest` (including the compoundActions array). */

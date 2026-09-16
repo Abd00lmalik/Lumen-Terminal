@@ -8,7 +8,7 @@ related: [tool-skill-orchestration.md, source-intelligence.md]
 
 **Related documents:** `tool-skill-orchestration.md` · `source-intelligence.md`
 
-> Converted from `DATA & MARKET INTELLIGENCE LAYER.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `DATA & MARKET INTELLIGENCE LAYER.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 DATA & MARKET INTELLIGENCE LAYER
 

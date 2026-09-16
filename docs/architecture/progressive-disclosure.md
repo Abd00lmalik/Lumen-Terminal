@@ -8,7 +8,7 @@ related: [workspace-presentation.md, judgment-confidence.md]
 
 **Related documents:** `workspace-presentation.md` · `judgment-confidence.md`
 
-> Converted from `PROGRESSIVE DISCLOSURE & EXPLAINABI.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `PROGRESSIVE DISCLOSURE & EXPLAINABI.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 PROGRESSIVE DISCLOSURE & EXPLAINABILITY INTELLIGENCE
 
@@ -157,17 +157,17 @@ The exact evidence comes from the underlying research state.
 The system should support explicit explanation levels.
 
 ```text
-LEVEL 0 — ANSWER
-LEVEL 1 — WHY
-LEVEL 2 — EVIDENCE
-LEVEL 3 — RESEARCH STRUCTURE
-LEVEL 4 — TRACEABILITY
-LEVEL 5 — FULL HISTORY
+LEVEL 0; ANSWER
+LEVEL 1; WHY
+LEVEL 2; EVIDENCE
+LEVEL 3; RESEARCH STRUCTURE
+LEVEL 4; TRACEABILITY
+LEVEL 5; FULL HISTORY
 ```
 
 ---
 
-# 7. Level 0 — Answer
+# 7. Level 0; Answer
 
 The trader receives only the current conclusion.
 
@@ -183,7 +183,7 @@ Useful for quick interactions.
 
 ---
 
-# 8. Level 1 — Why
+# 8. Level 1; Why
 
 Adds the principal reasons.
 
@@ -200,7 +200,7 @@ Confidence: Moderate.
 
 ---
 
-# 9. Level 2 — Evidence
+# 9. Level 2; Evidence
 
 Adds specific evidence behind the reasons.
 
@@ -219,7 +219,7 @@ Why:
 
 ---
 
-# 10. Level 3 — Research Structure
+# 10. Level 3; Research Structure
 
 Adds:
 
@@ -251,7 +251,7 @@ Unresolved:
 
 ---
 
-# 11. Level 4 — Traceability
+# 11. Level 4; Traceability
 
 Adds:
 
@@ -267,7 +267,7 @@ The trader can inspect exactly where a conclusion originated.
 
 ---
 
-# 12. Level 5 — Full History
+# 12. Level 5; Full History
 
 Provides the deepest available research history:
 

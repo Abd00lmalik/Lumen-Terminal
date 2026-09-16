@@ -2,7 +2,7 @@
  * Research engine shell (M0).
  *
  * Architectural basis: research-execution-engine.md, tool-skill-orchestration.md §41.
- * M0 ships only the capability-first routing seam — flows (Flow 1 in M2), LUI (M3), and
+ * M0 ships only the capability-first routing seam; flows (Flow 1 in M2), LUI (M3), and
  * transports (M1) are deliberately not implemented here. The engine asks "what capability?",
  * the registry resolves providers, and results are returned as normalized TOOL_RESULTs for
  * evidence ingestion. It performs no evidence fabrication and owns no truth.

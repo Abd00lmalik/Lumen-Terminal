@@ -70,7 +70,7 @@ const COMPLETE = responses.adaptiveDecision("COMPLETE");
 
 beforeEach(() => resetIdCounters());
 
-describe("Flow 2 — WHY DID IT HAPPEN? (causal investigation)", () => {
+describe("Flow 2; WHY DID IT HAPPEN? (causal investigation)", () => {
   it("runs end-to-end: event definition, hypotheses, synthesis, judgment with causal status", async () => {
     const { provider, registry, workspace, store } = setup([
       ["research.plan", RESEARCH_PLAN],
@@ -96,7 +96,7 @@ describe("Flow 2 — WHY DID IT HAPPEN? (causal investigation)", () => {
     expect(result.response).toContain("**Confidence:**");
   });
 
-  it("invented citations are dropped — no fabricated evidence (M4 §28)", async () => {
+  it("invented citations are dropped; no fabricated evidence (M4 §28)", async () => {
     const { provider, registry, workspace, store } = setup([
       ["research.plan", RESEARCH_PLAN],
       ["research.adaptive_decision", COMPLETE],
@@ -133,7 +133,7 @@ describe("Flow 2 — WHY DID IT HAPPEN? (causal investigation)", () => {
     expect(judgment?.statement).toContain("correlation is not asserted as causation");
   });
 
-  it("invalid causal status rejected — no silent coercion", async () => {
+  it("invalid causal status rejected; no silent coercion", async () => {
     const { provider, registry, workspace, store } = setup([
       ["research.plan", RESEARCH_PLAN],
       ["research.adaptive_decision", COMPLETE],
@@ -219,5 +219,24 @@ describe("Flow 2 — WHY DID IT HAPPEN? (causal investigation)", () => {
       expect(evidence.toolResultRef).toBeTruthy();
       expect(evidence.provenance.length).toBeGreaterThan(0); // provenance = ordered entry array
     }
+  });
+
+  // Honest time budget: a crossed deadline stops the loop with TIME_BUDGET_EXHAUSTED (never a
+  // model failure, never fabricated content) and the evidence gathered so far is preserved.
+  it("crossed deadline stops the loop honestly with TIME_BUDGET_EXHAUSTED and preserves gathered evidence", async () => {
+    const { provider, registry, workspace, store } = setup([
+      ["research.plan", RESEARCH_PLAN],
+      // Round 1 decides CONTINUE (so the loop re-enters); the deadline then stops round 2.
+      ["research.adaptive_decision", responses.adaptiveDecision("CONTINUE", [{ objective: "more news", capabilities: ["NEWS_ANALYSIS"], completion: "more coverage" }])],
+      ["flow2.causal_synthesis", causalSynthesis()],
+    ]);
+    const result = await runFlow2("Why did BTC drop today?", {
+      provider, registry, workspace, store, asset: "BTC",
+      deadlineMs: Date.now() - 1, // already crossed before round 1's decision
+    });
+    expect(result.modelFailure).toBeUndefined();
+    expect(result.outcome.stoppedBecause).toBe("TIME_BUDGET_EXHAUSTED");
+    expect(result.outcome.evidence.length).toBeGreaterThan(0); // partial truth is preserved
+    expect(workspace.getResearch(result.outcome.researchId)?.status).toBe("COMPLETED");
   });
 });

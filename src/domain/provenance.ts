@@ -1,10 +1,10 @@
 /**
- * Provenance — where information came from and how it entered the system.
+ * Provenance; where information came from and how it entered the system.
  *
  * Architectural basis:
  * - docs/architecture/research-object-model.md §21 (provenance traversal: Judgment → Hypothesis →
  *   Claim → Evidence → Source must be followable without reconstructing reasoning).
- * - tool-skill-orchestration.md §37 (credentials stay out of research objects — this type carries
+ * - tool-skill-orchestration.md §37 (credentials stay out of research objects; this type carries
  *   references, never secrets) and §38 (material tool results preserve tool/provider/time/inputs).
  */
 

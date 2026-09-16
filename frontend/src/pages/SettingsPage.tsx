@@ -1,5 +1,5 @@
 /**
- * Settings — visual preferences (local only) plus REAL server status from /api/health.
+ * Settings; visual preferences (local only) plus REAL server status from /api/health.
  * Provider info is informational: keys live server-side and are never displayed,
  * entered, or stored in the browser. No fake settings are presented as functional.
  */
@@ -84,14 +84,14 @@ export function SettingsPage() {
           <div style={{ display: "flex", alignItems: "center", gap: "var(--gap-4)", padding: "10px 0", borderBottom: "1px dashed var(--line)" }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13.5, fontWeight: 600, fontFamily: "var(--font-ui)" }}>API process</div>
-              <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>Reports process availability only — it never claims provider health or live monitoring.</div>
+              <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>Reports process availability only; it never claims provider health or live monitoring.</div>
             </div>
             {health !== undefined ? <StatusBadge status="OK" /> : <StatusBadge status={healthError !== undefined ? "UNAVAILABLE" : "…"} />}
           </div>
           {healthError !== undefined && <BackendDownNote error={healthError} />}
           {health !== undefined && (
             <>
-              <KV k="api" v={health.api ?? "—"} />
+              <KV k="api" v={health.api ?? ""} />
               {health.note !== undefined && <KV k="scope" v={health.note} />}
             </>
           )}
@@ -146,7 +146,7 @@ export function SettingsPage() {
         <Panel kicker="workspace & data" title="Workspace">
           <div className="panel-body" style={{ paddingTop: 4 }}>
             <Row title="Workspace" hint="Active research context">
-              <span className="badge gray">Q4 · BTC/ETH</span>
+              <span className="badge gray">Default workspace</span>
             </Row>
             <Row title="Data sources" hint="Capability routing stays provider-neutral">
               <span className="badge gray">Bitget-first</span>
@@ -170,7 +170,7 @@ export function SettingsPage() {
 
         <Panel kicker="privacy & about" title="Data & product">
           <div className="panel-body" style={{ paddingTop: 4 }}>
-            <KV k="research scope" v="research only — no execution, ever" />
+            <KV k="research scope" v="research only; no execution, ever" />
             <KV k="telemetry" v="none" />
             <KV k="build" v="Lumen Terminal · hackathon prototype" />
             <KV k="data status" v="live research data from your workspace" />

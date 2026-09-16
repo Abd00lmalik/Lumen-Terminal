@@ -1,5 +1,5 @@
 /**
- * LIVE endpoint validation — M2 (real Bitget endpoints, no mocks).
+ * LIVE endpoint validation; M2 (real Bitget endpoints, no mocks).
  *
  * Run explicitly:  FREEBUFF_LIVE=1 npx vitest run tests/research/flow1.live.test.ts
  * Skipped by default so `npm test` stays deterministic and hermetic.
@@ -8,7 +8,7 @@
  * endpoints; do not rely exclusively on mocks." They are NON-FABRICATING by construction:
  * - assertions tolerate the live conditions DISCOVERED on 2026-09-13 (news upstream empty,
  *   REST unreachable from this environment) and record them rather than inventing data;
- * - a failed capability produces a failed TOOL_RESULT — the test asserts on the FAILURE
+ * - a failed capability produces a failed TOOL_RESULT; the test asserts on the FAILURE
  *   RECORDING, never on invented content;
  * - whatever evidence the live run produces flows through the same pipeline as production.
  */
@@ -99,7 +99,7 @@ d("Flow 1 LIVE validation (real Bitget endpoints)", () => {
       { registry, workspace, store },
     );
 
-    // The pipeline always produces the full research structure — whatever the data conditions.
+    // The pipeline always produces the full research structure; whatever the data conditions.
     expect(workspace.listResearch()).toHaveLength(1);
     expect(workspace.listClaims().length).toBe(2);
     expect(workspace.listAnalyses()).toHaveLength(1);

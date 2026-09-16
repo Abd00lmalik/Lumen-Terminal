@@ -1,8 +1,8 @@
 /**
- * Challenge / falsification — REAL Flow-7 surface: hypotheses from the workspace
+ * Challenge / falsification; REAL Flow-7 surface: hypotheses from the workspace
  * (the engine's competing explanations and falsification targets), recorded
  * contradictions, and what the latest assessment says would change the judgment.
- * "Nothing found" is rendered honestly — never manufactured opposition.
+ * "Nothing found" is rendered honestly; never manufactured opposition.
  */
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -39,7 +39,7 @@ export function ChallengePage() {
         <h1 className="page-title">What could prove this wrong?</h1>
         <p className="page-sub">
           Disconfirming evidence the engine actually found against your active belief. Scrutiny
-          here is routine maintenance for a thesis — not an alarm.
+          here is routine maintenance for a thesis; not an alarm.
         </p>
       </div>
 
@@ -47,7 +47,7 @@ export function ChallengePage() {
 
       {loaded && error === undefined && challenge !== undefined && (
         <>
-          <Panel kicker="belief under challenge" title="The trader's belief — evaluated, never rewritten"
+          <Panel kicker="belief under challenge" title="The trader's belief; evaluated, never rewritten"
             right={<button className="btn sm ghost" onClick={() => navigate("/thesis")}>thesis workspace →</button>}>
             <div className="panel-body answer-card" style={{ borderLeft: "none" }}>
               <p style={{ margin: 0, fontSize: 14, lineHeight: 1.65 }}>{challenge.belief}</p>
@@ -62,7 +62,7 @@ export function ChallengePage() {
               {challenge.falsificationTargets.length === 0 && (
                 <Empty
                   title="No hypotheses to challenge yet"
-                  hint='Run research first — e.g. "Challenge my thesis" produces falsification targets and disconfirming evidence.'
+                  hint='Run research first; e.g. "Challenge my thesis" produces falsification targets and disconfirming evidence.'
                 />
               )}
               {challenge.falsificationTargets.map((t, i) => (
@@ -88,7 +88,7 @@ export function ChallengePage() {
                     )}
                     {t.found === "NONE_FOUND" && (
                       <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-3)" }}>
-                        no credible contradictory evidence found — recorded honestly, not treated as proof
+                        no credible contradictory evidence found; recorded honestly, not treated as proof
                       </div>
                     )}
                   </div>
@@ -115,7 +115,7 @@ export function ChallengePage() {
             <Panel kicker="decision relevance" title="What would change the judgment">
               <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {challenge.whatWouldChange.length === 0 && (
-                  <span style={{ fontSize: 12.5, color: "var(--text-3)" }}>nothing recorded yet — an assessment will fill this</span>
+                  <span style={{ fontSize: 12.5, color: "var(--text-3)" }}>nothing recorded yet; an assessment will fill this</span>
                 )}
                 {challenge.whatWouldChange.map((w, i) => (
                   <div key={i} style={{ display: "flex", gap: 10, fontSize: 13 }}>

@@ -1,5 +1,5 @@
 /**
- * Workspace service — session bootstrap and the continuity snapshot (the safe
+ * Workspace service; session bootstrap and the continuity snapshot (the safe
  * backend representation of current state: active research/thesis/judgment,
  * recent evidence, hypotheses, artifacts, memory, monitors).
  */

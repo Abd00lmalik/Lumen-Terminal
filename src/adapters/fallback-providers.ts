@@ -1,19 +1,19 @@
 /**
- * Capability-level fallback providers — the REGISTRY owns selection (never flow→tool).
+ * Capability-level fallback providers; the REGISTRY owns selection (never flow→tool).
  *
  * Mandate §3: Bitget stays PRIMARY for every capability; these adapters register at LOWER
  * priority so the registry's existing failover loop (`resolve()` ordering → first success)
  * reaches them only when the primary fails/unavailable. Every fallback:
  * - preserves full provenance (tool id, transport, raw capture, retrieval time),
  * - classifies outputs epistemically (FACTUAL_OBSERVATION for reportable facts,
- *   SENTIMENT_SIGNAL only for real sentiment indices — with an explicit proxyBasis),
- * - states exactly what it provides — it never invents funding/OI/positioning data,
+ *   SENTIMENT_SIGNAL only for real sentiment indices; with an explicit proxyBasis),
+ * - states exactly what it provides; it never invents funding/OI/positioning data,
  * - treats retrieval failure as a technical condition, never negative evidence.
  *
  * Sources chosen for keyless reliability (live-probed 2026-09-16 from this network):
  * - NEWS: CoinDesk RSS + Cointelegraph RSS (public feeds; secondary reporting by default).
  * - SENTIMENT: alternative.me Fear & Greed Index (public JSON, no key).
- * - MACRO: World Bank API (official indicators; keyless; low-frequency — labeled STALE).
+ * - MACRO: World Bank API (official indicators; keyless; low-frequency; labeled STALE).
  */
 import type { ProviderAdapter, CapabilityName } from "./capability-registry.js";
 import type { ToolResultInput, ToolOutput } from "../domain/tool-result.js";
@@ -21,7 +21,7 @@ import { RestTransport } from "./transports/rest.js";
 import { RawCapture } from "./transports/resilience.js";
 
 // ---------------------------------------------------------------------------
-// Shared RSS helpers (feeds are XML — the JSON-only RestTransport cannot parse them)
+// Shared RSS helpers (feeds are XML; the JSON-only RestTransport cannot parse them)
 // ---------------------------------------------------------------------------
 
 const XML_TITLE = /<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/;
@@ -64,7 +64,7 @@ async function fetchFeedXml(
 }
 
 // ---------------------------------------------------------------------------
-// NEWS fallback — public crypto RSS feeds. Each item carries publisher + timestamp + url;
+// NEWS fallback; public crypto RSS feeds. Each item carries publisher + timestamp + url;
 // reporting is SECONDARY by default (G2's classification law applied at this layer).
 // ---------------------------------------------------------------------------
 
@@ -77,7 +77,7 @@ export class NewsFallbackAdapter implements ProviderAdapter {
   readonly providerId = "fallback/news-rss";
   readonly capabilities: readonly CapabilityName[] = ["NEWS_ANALYSIS"];
   readonly limitations: readonly string[] = [
-    "fallback provider: public crypto RSS feeds (CoinDesk/Cointelegraph) — secondary reporting, not primary sources",
+    "fallback provider: public crypto RSS feeds (CoinDesk/Cointelegraph); secondary reporting, not primary sources",
     "headline-level aggregation; per-feed errors skip that feed (completeness may be PARTIAL)",
     "retrieval failure is a technical condition, never negative evidence",
   ];
@@ -150,9 +150,9 @@ export class NewsFallbackAdapter implements ProviderAdapter {
 }
 
 // ---------------------------------------------------------------------------
-// SENTIMENT fallback — alternative.me Fear & Greed Index (public, keyless).
+// SENTIMENT fallback; alternative.me Fear & Greed Index (public, keyless).
 // Provides ONLY the index: a real sentiment proxy (SENTIMENT_SIGNAL + proxyBasis).
-// Does NOT provide funding/OI/positioning — never invented.
+// Does NOT provide funding/OI/positioning; never invented.
 // ---------------------------------------------------------------------------
 
 interface FngResponse {
@@ -163,7 +163,7 @@ export class SentimentFallbackAdapter implements ProviderAdapter {
   readonly providerId = "fallback/fear-greed";
   readonly capabilities: readonly CapabilityName[] = ["SENTIMENT_ANALYSIS"];
   readonly limitations: readonly string[] = [
-    "fallback provider: alternative.me Fear & Greed Index only — a market sentiment proxy",
+    "fallback provider: alternative.me Fear & Greed Index only; a market sentiment proxy",
     "does NOT provide funding, open interest, liquidations, or trader positioning (never invented)",
     "daily-updated index; not intra-day sentiment",
   ];
@@ -225,8 +225,8 @@ export class SentimentFallbackAdapter implements ProviderAdapter {
 }
 
 // ---------------------------------------------------------------------------
-// MACRO fallback — World Bank official indicators (keyless, authoritative, annual lag).
-// Freshness is honestly STALE — low-frequency official data is never labeled CURRENT.
+// MACRO fallback; World Bank official indicators (keyless, authoritative, annual lag).
+// Freshness is honestly STALE; low-frequency official data is never labeled CURRENT.
 // ---------------------------------------------------------------------------
 
 interface WbResponse {
@@ -237,7 +237,7 @@ export class MacroFallbackAdapter implements ProviderAdapter {
   readonly providerId = "fallback/world-bank";
   readonly capabilities: readonly CapabilityName[] = ["MACRO_ANALYSIS"];
   readonly limitations: readonly string[] = [
-    "fallback provider: World Bank official indicators (US CPI inflation, US GDP growth) — authoritative but low-frequency (annual lag)",
+    "fallback provider: World Bank official indicators (US CPI inflation, US GDP growth); authoritative but low-frequency (annual lag)",
     "NOT real-time macro data; monthly-frequency releases are out of coverage",
     "crypto-relevant market macro (DXY, VIX, yields) is NOT provided",
   ];

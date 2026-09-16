@@ -1,7 +1,7 @@
 /**
- * BENCHMARK SUITE B — LIVE natural-language → flow → capability benchmark (env-gated).
+ * BENCHMARK SUITE B; LIVE natural-language → flow → capability benchmark (env-gated).
  *
- * Run explicitly (quota-aware — the free tier is ~20 requests/day/model and each research
+ * Run explicitly (quota-aware; the free tier is ~20 requests/day/model and each research
  * scenario costs several model calls, so scenarios are individually selectable):
  *
  *   FREEBUFF_LIVE=1 npx vitest run tests/benchmark/suite-b-live.test.ts                 # all
@@ -15,7 +15,7 @@
  *
  * Proves the REAL product path: varied natural-language question → REAL Gemini LUI
  * interpretation → flow dispatch → REAL Bitget capability execution (MCP hub) → evidence →
- * response. Pass criteria per scenario: the system reaches the CORRECT EPISTEMIC OUTCOME —
+ * response. Pass criteria per scenario: the system reaches the CORRECT EPISTEMIC OUTCOME
  * COMPLETED with real evidence, or honest INSUFFICIENT_EVIDENCE/UNAVAILABLE when upstream
  * data is down. A fabricated answer is a failure. Skipped without the gate.
  */
@@ -102,7 +102,7 @@ describe.skipIf(!LIVE)("BENCH-B: live natural-language research scenarios (real 
     const { registry } = createBitgetAdapterSet();
     const r = await makeLui(provider, registry).handle("Have we seen a setup like this on BTC before?") as unknown as HandleResultShape;
 
-    // Real Gemini may route this as Flow 5 (flow5 defined) — the architecture law is that
+    // Real Gemini may route this as Flow 5 (flow5 defined); the architecture law is that
     // however it routes, the answer contains NO fabricated historical claims.
     if (r.flow5 !== undefined) {
       expect(r.flow5.outcome.evidence).toHaveLength(0);
@@ -119,7 +119,7 @@ describe.skipIf(!LIVE)("BENCH-B: live natural-language research scenarios (real 
     const provider = new GeminiProvider();
     const { registry } = createBitgetAdapterSet();
 
-    // Varied phrasings — deliberately NOT the canonical flow names (BENCHMARK.md D1).
+    // Varied phrasings; deliberately NOT the canonical flow names (BENCHMARK.md D1).
     const scenarios: { id: string; question: string }[] = [
       { id: "NL-1", question: "What's going on with BTC right now?" },
       { id: "NL-2", question: "Why is BTC moving like this today?" },
@@ -142,7 +142,7 @@ describe.skipIf(!LIVE)("BENCH-B: live natural-language research scenarios (real 
     if (outcome === "COMPLETED_WITH_EVIDENCE") {
       expect(evidenceCount(r)).toBeGreaterThan(0);
     }
-    // When the upstream hub is down, the system must say so — either way is a pass.
+    // When the upstream hub is down, the system must say so; either way is a pass.
   }, 280_000);
 
   it("ETH: underspecified target is never silently invented", { timeout: 280_000 }, async () => {

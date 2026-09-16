@@ -8,7 +8,7 @@ related: [source-discovery-retrieval.md, source-intelligence.md, hypothesis.md, 
 
 **Related documents:** `source-discovery-retrieval.md` · `source-intelligence.md` · `hypothesis.md` · `judgment-confidence.md`
 
-> Converted from `EVIDENCE & SOURCE INTELLIGENCE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `EVIDENCE & SOURCE INTELLIGENCE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 EVIDENCE & SOURCE INTELLIGENCE
 

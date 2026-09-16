@@ -1,5 +1,5 @@
 /**
- * Monitor service — the persistent monitoring HANDOFF state. Reads are grouped by
+ * Monitor service; the persistent monitoring HANDOFF state. Reads are grouped by
  * lifecycle; activation is an explicit trader action through the backend domain
  * boundary. No polling, no background anything: clients refresh on demand.
  */

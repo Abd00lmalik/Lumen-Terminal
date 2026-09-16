@@ -68,7 +68,7 @@ const PLAN = JSON.stringify({
 
 beforeEach(() => resetIdCounters());
 
-describe("Flow 6 — WHAT DOES ALL THE INFORMATION SAY? (cross-domain synthesis)", () => {
+describe("Flow 6; WHAT DOES ALL THE INFORMATION SAY? (cross-domain synthesis)", () => {
   it("runs end-to-end with one primary judgment and typed disagreements preserved", async () => {
     const provider = new FakeModelProvider(new Map([
       ["research.plan", PLAN],
@@ -167,7 +167,7 @@ describe("Flow 6 — WHAT DOES ALL THE INFORMATION SAY? (cross-domain synthesis)
     expect(workspace.getEvidence("ev_000001")).toBeDefined();
   });
 
-  it("thesis implication appears when a thesis exists — without mutating it", async () => {
+  it("thesis implication appears when a thesis exists; without mutating it", async () => {
     const provider = new FakeModelProvider(new Map([
       ["research.plan", PLAN],
       ["research.adaptive_decision", responses.adaptiveDecision("COMPLETE")],

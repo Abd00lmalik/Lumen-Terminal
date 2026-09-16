@@ -1,18 +1,18 @@
 /**
- * Adaptive research loop — model-assisted planning over the capability-first engine (M3 §7/§8).
+ * Adaptive research loop; model-assisted planning over the capability-first engine (M3 §7/§8).
  *
  * Architectural basis:
  * - M3 §7: the model may plan (what's needed, which capabilities, gaps, sufficiency) but NEVER
  *   executes tools. The engine converts validated plans into capability requests. No
- *   hardcoded Flow→Skill mappings — capabilities only (final lock §6/§11).
- * - M3 §8: the living loop QUESTION → PLAN → RESEARCH → EVIDENCE → CLAIMS → … → DECIDE —
+ *   hardcoded Flow→Skill mappings; capabilities only (final lock §6/§11).
+ * - M3 §8: the living loop QUESTION → PLAN → RESEARCH → EVIDENCE → CLAIMS → … → DECIDE
  *   plans CHANGE when validated evidence contradicts the working view; the loop STOPS when
  *   evidence is sufficient. Information value, uncertainty, contradiction, and expected
- *   judgment impact drive continuation — never "run every capability".
+ *   judgment impact drive continuation; never "run every capability".
  * - Failure semantics (§19): tool failure ≠ research failure ≠ model failure. A failed round
  *   is recorded, not retried forever, and never becomes negative evidence.
  * - Bounded rounds: the engine owns the loop budget (MAX_ROUNDS); the model can propose but
- *   the engine decides when the loop must stop — with the reason recorded.
+ *   the engine decides when the loop must stop; with the reason recorded.
  */
 
 import type { CapabilityRegistry } from "../adapters/capability-registry.js";
@@ -51,13 +51,13 @@ export interface AdaptiveLoopOutcome {
   readonly executions: readonly RoundExecution[];
   readonly finalDecision: AdaptiveDecision;
   readonly evidence: readonly Evidence[];
-  readonly stoppedBecause: "EVIDENCE_SUFFICIENT" | "MODEL_INSUFFICIENT_EVIDENCE" | "ROUND_BUDGET_EXHAUSTED" | "MODEL_FAILURE";
-  /** Typed model failure when the loop ended that way — never fabricated around. */
+  readonly stoppedBecause: "EVIDENCE_SUFFICIENT" | "MODEL_INSUFFICIENT_EVIDENCE" | "ROUND_BUDGET_EXHAUSTED" | "TIME_BUDGET_EXHAUSTED" | "MODEL_FAILURE";
+  /** Typed model failure when the loop ended that way; never fabricated around. */
   readonly modelFailure?: ModelFailure;
   readonly context: ResearchContext;
 }
 
-/** Schemas as prompt fragments — the model must answer in one of these shapes. */
+/** Schemas as prompt fragments; the model must answer in one of these shapes. */
 export { RESEARCH_PLAN_SCHEMA_DESC, ADAPTIVE_DECISION_SCHEMA_DESC };
 
 const PLAN_SYSTEM = [
@@ -68,6 +68,7 @@ const PLAN_SYSTEM = [
   "- Select the smallest capability set with material information value. Do not request every capability.",
   "- Respect trader constraints (e.g. exclusions) in scope.",
   "- Never assume evidence that does not exist yet; plan tasks around what would decide the question.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 const ADAPTIVE_SYSTEM = [
@@ -75,9 +76,10 @@ const ADAPTIVE_SYSTEM = [
   "You receive the validated research context with epistemic classes preserved. Rules:",
   "- Interpretations/inferences/speculation are NOT observations. Do not upgrade them.",
   "- LIMITATIONS are data-availability conditions. They are NOT evidence against any claim. Never convert a tool failure into a negative finding.",
-  "- Insufficient evidence is a valid outcome — prefer honesty over forced conclusions.",
+  "- Insufficient evidence is a valid outcome; prefer honesty over forced conclusions.",
   "- Continue only when additional capabilities have MATERIAL information value (could change the judgment). Otherwise COMPLETE.",
-  "- Contradictory evidence may warrant one more targeted investigation — with capabilities, never providers.",
+  "- Contradictory evidence may warrant one more targeted investigation; with capabilities, never providers.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 function planPrompt(objective: string, constraints: readonly string[]): string {
@@ -112,6 +114,12 @@ export interface AdaptiveLoopOptions {
   /** Fixed news-style capability params (asset etc.) merged into every capability call. */
   readonly capabilityParams?: Readonly<Record<string, unknown>>;
   readonly maxRounds?: number;
+  /**
+   * Wall-clock deadline for the whole loop (epoch ms). When crossed, the loop stops with the
+   * honest TIME_BUDGET_EXHAUSTED reason and the evidence gathered so far is preserved; it is
+   * never treated as a model failure and nothing is fabricated to fill the gap.
+   */
+  readonly deadlineMs?: number;
   readonly now?: () => Date;
   /** F0 SSE seam: optional listener for REAL lifecycle events (never model reasoning/payloads). */
   readonly onProgress?: ProgressListener;
@@ -120,7 +128,7 @@ export interface AdaptiveLoopOptions {
 /**
  * Run the adaptive loop: model-proposed plan → engine executes capabilities round-by-round →
  * evidence into the graph → model decides continue/complete with the updated context.
- * The model NEVER calls capabilities directly — every execution goes through the registry.
+ * The model NEVER calls capabilities directly; every execution goes through the registry.
  */
 export async function runAdaptiveResearch(
   objective: string,
@@ -222,7 +230,7 @@ export async function runAdaptiveResearch(
       stoppedBecause = "MODEL_FAILURE";
       finalDecision = {
         decision: "INSUFFICIENT_EVIDENCE",
-        rationale: `loop ended on model failure: ${modelFailure.message} — no fabricated continuation`,
+        rationale: `loop ended on model failure: ${modelFailure.message}; no fabricated continuation`,
         nextTasks: [],
       };
       rounds.push({ round, executions, decision: finalDecision });
@@ -255,6 +263,18 @@ export async function runAdaptiveResearch(
       finalDecision = decision;
       break;
     }
+    // Honest wall-clock budget: stop before the caller's execution window expires rather than
+    // dying mid-flight (an in-flight run can never deliver its partial truth to the trader).
+    if (options.deadlineMs !== undefined && at().getTime() >= options.deadlineMs) {
+      stoppedBecause = "TIME_BUDGET_EXHAUSTED";
+      finalDecision = {
+        decision: "INSUFFICIENT_EVIDENCE",
+        rationale: `time budget exhausted after ${rounds.length} round(s); evidence gathered so far is preserved`,
+        nextTasks: [],
+      };
+      options.onProgress?.(progressEvent("research_stopped", at(), `research stopped: ${stoppedBecause}`, { reason: stoppedBecause }));
+      break;
+    }
     if (round === maxRounds) {
       stoppedBecause = "ROUND_BUDGET_EXHAUSTED";
       finalDecision = {
@@ -267,7 +287,10 @@ export async function runAdaptiveResearch(
     }
   }
 
-  // Persist the completed loop (lock §14). A store failure propagates — never reported as success.
+  // Lifecycle honesty: the loop CONCLUDED (by sufficiency, insufficiency, budget, or model
+  // failure); the research object must reflect that instead of staying ACTIVE forever.
+  workspace.transitionResearch(researchRef, "COMPLETED", { kind: "agent", detail: "adaptive research loop" }, `research concluded: ${stoppedBecause}`, at());
+  // Persist the completed loop (lock §14). A store failure propagates; never reported as success.
   await options.store.save(workspace.toSnapshot());
   return {
     research: mustResearch(workspace, researchRef),

@@ -1,5 +1,5 @@
 /**
- * Monitor view — the REAL monitoring handoff from the backend: lifecycle-grouped
+ * Monitor view; the REAL monitoring handoff from the backend: lifecycle-grouped
  * monitors, distinct invalidation/early-warning conditions, source-unavailable as
  * state data. Activation posts to the backend's trader boundary and refreshes state.
  * A persistent explainer states that no background worker exists.
@@ -13,10 +13,10 @@ import { monitorFromDto } from "../data/adapters.js";
 import type { MonitorView } from "../data/types.js";
 
 const GROUPS: { status: MonitorView["status"]; title: string }[] = [
-  { status: "PROPOSED", title: "Proposed — awaiting your activation" },
+  { status: "PROPOSED", title: "Proposed; awaiting your activation" },
   { status: "ACTIVE", title: "Active (handoff state)" },
   { status: "PAUSED", title: "Paused" },
-  { status: "STALE", title: "Stale — flagged for review" },
+  { status: "STALE", title: "Stale; flagged for review" },
   { status: "COMPLETED", title: "Completed" },
 ];
 
@@ -43,7 +43,7 @@ export function MonitorPage() {
     setBusy(true);
     try {
       await activateMonitor(ref);
-      setNotice(`Monitor ${ref} activated — a persistent state change only; no background worker was created.`);
+      setNotice(`Monitor ${ref} activated; a persistent state change only; no background worker was created.`);
       await refresh();
     } catch (err) {
       setError(err instanceof ApiError ? `${err.code}: ${err.message}` : String(err));
@@ -62,12 +62,12 @@ export function MonitorPage() {
             <div className="rail-title">What this is</div>
             <div style={{ fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.6 }}>
               Monitors are persistent research state: conditions the engine recorded for future
-              checking. Nothing runs in the background — no worker, no notifications, no cron.
+              checking. Nothing runs in the background; no worker, no notifications, no cron.
             </div>
           </div>
           <Note>
             Activation is recorded through the backend's trader-confirmation boundary. It changes
-            state, not reality — no live process exists behind an “active” badge.
+            state, not reality; no live process exists behind an “active” badge.
           </Note>
         </>
       }
@@ -76,7 +76,7 @@ export function MonitorPage() {
         <h1 className="page-title">Monitoring handoff</h1>
         <p className="page-sub">
           Conditions worth watching, derived from your theses and research. Invalidation and
-          early-warning conditions are kept separate — one disproves, the other only warns.
+          early-warning conditions are kept separate; one disproves, the other only warns.
         </p>
       </div>
 
@@ -117,7 +117,7 @@ export function MonitorPage() {
                     {m.sourceStates.some((s) => s.state === "SOURCE_UNAVAILABLE") && (
                       <div style={{ marginTop: 8 }}>
                         <Note tone="warn">
-                          source unavailable: {m.sourceStates.find((s) => s.state === "SOURCE_UNAVAILABLE")?.note} — recorded as a source
+                          source unavailable: {m.sourceStates.find((s) => s.state === "SOURCE_UNAVAILABLE")?.note}; recorded as a source
                           state, never treated as a triggered condition.
                         </Note>
                       </div>
@@ -139,7 +139,7 @@ export function MonitorPage() {
                     )}
                     {m.status === "PROPOSED" && (
                       <div className="mono" style={{ fontSize: 10, color: "var(--text-3)", marginTop: 6 }}>
-                        proposal only — activation requires your explicit confirmation
+                        proposal only; activation requires your explicit confirmation
                       </div>
                     )}
                   </div>

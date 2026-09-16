@@ -36,7 +36,7 @@ describe("M5 research memory (memory.md; M5 §4–§6, §18)", () => {
     expect(ws.listMemoriesByCategory("research")[0]?.content).toBe("research memory");
   });
 
-  it("ordinary research does NOT automatically become memory — only explicit addMemory calls create entries", () => {
+  it("ordinary research does NOT automatically become memory; only explicit addMemory calls create entries", () => {
     const ws = new Workspace();
     const research = ws.addResearch({ objective: "o", question: "q", flow: "WHAT_HAPPENED" }, trader);
     ws.transitionResearch(research.id, "ACTIVE", system, "activated");
@@ -120,11 +120,11 @@ describe("M5 monitoring handoff (thesis-monitor-reassessment.md §20–§26; M5 
     );
     expect(monitor.status).toBe("PROPOSED"); // inert
     expect(monitor.conditions[0]?.kind).toBe("INVALIDATION");
-    expect(monitor.conditions[1]?.kind).toBe("EARLY_WARNING"); // distinct — never merged
+    expect(monitor.conditions[1]?.kind).toBe("EARLY_WARNING"); // distinct; never merged
     expect(monitor.thesisVersion).toBe(1);
   });
 
-  it("confirmation boundary: only trader origins can activate — system/model origins are rejected", () => {
+  it("confirmation boundary: only trader origins can activate; system/model origins are rejected", () => {
     const ws = new Workspace();
     const monitor = ws.addMonitorProposal({ target: "BTC", conditions: [], triggerRationale: "r" }, system);
     expect(() => ws.activateMonitor(monitor.id, system, "self-activation")).toThrow(/trader confirmation/);
@@ -157,14 +157,14 @@ describe("M5 monitoring handoff (thesis-monitor-reassessment.md §20–§26; M5 
     const updated = ws.recordMonitorSourceState(monitor.id, "funding:BTC", "SOURCE_UNAVAILABLE", "upstream feed unreachable", system);
     expect(updated.sourceStates).toHaveLength(1);
     expect(updated.sourceStates[0]?.state).toBe("SOURCE_UNAVAILABLE");
-    // The thesis status is untouched — a source outage is NOT invalidation evidence:
+    // The thesis status is untouched; a source outage is NOT invalidation evidence:
     const thesis = ws.addThesis({ statement: "BTC trends up", objective: "swing" }, trader);
     expect(ws.getThesis(thesis.id)?.status).toBe("ACTIVE");
     // Provenance records the limitation:
     expect(updated.provenance.some((p) => p.note?.includes("SOURCE_UNAVAILABLE"))).toBe(true);
   });
 
-  it("revalidation flag (M5 §15): monitor flagged for review is marked STALE — never silently deleted or reworded", () => {
+  it("revalidation flag (M5 §15): monitor flagged for review is marked STALE; never silently deleted or reworded", () => {
     const ws = new Workspace();
     const monitor = ws.activateMonitor(ws.addMonitorProposal({ target: "t", conditions: [{ description: "condition A", kind: "EARLY_WARNING", triggerType: "STATE_CHANGE", conditionStatus: "PROPOSED", rationale: "r", evidenceDependencies: [] }], triggerRationale: "r" }, trader).id, trader, "go");
     const flagged = ws.flagMonitorForReview(monitor.id, "reassessment made condition A immaterial", system);
@@ -214,7 +214,7 @@ describe("M5 thesis assessment history (M5 §8–§9, §14)", () => {
     expect(latest?.confidence).toBe("MODERATE");
   });
 
-  it("assessment requires a real thesis — no fabricated targets", () => {
+  it("assessment requires a real thesis; no fabricated targets", () => {
     const ws = new Workspace();
     expect(() => ws.recordThesisAssessment({ thesisId: "th_999999", thesisVersion: 1, assessment: "SUPPORTED", rationale: "x", supportingEvidence: [], contradictingEvidence: [], unresolved: [], whatWouldChange: [], confidence: "LOW" }, system)).toThrow(/Unknown thesis/);
   });

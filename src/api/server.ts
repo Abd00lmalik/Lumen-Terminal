@@ -1,5 +1,5 @@
 /**
- * F0 API server bootstrap — Fastify application factory + CLI entrypoint (F0 mandate §3/§20/§21).
+ * F0 API server bootstrap; Fastify application factory + CLI entrypoint (F0 mandate §3/§20/§21).
  *
  * - Dev CORS: localhost origins only, documented development behavior (no production claims).
  * - Health: reports ONLY that the API process is up. It does NOT claim Gemini/Bitget health
@@ -7,7 +7,7 @@
  * - Secrets: nothing here reads or returns credentials; the Gemini provider reads env inside
  *   its own adapter and the key never crosses the API surface.
  * - The factory is injectable (fake provider/registry/store) so deterministic tests drive the
- *   REAL HTTP layer — the E2E seam test proves API → LUI → engine → capabilities → DTO.
+ *   REAL HTTP layer; the E2E seam test proves API → LUI → engine → capabilities → DTO.
  */
 
 import Fastify, { type FastifyInstance } from "fastify";
@@ -27,21 +27,21 @@ export interface ApiDeps {
 }
 
 /**
- * Build the Fastify app over the given engine wiring. Does not listen — tests use
+ * Build the Fastify app over the given engine wiring. Does not listen; tests use
  * `inject()`; `startApi` listens when run as a process.
  */
 export async function buildApi(deps: ApiDeps): Promise<{ app: FastifyInstance; researchApp: ResearchApp }> {
   const app = Fastify({ logger: false });
 
   // Dev CORS: localhost development origins only (F0 mandate §20). This is explicitly a
-  // development convenience — no broad production assumptions are made here.
+  // development convenience; no broad production assumptions are made here.
   await app.register(cors, {
     origin: ["http://localhost:5173", "http://localhost:4173", "http://127.0.0.1:5173", "http://127.0.0.1:4173"],
     methods: ["GET", "POST"],
   });
 
   // No global auth: single local trader identity for the hackathon MVP
-  // (FRONTEND_ARCHITECTURE.md §16/§18 — auth is a future migration step).
+  // (FRONTEND_ARCHITECTURE.md §16/§18; auth is a future migration step).
 
   const store = deps.store ?? new MemoryStore();
   const researchApp = await ResearchApp.create({
@@ -52,14 +52,14 @@ export async function buildApi(deps: ApiDeps): Promise<{ app: FastifyInstance; r
   });
 
   // ------------------------------------------------------------------
-  // Health (F0 mandate §21) — availability of THIS process only. No false signals:
+  // Health (F0 mandate §21); availability of THIS process only. No false signals:
   // it does not claim Gemini/Bitget reachability, monitoring activity, or trading.
   // ------------------------------------------------------------------
   app.get("/api/health", async () => ({
     status: "ok",
     api: "f0",
     timestamp: new Date().toISOString(),
-    note: "API process availability only — provider reachability is not probed; no background monitoring exists; this workbench performs research only (no trading).",
+    note: "API process availability only; provider reachability is not probed; no background monitoring exists; this workbench performs research only (no trading).",
   }));
 
   registerRoutes(app, researchApp);

@@ -1,8 +1,8 @@
 # Lumen Terminal
 
-**An AI research workbench for traders** — ask a natural-language question about a market, and the system investigates it like a research analyst: it plans the research, retrieves real market evidence, classifies what it *observed* versus what it *interpreted*, preserves provenance for every claim, and reports its judgment **with** its uncertainty.
+**An AI research workbench for traders**; ask a natural-language question about a market, and the system investigates it like a research analyst: it plans the research, retrieves real market evidence, classifies what it *observed* versus what it *interpreted*, preserves provenance for every claim, and reports its judgment **with** its uncertainty.
 
-> **This is not a trading terminal.** Lumen Terminal performs research only. There are no orders, no execution, no position management, and no buy/sell signals anywhere in the system — by architecture, not by policy. *Research can inform a decision; research does not become the decision.*
+> **This is not a trading terminal.** Lumen Terminal performs research only. There are no orders, no execution, no position management, and no buy/sell signals anywhere in the system; by architecture, not by policy. *Research can inform a decision; research does not become the decision.*
 
 Built for the Bitget AI Hackathon (Track 3).
 
@@ -12,20 +12,20 @@ Built for the Bitget AI Hackathon (Track 3).
 
 Traders ask questions like *"Why did BTC move today?"* or *"Has this setup happened before?"* and get one of two bad answers:
 
-1. **A chatbot answer** — fluent text generated from a model's background knowledge, with no way to tell what was actually measured, what was inferred, and what is simply made up.
-2. **A dashboard** — raw numbers with no synthesis, no contradiction handling, and no honest statement of what the data does not establish.
+1. **A chatbot answer**; fluent text generated from a model's background knowledge, with no way to tell what was actually measured, what was inferred, and what is simply made up.
+2. **A dashboard**; raw numbers with no synthesis, no contradiction handling, and no honest statement of what the data does not establish.
 
 Both hide the most important thing: **the difference between an observation and an opinion.** Lumen Terminal is built to make that difference impossible to hide.
 
 ## What we built
 
-- **Natural-language research intake** — a Gemini-interpreted LUI classifies every request into one of six actions (`RESEARCH`, `ANALYZE`, `CHALLENGE`, `MANAGE_STATE`, `MONITOR`, `SAVE`) and one of eight research flows. The model interprets; it never executes.
-- **A research engine** — model-proposed, schema-validated research plans executed through a **capability registry** (no flow→tool hardcoding; the registry resolves providers, with fallback).
-- **Real evidence with epistemic classes** — every piece of evidence is an `OBSERVATION`, `QUANTITATIVE_OBSERVATION`, `DERIVED_OBSERVATION`, `ANALYST_INTERPRETATION`, `INFERENCE`, `SPECULATION`, or `PROXY_EVIDENCE` — and unavailable data stays `UNAVAILABLE` (a failed fetch is never laundered into negative evidence).
-- **Provenance on every object** — who/what created it, when, from which tool invocation, with raw-capture references for audit.
-- **Historical precedent research (Flow 5)** — real multi-year candles, deterministic episode detection with **explainable** similarity (matched vs. differing dimensions — never a bare score), forward outcome windows, and **look-ahead protection** (episode features never use future data; outcomes are computed separately).
-- **Thesis lifecycle** — trader-owned theses are assessed, challenged, and reassessed; they are never silently rewritten, and monitor activation always requires explicit confirmation.
-- **Memory with decay** — saved knowledge is `CURRENT`, `STALE`, or `HISTORICAL`; current research always outranks stale memory.
+- **Natural-language research intake**; a Gemini-interpreted LUI classifies every request into one of six actions (`RESEARCH`, `ANALYZE`, `CHALLENGE`, `MANAGE_STATE`, `MONITOR`, `SAVE`) and one of eight research flows. The model interprets; it never executes.
+- **A research engine**; model-proposed, schema-validated research plans executed through a **capability registry** (no flow→tool hardcoding; the registry resolves providers, with fallback).
+- **Real evidence with epistemic classes**; every piece of evidence is an `OBSERVATION`, `QUANTITATIVE_OBSERVATION`, `DERIVED_OBSERVATION`, `ANALYST_INTERPRETATION`, `INFERENCE`, `SPECULATION`, or `PROXY_EVIDENCE`; and unavailable data stays `UNAVAILABLE` (a failed fetch is never laundered into negative evidence).
+- **Provenance on every object**; who/what created it, when, from which tool invocation, with raw-capture references for audit.
+- **Historical precedent research (Flow 5)**; real multi-year candles, deterministic episode detection with **explainable** similarity (matched vs. differing dimensions; never a bare score), forward outcome windows, and **look-ahead protection** (episode features never use future data; outcomes are computed separately).
+- **Thesis lifecycle**; trader-owned theses are assessed, challenged, and reassessed; they are never silently rewritten, and monitor activation always requires explicit confirmation.
+- **Memory with decay**; saved knowledge is `CURRENT`, `STALE`, or `HISTORICAL`; current research always outranks stale memory.
 
 ## The 8 research flows
 
@@ -40,7 +40,7 @@ Both hide the most important thing: **the difference between an observation and 
 | 7 | **What could prove me wrong?** | ✅ deterministic |
 | 8 | **Evaluate it by my framework** | ✅ deterministic |
 
-A benchmark "pass" is the **correct epistemic outcome** — `COMPLETED`, `INSUFFICIENT_EVIDENCE`, `UNAVAILABLE`, or honest failure — never a forced success.
+A benchmark "pass" is the **correct epistemic outcome**; `COMPLETED`, `INSUFFICIENT_EVIDENCE`, `UNAVAILABLE`, or honest failure; never a forced success.
 
 ## Architecture
 
@@ -110,7 +110,7 @@ flowchart TD
     REG --> P2[Fallback: news RSS · Fear&Greed · World Bank]
     P1 -->|typed failure OR empty coverage| REG
     P2 -->|serves| TR[TOOL_RESULT + attemptedProviders trail<br/>+ fallback limitation]
-    P1 -->|serves| TR2[TOOL_RESULT — no fallback noise]
+    P1 -->|serves| TR2[TOOL_RESULT; no fallback noise]
     REG -->|all fail / all empty| EMPTY[Honest EMPTY<br/>never fabricated, never negative evidence]
 ```
 
@@ -124,7 +124,7 @@ flowchart TD
     CHUNKS --> CS[Current setup<br/>trend · momentum · volatility · range]
     CHUNKS --> EP[Episode detection<br/>features from anchor-time data ONLY]
     EP --> SIM[Explainable similarity<br/>matched vs differing dimensions]
-    EP --> OUT[Outcome windows 1/3/7/14d<br/>separate from detection — no look-ahead]
+    EP --> OUT[Outcome windows 1/3/7/14d<br/>separate from detection; no look-ahead]
     SIM --> RESP["CURRENT SETUP → HISTORICAL ANALOGUES →<br/>WHAT THIS DOES NOT ESTABLISH"]
     OUT --> RESP
     RESP --> J5[Judgment: precedent ≠ prediction]
@@ -144,35 +144,35 @@ flowchart LR
 
 ## The Gemini boundary
 
-- Gemini **interprets** natural language, proposes research plans, and drafts synthesis — always schema-validated, always retry-bounded.
+- Gemini **interprets** natural language, proposes research plans, and drafts synthesis; always schema-validated, always retry-bounded.
 - Gemini **never** executes tools, never invents evidence, and its background knowledge is never presented as current market data. All market facts come from capabilities with provenance.
 - The API key lives **server-side only** (`GEMINI_API_KEY`); the browser never sees it and never calls Gemini.
-- Default model: `gemini-3.5-flash-lite` (selected by a live free-tier audit — see `.env.example`); configurable via `GEMINI_MODEL`.
-- Model/provider failures surface as typed `MODEL_FAILURE` states — never silently retried into fabrication.
+- Default model: `gemini-3.5-flash-lite` (selected by a live free-tier audit; see `.env.example`); configurable via `GEMINI_MODEL`.
+- Model/provider failures surface as typed `MODEL_FAILURE` states; never silently retried into fabrication.
 
 ## Bitget, G1, and G2 capabilities
 
-- **Bitget (M1/M2)** — MCP + REST transports with throttling, bounded retry, freshness, and `TOOL_RESULT` normalization. Live-verified: real technical-analysis evidence (RSI/MACD/Bollinger) with conflicting interpretations preserved as genuine disagreement. Live-verified from production Vercel: real kline-derived technical evidence flowing end to end.
-- **G1 historical data** — engine-selected `HistoricalQuery` (symbol, metric, window, interval) served by **Bitget REST when reachable**, with **Binance Vision** (`data-api.binance.vision`, Binance's official keyless market-data mirror) as the live fallback; the serving venue is recorded in provenance. OHLCV is real and multi-year; funding/open-interest/liquidations are honestly `UNAVAILABLE` (mirrored nowhere reachable — never fabricated).
-- **G2 web/primary sources** — bounded retrieval with URL validation (SSRF-safe), HTML-to-text extraction, source classification (**primary / secondary / commentary / community**), and source/evidence separation: a web page is a *source*, not automatically evidence. Repeated syndication of one origin is not counted as independent corroboration.
+- **Bitget (M1/M2)**; MCP + REST transports with throttling, bounded retry, freshness, and `TOOL_RESULT` normalization. Live-verified: real technical-analysis evidence (RSI/MACD/Bollinger) with conflicting interpretations preserved as genuine disagreement. Live-verified from production Vercel: real kline-derived technical evidence flowing end to end.
+- **G1 historical data**; engine-selected `HistoricalQuery` (symbol, metric, window, interval) served by **Bitget REST when reachable**, with **Binance Vision** (`data-api.binance.vision`, Binance's official keyless market-data mirror) as the live fallback; the serving venue is recorded in provenance. OHLCV is real and multi-year; funding/open-interest/liquidations are honestly `UNAVAILABLE` (mirrored nowhere reachable; never fabricated).
+- **G2 web/primary sources**; bounded retrieval with URL validation (SSRF-safe), HTML-to-text extraction, source classification (**primary / secondary / commentary / community**), and source/evidence separation: a web page is a *source*, not automatically evidence. Repeated syndication of one origin is not counted as independent corroboration.
 
 ### Provider fallback (registry-owned)
 
-The **capability registry owns failover** — flows never name providers. When the primary
+The **capability registry owns failover**; flows never name providers. When the primary
 (Bitget) fails *or returns empty coverage*, the next registered provider for that
 capability serves:
 
-- **NEWS** → curated public crypto RSS (CoinDesk/Cointelegraph) — classified as secondary
+- **NEWS** → curated public crypto RSS (CoinDesk/Cointelegraph); classified as secondary
   reporting; per-item publisher/timestamp/URL preserved.
-- **SENTIMENT** → alternative.me Fear & Greed Index — a `SENTIMENT_SIGNAL` with explicit
+- **SENTIMENT** → alternative.me Fear & Greed Index; a `SENTIMENT_SIGNAL` with explicit
   `proxyBasis`; never upgraded to a market observation.
-- **MACRO** → World Bank official indicators — `QUANTITATIVE_OBSERVATION` with
+- **MACRO** → World Bank official indicators; `QUANTITATIVE_OBSERVATION` with
   freshness `STALE` (annual official lag is never labeled current).
 
 A serving fallback **must not erase the primary's failure**: every tool result carries an
 `attemptedProviders` audit trail plus a human-readable limitation ("Bitget unavailable —
 research continued using fallback/news-rss"). All providers failing/empty is an honest
-`EMPTY` — never fabricated coverage, never negative evidence about the market.
+`EMPTY`; never fabricated coverage, never negative evidence about the market.
 
 Live-verified from production: Bitget news/sentiment returned empty coverage and the
 fallbacks served with the provenance trail intact (COMPLETED, HIGH confidence).
@@ -183,7 +183,7 @@ Structurally enforced, not prompt-enforced:
 
 - No trading/execution capability exists in the registry, the API, or the frontend. Execution-like requests are rejected at the LUI safety screen (live-verified with adversarial phrasing).
 - `SAVE` persists memory only through the explicit trader-confirmation boundary.
-- Monitors are proposals; activation is confirmation-gated; **no background worker, cron, or notification infrastructure exists** — the UI labels monitor state as a handoff, not live surveillance.
+- Monitors are proposals; activation is confirmation-gated; **no background worker, cron, or notification infrastructure exists**; the UI labels monitor state as a handoff, not live surveillance.
 - Source failure becomes `SOURCE_UNAVAILABLE`, never invalidation; retrieval failure never becomes negative evidence.
 - The frontend renders backend **typed** epistemic state and never infers meaning from raw text.
 
@@ -196,7 +196,7 @@ Verification categories are never collapsed (`VERIFIED LIVE` / `VERIFIED DETERMI
 | Deterministic tests | **389 backend + 11 frontend passed / 0 failed** (25 env-gated live tests skipped without credentials) |
 | Backend typecheck | clean |
 | Frontend typecheck + production build | clean |
-| **Production deployment** | **VERIFIED LIVE at https://asklumen.vercel.app** — same-origin serverless API, health 200, real research COMPLETED |
+| **Production deployment** | **VERIFIED LIVE at https://asklumen.vercel.app**; same-origin serverless API, health 200, real research COMPLETED |
 | Live research (Suite B) | Flow 1 and Flow 5 COMPLETED with real evidence; Flow 5 live UI run verified |
 | Live provider fallback | VERIFIED LIVE from production: Bitget empty coverage → news/sentiment fallbacks served, provenance trail preserved |
 | Browser E2E (Suite C / CDP) | real ask-bar submission → new backend research object → judgment (backend-side proof) |
@@ -204,12 +204,12 @@ Verification categories are never collapsed (`VERIFIED LIVE` / `VERIFIED DETERMI
 
 ## Known limitations
 
-- **Production workspace state is per-instance memory** (documented in `DEPLOYMENT.md` §3) — serverless disks are ephemeral; durable external persistence is a contained future upgrade behind the two-method `WorkspaceStore` interface.
-- **News / sentiment / macro upstreams** can be unreachable from some networks (Bitget endpoint blocking) — registry-owned fallbacks now cover news/sentiment/macro; all-fail remains an honest EMPTY, never fabricated.
-- **G1 depth beyond OHLCV** — historical funding/OI/liquidations are not mirrored by any reachable source; reported `UNAVAILABLE`.
-- **Monitoring is a handoff, not a worker** — proposed/activated monitors persist, but nothing runs in the background. This is intentional for this phase.
-- **Local dev persistence** — `FileStore` (`.data/workspace.json`) is local and single-user; multi-user auth is future work.
-- **Free-tier model quotas** — per-model daily limits on Gemini's free tier; quota exhaustion surfaces as an honest `MODEL_FAILURE`, and retries are bounded so it fails fast.
+- **Production workspace state is per-instance memory** (documented in `DEPLOYMENT.md` §3); serverless disks are ephemeral; durable external persistence is a contained future upgrade behind the two-method `WorkspaceStore` interface.
+- **News / sentiment / macro upstreams** can be unreachable from some networks (Bitget endpoint blocking); registry-owned fallbacks now cover news/sentiment/macro; all-fail remains an honest EMPTY, never fabricated.
+- **G1 depth beyond OHLCV**; historical funding/OI/liquidations are not mirrored by any reachable source; reported `UNAVAILABLE`.
+- **Monitoring is a handoff, not a worker**; proposed/activated monitors persist, but nothing runs in the background. This is intentional for this phase.
+- **Local dev persistence**; `FileStore` (`.data/workspace.json`) is local and single-user; multi-user auth is future work.
+- **Free-tier model quotas**; per-model daily limits on Gemini's free tier; quota exhaustion surfaces as an honest `MODEL_FAILURE`, and retries are bounded so it fails fast.
 
 ## Local setup
 
@@ -249,11 +249,11 @@ Live tests are **env-gated** (`FREEBUFF_LIVE=1` + credentials) and never run in 
 
 ## Demo workflow
 
-1. **What happened?** — `What is affecting BTC right now?` → Flow 1: current evidence, confidence, uncertainty.
-2. **Has this happened before?** — `Search historical data for similar BTC setups and patterns.` → Flow 5: current setup → historical analogues (with matched/differing dimensions) → what the record does *not* establish.
-3. **Does my thesis hold?** — save a thesis, then ask → Flow 4: evidence-grounded assessment, versioned history.
-4. **What could prove me wrong?** — `What would prove my BTC thesis wrong?` → Flow 7: falsification targets, disconfirming evidence, monitor *proposals*.
-5. **Watch the honesty paths** — submit an execution-like request (rejected), or exhaust the model quota (typed `MODEL_FAILURE`, no fabricated content).
+1. **What happened?**; `What is affecting BTC right now?` → Flow 1: current evidence, confidence, uncertainty.
+2. **Has this happened before?**; `Search historical data for similar BTC setups and patterns.` → Flow 5: current setup → historical analogues (with matched/differing dimensions) → what the record does *not* establish.
+3. **Does my thesis hold?**; save a thesis, then ask → Flow 4: evidence-grounded assessment, versioned history.
+4. **What could prove me wrong?**; `What would prove my BTC thesis wrong?` → Flow 7: falsification targets, disconfirming evidence, monitor *proposals*.
+5. **Watch the honesty paths**; submit an execution-like request (rejected), or exhaust the model quota (typed `MODEL_FAILURE`, no fabricated content).
 
 ## Project structure
 
@@ -266,7 +266,7 @@ Live tests are **env-gated** (`FREEBUFF_LIVE=1` + credentials) and never run in 
 │  ├─ adapters/        # capability registry + failover, Bitget MCP/REST, G1 historical, G2 web, fallbacks
 │  ├─ persistence/     # WorkspaceStore (file + memory)
 │  └─ api/             # F0 boundary: Fastify server, routes, DTOs, SSE, error model
-├─ api/                # Vercel function adapter (hosts the same Fastify app — no second backend)
+├─ api/                # Vercel function adapter (hosts the same Fastify app; no second backend)
 ├─ frontend/           # React + Vite research workbench (single fetch boundary)
 ├─ tests/              # deterministic + env-gated live suites, benchmark suites A/B/C
 ├─ docs/architecture/  # the source-of-truth architecture documents
@@ -279,6 +279,6 @@ Source-of-truth hierarchy: `docs/architecture/` → `AGENT.md` → `FINDINGS.md`
 
 ## Deployment
 
-**Deployed and live:** https://asklumen.vercel.app — same-origin serverless API + SPA on
+**Deployed and live:** https://asklumen.vercel.app; same-origin serverless API + SPA on
 Vercel, with registry-owned provider fallbacks. Full architecture, environment variables,
 persistence honesty, and known limits: [`DEPLOYMENT.md`](DEPLOYMENT.md).

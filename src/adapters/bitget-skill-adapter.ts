@@ -1,7 +1,7 @@
 /**
- * Bitget skill adapter base — one generic `ProviderAdapter` implementation shared by the five
+ * Bitget skill adapter base; one generic `ProviderAdapter` implementation shared by the five
  * confirmed skills (FINDINGS.md §1). Skills are registered through the generic CapabilityRegistry
- * mechanism — no hidden Flow→Tool mappings (final lock §6/§11).
+ * mechanism; no hidden Flow→Tool mappings (final lock §6/§11).
  *
  * Responsibilities (all inside the adapter; the research engine never sees provider specifics):
  * - invoke the documented MCP tool (or REST endpoint for technical-analysis) via the transports
@@ -10,7 +10,7 @@
  *   factual payloads → observation-class outputs (never silently upgraded)
  * - capture provenance: skill, tool, params, timestamps, raw reference, attempts
  * - assess freshness against the skill's FINDINGS.md profile
- * - convert transport failures into failed TOOL_RESULTs — no fabricated fallback data (lock §18)
+ * - convert transport failures into failed TOOL_RESULTs; no fabricated fallback data (lock §18)
  */
 
 import type { CapabilityName, ProviderAdapter } from "./capability-registry.js";
@@ -27,7 +27,7 @@ export type { ProfileKey };
 export interface SkillDescriptor {
   /** Provider id, e.g. "bitget-signal/news-briefing". */
   readonly providerId: string;
-  /** Capabilities this skill can satisfy (capability-first — flows never name skills). */
+  /** Capabilities this skill can satisfy (capability-first; flows never name skills). */
   readonly capabilities: readonly CapabilityName[];
   /** Documented limitations preserved into every TOOL_RESULT (FINDINGS.md §2 per-skill). */
   readonly limitations: readonly string[];
@@ -48,7 +48,7 @@ export interface McpToolSpec {
 export interface OutputMapping {
   /**
    * Default class for narrative/tool-synthesized content from this skill. Per FINDINGS.md:
-   * verdicts, threshold interpretations, and narrative synthesis are skill-authored analysis —
+   * verdicts, threshold interpretations, and narrative synthesis are skill-authored analysis
    * never raw observations (lock §3/§7).
    */
   readonly narrativeClass: Extract<ToolOutputClass, "ANALYST_INTERPRETATION" | "MODEL_OUTPUT" | "INFERENCE">;
@@ -70,7 +70,7 @@ export interface BitgetSkillAdapterOptions {
   readonly origin?: ProvenanceOrigin;
   /**
    * Flattens one classified output into 0..n outputs. DISCOVERED live: some tools return one
-   * text block holding a JSON array of per-feed/per-source records — the useful evidence unit
+   * text block holding a JSON array of per-feed/per-source records; the useful evidence unit
    * is the record, not the block. Defaults to identity (one block → one output).
    */
   readonly flattenOutput?: (output: ToolOutput) => readonly ToolOutput[];
@@ -120,7 +120,7 @@ export class BitgetSkillAdapter implements ProviderAdapter {
 
     const outputs: ToolOutput[] = content.flatMap((block) => this.flattenOutput(this.classifyContentBlock(block)));
     if (outputs.length === 0) {
-      // Tool responded but returned nothing usable — EMPTY, not a failure (failure-recovery.md
+      // Tool responded but returned nothing usable; EMPTY, not a failure (failure-recovery.md
       // §10: NO RESULT ≠ FAILED RETRIEVAL ≠ NEGATIVE RESULT).
       return {
         tool: this.providerId,
@@ -160,7 +160,7 @@ export class BitgetSkillAdapter implements ProviderAdapter {
   /**
    * Classify one content block. Text blocks from these skills are skill-authored narrative or
    * structured text. When the block carries a parseable JSON payload with an explicit class hint
-   * (`"_class"`), honor it — otherwise narrative text uses the skill's narrativeClass.
+   * (`"_class"`), honor it; otherwise narrative text uses the skill's narrativeClass.
    */
   private classifyContentBlock(block: unknown): ToolOutput {
     if (typeof block === "object" && block !== null && "text" in (block as Record<string, unknown>)) {
@@ -185,7 +185,7 @@ export class BitgetSkillAdapter implements ProviderAdapter {
 
   private classifyText(text: string): ToolOutput {
     // Neutral per-source failure marker (CONFIRMED in FINDINGS.md §2.1/§2.2/§2.5: skills return
-    // "data temporarily unavailable" without exposing provider names). Preserved as UNAVAILABLE —
+    // "data temporarily unavailable" without exposing provider names). Preserved as UNAVAILABLE
     // never replaced with fabricated content, never silently dropped.
     if (/^data temporarily unavailable/i.test(text.trim())) {
       return { outputClass: "UNAVAILABLE", content: text };
@@ -229,7 +229,7 @@ export class BitgetSkillAdapter implements ProviderAdapter {
     if (unavailable > 0 && total > 0) {
       items.push(
         unavailable === total
-          ? `all ${total} content blocks reported data temporarily unavailable — no usable output`
+          ? `all ${total} content blocks reported data temporarily unavailable; no usable output`
           : `${unavailable} of ${total} content blocks reported data temporarily unavailable (per-source failure skipped per FINDINGS.md §2.5)`,
       );
     }
@@ -244,10 +244,10 @@ export class BitgetSkillAdapter implements ProviderAdapter {
 }
 
 /**
- * DISCOVERED (live 2026-09-13): many tools return per-record error envelopes — a bare object like
+ * DISCOVERED (live 2026-09-13): many tools return per-record error envelopes; a bare object like
  * `{"error": "Unknown action: "}` or `{"cpi": {"error": ""}}` instead of data. An object whose
  * ONLY content is error fields is a per-record failure: preserved as UNAVAILABLE (never turned
- * into an observation, never fabricated over — final lock §18). Mixed objects (error fields AND
+ * into an observation, never fabricated over; final lock §18). Mixed objects (error fields AND
  * data keys) pass through so record-level flattening can decide per record.
  */
 function errorEnvelopeOutput(payload: Record<string, unknown>): ToolOutput | undefined {

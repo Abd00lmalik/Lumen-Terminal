@@ -8,7 +8,7 @@ related: [branch.md, analysis-synthesis.md, evidence-source.md, research-flows.m
 
 **Related documents:** `branch.md` · `analysis-synthesis.md` · `evidence-source.md` · `research-flows.md` · `thesis-monitor-reassessment.md` · `framework.md`
 
-> Converted from `HYPOTHESIS INTELLIGENCE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `HYPOTHESIS INTELLIGENCE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 HYPOTHESIS INTELLIGENCE
 

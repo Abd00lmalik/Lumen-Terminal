@@ -1,5 +1,5 @@
 /**
- * BENCHMARK SUITE A — epistemic-integrity + failure-matrix (deterministic).
+ * BENCHMARK SUITE A; epistemic-integrity + failure-matrix (deterministic).
  *
  * BENCHMARK.md D5/D6: adversarial evidence through the REAL pipeline. The probe drives a
  * mixed-class capability payload through Lui.handle → registry → TOOL_RESULT → evidence →
@@ -90,7 +90,7 @@ describe("BENCH-A1: epistemic classes survive the real pipeline (D5)", () => {
 
     // measurement stays measurement
     expect(byClass.get("OBSERVATION")).toBe(2);
-    // skill narrative/inference is DERIVED_OBSERVATION — never upgraded to observation
+    // skill narrative/inference is DERIVED_OBSERVATION; never upgraded to observation
     expect(byClass.get("DERIVED_OBSERVATION")).toBe(2);
     // speculation stays speculation
     expect(byClass.get("SPECULATION")).toBe(1);
@@ -102,7 +102,7 @@ describe("BENCH-A1: epistemic classes survive the real pipeline (D5)", () => {
       expect(e.provenance).toBeDefined();
     }
     // interpretations carry their basis into the graph (Evidence has no interpretationBasis
-    // field — the basis survives via observation text + DERIVED_OBSERVATION class; the tool
+    // field; the basis survives via observation text + DERIVED_OBSERVATION class; the tool
     // payload basis is enforced by the adapter contract instead).
     const derived = research!.evidence.filter((e) => e.evidenceClass === "DERIVED_OBSERVATION");
     expect(derived).toHaveLength(2);
@@ -152,7 +152,7 @@ describe("BENCH-A2: failure/edge matrix through the pipeline (D6)", () => {
       { outputClass: "UNAVAILABLE", content: "sentiment upstream returned no data", about: "BTC" },
     ]));
     const { r, workspace } = await researchWith(provider, registry);
-    // UNAVAILABLE output produced zero evidence — and did not crash the pipeline.
+    // UNAVAILABLE output produced zero evidence; and did not crash the pipeline.
     expect(r.research?.evidence).toHaveLength(0);
     expect(workspace.listEvidence()).toHaveLength(0);
   });
@@ -230,7 +230,7 @@ describe("BENCH-A2: failure/edge matrix through the pipeline (D6)", () => {
     expect(workspace.listEvidence()[0]?.freshness).toBe("STALE");
   });
 
-  it("an empty proxy basis is an unlabeled proxy — rejected at creation (lock §5)", () => {
+  it("an empty proxy basis is an unlabeled proxy; rejected at creation (lock §5)", () => {
     expect(() => {
       void createEvidence(
         {
@@ -280,7 +280,7 @@ describe("BENCH-A3: SAVE/MONITOR/state boundaries under benchmark conditions (D8
     expect(workspace.getMonitor(monitor.id)?.status).toBe("PROPOSED");
   });
 
-  it("trader-confirmed origin activates the monitor — still no background worker implied", async () => {
+  it("trader-confirmed origin activates the monitor; still no background worker implied", async () => {
     const workspace = new Workspace();
     const traderOrigin = { kind: "trader" as const, detail: "trader confirms" };
     const monitor = workspace.addMonitorProposal({
@@ -290,13 +290,13 @@ describe("BENCH-A3: SAVE/MONITOR/state boundaries under benchmark conditions (D8
     }, traderOrigin);
     const activated = workspace.activateMonitor(monitor.id, traderOrigin, "confirmed");
     expect(activated.status).toBe("ACTIVE");
-    // Persistent handoff state only — no scheduling/polling surface exists to call.
+    // Persistent handoff state only; no scheduling/polling surface exists to call.
     const wsAny = workspace as unknown as Record<string, unknown>;
     expect(wsAny["startWorker"]).toBeUndefined();
     expect(wsAny["schedulePolling"]).toBeUndefined();
   });
 
-  it("trader thesis is never mutated by assessment — structural re-check across a full assess cycle", async () => {
+  it("trader thesis is never mutated by assessment; structural re-check across a full assess cycle", async () => {
     const provider = new FakeModelProvider(new Map());
     scriptPipeline(provider);
     const registry = new CapabilityRegistry();

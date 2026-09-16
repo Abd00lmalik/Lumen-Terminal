@@ -1,5 +1,5 @@
 /**
- * Thesis workspace — the trader's thesis from the REAL backend. Assessments come
+ * Thesis workspace; the trader's thesis from the REAL backend. Assessments come
  * from the auditable assessment history; the thesis text itself is rendered verbatim
  * and is never edited by the system. Confidence and research quality render separately.
  */
@@ -69,7 +69,7 @@ export function ThesisPage() {
             </div>
           )}
           <Note>
-            Assessments are research results. The thesis object is never modified by them —
+            Assessments are research results. The thesis object is never modified by them
             revision is a separate, explicit trader action.
           </Note>
         </>
@@ -77,7 +77,7 @@ export function ThesisPage() {
     >
       <div className="page-head">
         <h1 className="page-title">Thesis</h1>
-        <p className="page-sub">Loaded from the backend — the trader's property, evaluated but never rewritten.</p>
+        <p className="page-sub">Loaded from the backend; the trader's property, evaluated but never rewritten.</p>
       </div>
 
       {error !== undefined && <BackendDownNote error={error} />}
@@ -85,7 +85,7 @@ export function ThesisPage() {
       {loaded && error === undefined && thesis === undefined && (
         <Empty
           title="No thesis in this workspace yet"
-          hint="Ask the agent to save one: e.g. 'Save a thesis: BTC follows liquidity cycles' — then make it active."
+          hint="Ask the agent to save one: e.g. 'Save a thesis: BTC follows liquidity cycles'; then make it active."
         />
       )}
 
@@ -104,7 +104,7 @@ export function ThesisPage() {
             <ConfidenceMeter confidence={thesis.confidence} />
             <span className="panel-kicker" style={{ marginLeft: 16 }}>research quality</span>
             <span className="badge gray">{thesis.researchQuality}</span>
-            <span style={{ color: "var(--text-3)", fontSize: 12 }}>— quality and confidence are different things; both are shown.</span>
+            <span style={{ color: "var(--text-3)", fontSize: 12 }}>quality and confidence are different things; both are shown.</span>
           </div>
 
           <div className="grid-2">
@@ -145,7 +145,7 @@ export function ThesisPage() {
             </div>
           </Panel>
 
-          <Panel kicker="assessment history" title={`${thesis.assessments.length} assessments — appended, never overwritten`}>
+          <Panel kicker="assessment history" title={`${thesis.assessments.length} assessments; appended, never overwritten`}>
             <div>
               {thesis.assessments.length === 0 && (
                 <Empty title="No assessments yet" hint='Ask "Does my thesis hold?" in the research workspace to produce one.' />

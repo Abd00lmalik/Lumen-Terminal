@@ -8,7 +8,7 @@ related: [framework.md, memory.md, safety-boundaries.md]
 
 **Related documents:** `framework.md` · `memory.md` · `safety-boundaries.md`
 
-> Converted from `PERSONALIZATION INTELLIGENCE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `PERSONALIZATION INTELLIGENCE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 PERSONALIZATION INTELLIGENCE
 

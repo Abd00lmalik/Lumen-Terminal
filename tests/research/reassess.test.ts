@@ -149,7 +149,7 @@ describe("M5 reassessment pathway (M5 §13–§15)", () => {
         ...JSON.parse(REASSESSMENT),
         monitorRevalidations: [
           { monitorId: "monitor_000001", outcome: "REVIEW", rationale: "tightening already happened; condition needs rewording by the trader" },
-          { monitorId: "monitor_999999", outcome: "REVIEW", rationale: "invented monitor — must be dropped" },
+          { monitorId: "monitor_999999", outcome: "REVIEW", rationale: "invented monitor; must be dropped" },
         ],
       })],
     ]));
@@ -163,7 +163,7 @@ describe("M5 reassessment pathway (M5 §13–§15)", () => {
     expect(result.monitorRevalidations[0]?.monitorId).toBe("monitor_000001");
   });
 
-  it("memory revalidation: current research outranks memory — memory preserved but marked not-confirmed (M5 §3/§18)", async () => {
+  it("memory revalidation: current research outranks memory; memory preserved but marked not-confirmed (M5 §3/§18)", async () => {
     const ws = setupWorkspace();
     setupMonitorAndMemory(ws);
     newEvidence(ws, "CPI reaccelerated to 4.2%");
@@ -180,7 +180,7 @@ describe("M5 reassessment pathway (M5 §13–§15)", () => {
     expect(memory?.validationNote).toContain("NOT confirmed");
   });
 
-  it("invented memory refs are dropped — only real memories are revalidated", async () => {
+  it("invented memory refs are dropped; only real memories are revalidated", async () => {
     const ws = setupWorkspace();
     setupMonitorAndMemory(ws);
     newEvidence(ws, "CPI reaccelerated");
@@ -241,7 +241,7 @@ describe("M5 LUI continuity integration (M5 §6/§7/§10/§21)", () => {
     scriptDefaults(provider, [{ action: "SAVE", description: "save finding", capabilities: [], params: {} }]);
     provider.responses.set("state.save_proposal", JSON.stringify({ artifactType: "finding", content: "ETF flows turned positive", derivedFromRefs: [], rationale: "reusable conclusion" }));
     const { lui, workspace } = buildLui(provider);
-    const result = await lui.handle("Save this finding", { kind: "trader", detail: "explicit save request — confirmed" });
+    const result = await lui.handle("Save this finding", { kind: "trader", detail: "explicit save request; confirmed" });
     expect(result.saved).toBeDefined();
     expect(result.memory).toBeDefined(); // memory layer entry created
     expect(workspace.listMemories()).toHaveLength(1);
@@ -271,13 +271,13 @@ describe("M5 LUI continuity integration (M5 §6/§7/§10/§21)", () => {
       earlyWarningConditions: ["funding resets"],
       suggestedCadence: "daily",
       scopeNote: "watch the thesis invalidation",
-      // requiresConfirmation is added by the LUI after validation — the model cannot set it.
+      // requiresConfirmation is added by the LUI after validation; the model cannot set it.
     }));
     const { lui, workspace } = buildLui(provider);
-    // The trader explicitly asked for this monitor — the request origin records the explicit
+    // The trader explicitly asked for this monitor; the request origin records the explicit
     // authorization (M5 §7/§11). The result is still only a PROPOSED monitor: activation is a
     // separate trader-confirmed operation.
-    const result = await lui.handle("Monitor the conditions that would invalidate my thesis", { kind: "trader", detail: "explicit monitor request — confirmed" });
+    const result = await lui.handle("Monitor the conditions that would invalidate my thesis", { kind: "trader", detail: "explicit monitor request; confirmed" });
     expect(result.monitorProposal?.requiresConfirmation).toBe(true);
     expect(result.monitor).toBeDefined();
     const monitor = workspace.listMonitors()[0];
@@ -316,7 +316,7 @@ describe("M5 LUI continuity integration (M5 §6/§7/§10/§21)", () => {
     expect(stateWs.listSavedArtifacts()).toHaveLength(0);
   });
 
-  it("continuity context recovery: a later request resolves thesis/assessment/monitor/memory from persisted state — not conversation memory", async () => {
+  it("continuity context recovery: a later request resolves thesis/assessment/monitor/memory from persisted state; not conversation memory", async () => {
     const ws = new Workspace();
     const thesis = ws.addThesis({ statement: "BTC trends up", objective: "swing" }, trader);
     ws.recordThesisAssessment({ thesisId: thesis.id, thesisVersion: 1, assessment: "WEAKENED", rationale: "prior assessment", supportingEvidence: [], contradictingEvidence: [], unresolved: [], whatWouldChange: [], confidence: "LOW" }, system);

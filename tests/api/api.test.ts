@@ -1,5 +1,5 @@
 /**
- * F0 API contract tests — deterministic, no network, no GEMINI_API_KEY (F0 mandate §22).
+ * F0 API contract tests; deterministic, no network, no GEMINI_API_KEY (F0 mandate §22).
  *
  * Coverage: request handling (valid/malformed/empty, API-does-not-select-flows), DTO safety
  * (epistemic status, judgment fields, uncertainty, limitations, no reasoning/secrets), workspace
@@ -83,7 +83,7 @@ async function makeApp(opts: {
 // ---------------------------------------------------------------------------
 describe("request handling", () => {
   // Full-engine integration test: given an explicit time budget so parallel-suite load
-  // (cold transform of 32 files) can never make it flaky. Deterministic — fakes only.
+  // (cold transform of 32 files) can never make it flaky. Deterministic; fakes only.
   it("accepts a valid research request and reaches the LUI boundary (model called with the message)", { timeout: 30_000 }, async () => {
     const provider = new FakeModelProvider(new Map());
     scriptLuiDefaults(provider, ADAPTIVE_PLAN);
@@ -92,7 +92,7 @@ describe("request handling", () => {
     const { app } = await makeApp({ provider });
     const res = await app.inject({ method: "POST", url: "/api/research", payload: { message: "What is affecting BTC right now?" } });
     expect(res.statusCode).toBe(200);
-    // The message reached the LUI (the interpreter prompt carries it) — the API is a seam.
+    // The message reached the LUI (the interpreter prompt carries it); the API is a seam.
     expect(provider.calls.some((c) => c.schemaName === "lui.normalized_request" && c.prompt.includes("What is affecting BTC right now?"))).toBe(true);
     await app.close();
   });
@@ -116,20 +116,20 @@ describe("request handling", () => {
     await app.close();
   });
 
-  it("never selects a flow itself — no client-side flow parameter can reach the engine as an override", async () => {
+  it("never selects a flow itself; no client-side flow parameter can reach the engine as an override", async () => {
     const provider = new FakeModelProvider(new Map());
     scriptLuiDefaults(provider, ADAPTIVE_PLAN);
     provider.responses.set("research.plan", responses.researchPlan());
     provider.responses.set("research.adaptive_decision", responses.adaptiveDecision("COMPLETE"));
     const { app } = await makeApp({ provider });
-    // A client trying to smuggle a flow field is ignored — the API contract carries only `message`.
+    // A client trying to smuggle a flow field is ignored; the API contract carries only `message`.
     const res = await app.inject({
       method: "POST",
       url: "/api/research",
       payload: { message: "What happened to BTC?", flow: "DOES_MY_THESIS_HOLD", action: "SAVE" },
     });
     expect(res.statusCode).toBe(200);
-    // The scripted plan is the adaptive RESEARCH plan — the injected `action: SAVE` did nothing.
+    // The scripted plan is the adaptive RESEARCH plan; the injected `action: SAVE` did nothing.
     expect(res.json().action).toBe("RESEARCH");
     await app.close();
   });
@@ -149,7 +149,7 @@ describe("request handling", () => {
 });
 
 // ---------------------------------------------------------------------------
-// DTO safety — epistemic status preserved
+// DTO safety; epistemic status preserved
 // ---------------------------------------------------------------------------
 describe("DTO safety", () => {
   it("preserves evidence epistemic classes, freshness, and refs in responses", async () => {
@@ -160,7 +160,7 @@ describe("DTO safety", () => {
     const { app } = await makeApp({ provider });
     const body = (await app.inject({ method: "POST", url: "/api/research", payload: { message: "What happened to BTC?" } })).json();
     const ev = body.evidence[0];
-    expect(ev.evidenceClass).toBe("OBSERVATION"); // class preserved as data — not flattened to source+text
+    expect(ev.evidenceClass).toBe("OBSERVATION"); // class preserved as data; not flattened to source+text
     expect(ev.freshness).toBe("CURRENT");
     expect(ev.sourceRefs.length).toBeGreaterThan(0);
     expect(ev.observedAt).toBeTruthy();
@@ -225,7 +225,7 @@ describe("workspace exposure", () => {
     await app.close();
   });
 
-  it("exposes memory with explicit status — STALE is returned as STALE, never merged into current", async () => {
+  it("exposes memory with explicit status; STALE is returned as STALE, never merged into current", async () => {
     const provider = new FakeModelProvider(new Map());
     const { app } = await makeApp({
       provider,
@@ -238,16 +238,16 @@ describe("workspace exposure", () => {
     const memories = (await app.inject({ method: "GET", url: "/api/memory" })).json();
     const statuses = memories.map((m: { status: string }) => m.status);
     expect(statuses).toContain("CURRENT");
-    expect(statuses).toContain("HISTORICAL"); // explicit status field — client never infers
+    expect(statuses).toContain("HISTORICAL"); // explicit status field; client never infers
     await app.close();
   });
 });
 
 // ---------------------------------------------------------------------------
-// SAVE authorization — the API cannot bypass the confirmation boundary
+// SAVE authorization; the API cannot bypass the confirmation boundary
 // ---------------------------------------------------------------------------
 describe("SAVE authorization", () => {
-  it("an unconfirmed SAVE persists NOTHING — awaiting confirmation, no artifact, no memory", async () => {
+  it("an unconfirmed SAVE persists NOTHING; awaiting confirmation, no artifact, no memory", async () => {
     const provider = new FakeModelProvider(new Map());
     scriptLuiDefaults(provider, SAVE_PLAN);
     provider.responses.set("state.save_proposal", JSON.stringify({
@@ -301,7 +301,7 @@ describe("SAVE authorization", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Thesis exposure — read + selection only
+// Thesis exposure; read + selection only
 // ---------------------------------------------------------------------------
 describe("thesis exposure", () => {
   it("exposes thesis, assessment history, and latest assessment; selection persists; no mutation endpoint", async () => {
@@ -347,7 +347,7 @@ describe("thesis exposure", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Monitoring exposure — proposal ≠ active; no fake infrastructure
+// Monitoring exposure; proposal ≠ active; no fake infrastructure
 // ---------------------------------------------------------------------------
 describe("monitoring exposure", () => {
   it("exposes proposals separately from active monitors; activation goes through the trader boundary", async () => {
@@ -384,7 +384,7 @@ describe("monitoring exposure", () => {
     await app.close();
   });
 
-  it("exposes SOURCE_UNAVAILABLE as monitor state data — never as an invalidation alert", async () => {
+  it("exposes SOURCE_UNAVAILABLE as monitor state data; never as an invalidation alert", async () => {
     const provider = new FakeModelProvider(new Map());
     const { app } = await makeApp({
       provider,
@@ -404,10 +404,10 @@ describe("monitoring exposure", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Security — no secrets, no auth headers, no filesystem, no trading surface
+// Security; no secrets, no auth headers, no filesystem, no trading surface
 // ---------------------------------------------------------------------------
 describe("security", () => {
-  it("health endpoint reports process availability only — no false provider/monitoring/trading signals", async () => {
+  it("health endpoint reports process availability only; no false provider/monitoring/trading signals", async () => {
     const provider = new FakeModelProvider(new Map());
     const { app } = await makeApp({ provider });
     const health = (await app.inject({ method: "GET", url: "/api/health" })).json();
@@ -433,7 +433,7 @@ describe("security", () => {
       const res = await app.inject({ method: attempt.method, url: attempt.url, payload: {} });
       expect([404, 405]).toContain(res.statusCode);
     }
-    // The registry structurally exposes no execution capability — probed through the app.
+    // The registry structurally exposes no execution capability; probed through the app.
     await app.close();
   });
 

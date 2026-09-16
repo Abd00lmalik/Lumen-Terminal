@@ -1,5 +1,5 @@
 /**
- * Transport resilience primitives — throttling, bounded retry/backoff, failure classification,
+ * Transport resilience primitives; throttling, bounded retry/backoff, failure classification,
  * and raw-response capture. Provider-neutral: the Bitget transports (M1) compose these; the
  * research engine never sees any of it.
  *
@@ -23,7 +23,7 @@ export type TransportFailureType = Extract<
 /**
  * Typed transport failure. `retriable` follows failure-recovery.md §11: only transient failures
  * (network errors, temporary provider errors, rate limits, timeouts) are retriable. Schema and
- * invalid-response problems are permanent for the same request — retrying cannot fix them.
+ * invalid-response problems are permanent for the same request; retrying cannot fix them.
  */
 export class TransportError extends Error {
   readonly failureType: TransportFailureType;
@@ -97,7 +97,7 @@ function parseRetryAfter(header: string | null | undefined): number | undefined 
 }
 
 // ---------------------------------------------------------------------------
-// Throttling — client-side rate limiting (FINDINGS.md R6: provider limits UNKNOWN)
+// Throttling; client-side rate limiting (FINDINGS.md R6: provider limits UNKNOWN)
 // ---------------------------------------------------------------------------
 
 export interface ThrottlerOptions {
@@ -138,7 +138,7 @@ export class Throttler {
 // ---------------------------------------------------------------------------
 
 export interface RetryPolicy {
-  /** Total attempts including the first. 1 = no retries. Bounded — retries never run indefinitely. */
+  /** Total attempts including the first. 1 = no retries. Bounded; retries never run indefinitely. */
   readonly maxAttempts: number;
   readonly baseDelayMs: number;
   readonly maxDelayMs: number;
@@ -179,7 +179,7 @@ export interface RetryOptions {
 /**
  * Retry a transport call with exponential backoff and full jitter. Only transient failures
  * (failure-recovery.md §11) are retried; permanent failures propagate immediately. Bounded by
- * `policy.maxAttempts` — never indefinite.
+ * `policy.maxAttempts`; never indefinite.
  */
 export async function withRetry<T>(fn: (attempt: number) => Promise<T>, options: RetryOptions): Promise<T> {
   const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -192,7 +192,7 @@ export async function withRetry<T>(fn: (attempt: number) => Promise<T>, options:
     } catch (error) {
       if (!(error instanceof TransportError)) throw error;
       const isLastAttempt = attempt === policy.maxAttempts;
-      // Permanent failures propagate immediately as themselves — retrying cannot fix them and
+      // Permanent failures propagate immediately as themselves; retrying cannot fix them and
       // wrapping them in RetryExhaustedError would misrepresent the failure (failure-recovery.md §11).
       if (!error.retriable) throw error;
       lastError = error;
@@ -211,7 +211,7 @@ export async function withRetry<T>(fn: (attempt: number) => Promise<T>, options:
 }
 
 // ---------------------------------------------------------------------------
-// Raw capture — provenance requires referenceable raw responses (final lock §7)
+// Raw capture; provenance requires referenceable raw responses (final lock §7)
 // ---------------------------------------------------------------------------
 
 /**

@@ -1,5 +1,5 @@
 /**
- * Thesis & SavedArtifact — M3 domain additions (architecture objects deliberately deferred
+ * Thesis & SavedArtifact; M3 domain additions (architecture objects deliberately deferred
  * from M0; see objects.ts header and IMPLEMENTATION_PLAN.md).
  *
  * Architectural basis:
@@ -20,7 +20,7 @@ import { createProvenance, type Provenance, type ProvenanceOrigin } from "./prov
 import type { ISO } from "./objects.js";
 
 // ---------------------------------------------------------------------------
-// THESIS — the trader's own position; system NEVER mutates it (thesis.md §1)
+// THESIS; the trader's own position; system NEVER mutates it (thesis.md §1)
 // ---------------------------------------------------------------------------
 
 /** Thesis lifecycle states (object-lifecycle-state-machine.md THESIS LIFECYCLE). */
@@ -53,12 +53,12 @@ export interface ThesisAssumption {
 }
 
 /**
- * Thesis assessment history record (M5 §9 — thesis-monitor-reassessment.md §7 THESIS ASSESSMENT).
+ * Thesis assessment history record (M5 §9; thesis-monitor-reassessment.md §7 THESIS ASSESSMENT).
  * An ASSESSMENT is a research result ABOUT the thesis; it is NOT a mutation of the thesis itself.
  * The thesis object never changes when assessments are recorded.
  */
 /**
- * Assessment vocabulary for thesis ASSESSMENTS (M4b §3: existing judgment vocabulary —
+ * Assessment vocabulary for thesis ASSESSMENTS (M4b §3: existing judgment vocabulary
  * SUPPORTED/WEAKENED/MATERIALLY_CHALLENGED/UNSUPPORTED/INDETERMINATE). This is the evaluation
  * outcome about a thesis, distinct from the thesis's own lifecycle `ThesisStatus`.
  */
@@ -69,7 +69,7 @@ export interface ThesisAssessmentRecord {
   readonly thesisId: string;
   /** Exact thesis version assessed (assessment → thesis version provenance). */
   readonly thesisVersion: number;
-  /** Existing judgment vocabulary — no new taxonomy (M4 §22; M4b §3; M5 §14). */
+  /** Existing judgment vocabulary; no new taxonomy (M4 §22; M4b §3; M5 §14). */
   readonly assessment: ThesisAssessmentStatus;
   readonly rationale: string;
   readonly supportingEvidence: readonly string[];
@@ -115,7 +115,7 @@ export function createThesis(
     alternatives?: readonly string[];
     confidence?: "HIGH" | "MODERATE" | "LOW";
   },
-  /** Thesis creation is a TRADER action (or trader-approved import) — provenance records it. */
+  /** Thesis creation is a TRADER action (or trader-approved import); provenance records it. */
   origin: ProvenanceOrigin,
   at: Date = new Date(),
 ): Thesis {
@@ -143,7 +143,7 @@ export function createThesis(
 }
 
 /**
- * Version a thesis. THE TRADER must be the origin — the system never silently rewrites the
+ * Version a thesis. THE TRADER must be the origin; the system never silently rewrites the
  * thesis (thesis.md; M3 §15). Previous version stays fully preserved via priorVersionRef.
  */
 export function reviseThesis(
@@ -154,7 +154,7 @@ export function reviseThesis(
   at: Date = new Date(),
 ): Thesis {
   if (origin.kind !== "trader") {
-    throw new Error("thesis revision requires trader origin — the system must never silently rewrite the trader's thesis");
+    throw new Error("thesis revision requires trader origin; the system must never silently rewrite the trader's thesis");
   }
   return Object.freeze({
     ...prior,
@@ -175,14 +175,14 @@ export function reviseThesis(
 }
 
 // ---------------------------------------------------------------------------
-// SAVED_ARTIFACT — persistent reusable memory via SAVE (lui-save-action.md, memory.md)
+// SAVED_ARTIFACT; persistent reusable memory via SAVE (lui-save-action.md, memory.md)
 // ---------------------------------------------------------------------------
 
 export interface SavedArtifact {
   readonly id: string;
   readonly type: string; // e.g. "finding", "research-conclusion", "framework", "preference"
   readonly content: string;
-  /** Workspace objects the artifact derives from — provenance, not decoration. */
+  /** Workspace objects the artifact derives from; provenance, not decoration. */
   readonly derivedFromRefs: readonly string[];
   readonly rationale: string;
   readonly researchRef?: string;
@@ -204,7 +204,7 @@ export function createSavedArtifact(
   at: Date = new Date(),
 ): SavedArtifact {
   if (input.content.trim() === "") {
-    throw new Error("SavedArtifact requires non-empty content — never persist an empty SAVE");
+    throw new Error("SavedArtifact requires non-empty content; never persist an empty SAVE");
   }
   return Object.freeze({
     id: newId(idPrefixes.artifact),

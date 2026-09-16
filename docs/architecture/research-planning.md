@@ -8,7 +8,7 @@ related: [research-execution-engine.md, execution-scheduler.md, tool-skill-orche
 
 **Related documents:** `research-execution-engine.md` · `execution-scheduler.md` · `tool-skill-orchestration.md` · `completion-stopping.md`
 
-> Converted from `RESEARCH PLANNING & ORCHESTRATION.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `RESEARCH PLANNING & ORCHESTRATION.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 RESEARCH PLANNING & ORCHESTRATION
 

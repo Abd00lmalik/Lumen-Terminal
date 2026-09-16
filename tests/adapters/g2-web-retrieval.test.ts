@@ -1,5 +1,5 @@
 /**
- * G2 web/primary-source retrieval — deterministic tests (no network) + env-gated live test.
+ * G2 web/primary-source retrieval; deterministic tests (no network) + env-gated live test.
  *
  * Laws under test (mandate §14–22):
  * - SOURCE ≠ EVIDENCE: retrieve returns source records with URL/publisher/class/dates/raw-ref;
@@ -11,7 +11,7 @@
  * - §19 safety: SSRF guard rejects private/loopback/link-local and non-http(s) schemes BEFORE
  *   fetch; page size bounded; no credential forwarding.
  * - Live (env-gated): one real authoritative retrieval when FREEBUFF_LIVE=1 and the network
- *   allows — never a suite dependency.
+ *   allows; never a suite dependency.
  */
 import { describe, expect, it } from "vitest";
 import { G2WebRetrievalAdapter, classifySource, extractHtml, contentFingerprint } from "../../src/adapters/g2-web-retrieval.js";
@@ -48,7 +48,7 @@ describe("G2 source classification (conservative, domain-based)", () => {
     expect(classifySource("https://www.reddit.com/r/Bitcoin/comments/x")).toBe("community/social-signal");
   });
 
-  it("UNKNOWN domains default to secondary/unclassified — never silently primary", () => {
+  it("UNKNOWN domains default to secondary/unclassified; never silently primary", () => {
     expect(classifySource("https://random-crypto-blog.example.com/post/1")).toBe("secondary/unclassified");
   });
 });
@@ -83,7 +83,7 @@ describe("G2 adapter (deterministic, fake fetch)", () => {
     expect(source.publishedAt).toBe("2026-09-15T18:00:00Z");
     expect(source.contentReference).toContain("#excerpt:");
     expect(source.retrievedAt).toBeTruthy();
-    // Raw capture holds the full page (provenance — final lock §7).
+    // Raw capture holds the full page (provenance; final lock §7).
     expect(g2.rawCapture.size).toBeGreaterThan(0);
   });
 
@@ -183,13 +183,13 @@ describe("G2 adapter (deterministic, fake fetch)", () => {
     expect(registry.resolve("SOURCE_VALIDATION").map((r) => r.adapter.providerId)).toEqual(["g2/web-retrieval"]);
     const result = await registry.execute("SOURCE_VALIDATION", { intent: "RETRIEVE", url: "https://www.federalreserve.gov/x.htm" }, ORIGIN);
     expect(result.failure.type).toBe("NONE");
-    // The output carries sourceClass — evidence keeps the distinction as data (no flattening).
+    // The output carries sourceClass; evidence keeps the distinction as data (no flattening).
     expect(result.normalizedOutput[0]!.content).toHaveProperty("sourceClass", "primary/official");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Live verification — env-gated, never a suite dependency (§21).
+// Live verification; env-gated, never a suite dependency (§21).
 // ---------------------------------------------------------------------------
 const LIVE = process.env.FREEBUFF_LIVE === "1";
 describe.skipIf(!LIVE)("G2 live (env-gated: FREEBUFF_LIVE=1)", () => {
@@ -199,7 +199,7 @@ describe.skipIf(!LIVE)("G2 live (env-gated: FREEBUFF_LIVE=1)", () => {
       intent: "RETRIEVE",
       url: "https://www.federalreserve.gov/newsevents/pressreleases.htm",
     });
-    // Network may be down at run time — report honestly either way.
+    // Network may be down at run time; report honestly either way.
     if (result.failure.type !== "NONE") {
       console.log(`[G2 live] BLOCKED-EXTERNAL: ${result.failure.type}: ${result.failure.message}`);
       return;

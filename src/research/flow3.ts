@@ -1,22 +1,22 @@
 /**
- * Flow 3 — WHAT COULD AFFECT IT? (drivers/catalysts/risks/dependencies investigation) — M4b.
+ * Flow 3; WHAT COULD AFFECT IT? (drivers/catalysts/risks/dependencies investigation); M4b.
  *
  * Architectural basis: research-flows.md FLOW 3.
  * - This is an investigation of POTENTIAL drivers, catalysts, risks, dependencies, and external
- *   factors that could materially affect the target — NOT price prediction, NOT a trading
+ *   factors that could materially affect the target; NOT price prediction, NOT a trading
  *   strategy, NOT autonomous decision-making (M4b §2/§8).
  * - Epistemic distinctions (M4b §2): a possible driver is not automatically a current driver;
  *   a plausible mechanism is not evidence the event will happen; a model suggestion is not
  *   evidence; missing data is not evidence the factor does not exist. Every factor carries an
  *   explicit status: OBSERVED_CURRENT_DRIVER / POTENTIAL_DRIVER / CATALYST / RISK / DEPENDENCY /
- *   SPECULATIVE_FACTOR (factor-status vocabulary authored for this flow's OUTPUT STRUCTURE —
+ *   SPECULATIVE_FACTOR (factor-status vocabulary authored for this flow's OUTPUT STRUCTURE
  *   the underlying objects remain the existing Evidence/Claim/Hypothesis/Analysis/Judgment set;
  *   no new domain enums were invented).
  * - For each material factor: what it is, why it could matter, supporting AND contradicting
  *   evidence, transmission mechanism, current-vs-potential status, uncertainty, provenance.
  * - "Could affect" stays CONDITIONAL wherever evidence does not establish a current effect.
  * - The flow defines objective + mode (EXPLORATORY); the shared runner + registry pick
- *   capabilities — no Flow→Tool hardcoding (M4b §5); the adaptive loop handles follow-ups.
+ *   capabilities; no Flow→Tool hardcoding (M4b §5); the adaptive loop handles follow-ups.
  */
 
 import type { ModelProvider } from "../model/provider.js";
@@ -29,16 +29,16 @@ import type { WorkspaceStore } from "../persistence/index.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
 
 // ---------------------------------------------------------------------------
-// Flow objective — EXPLORATORY mode (drivers/catalysts/risks; no prediction)
+// Flow objective; EXPLORATORY mode (drivers/catalysts/risks; no prediction)
 // ---------------------------------------------------------------------------
 
 const EXPLORATORY_GUIDANCE = [
-  "EXPLORATORY MODE (Flow 3 — WHAT COULD AFFECT IT?): identify potentially material factors, not predictions.",
+  "EXPLORATORY MODE (Flow 3; WHAT COULD AFFECT IT?): identify potentially material factors, not predictions.",
   "- Investigate: current drivers, future catalysts, risks, dependencies, macro/market/sector/ecosystem factors, and regulatory/policy factors WHEN capabilities can support them.",
   "- For each factor, capture the TRANSMISSION MECHANISM (how it would reach the target) and the CONDITIONS under which it would matter.",
   "- EPISTEMIC RULES: a possible driver is not automatically a current driver; a plausible mechanism is not evidence the event will happen; your own suggestion is not evidence; missing data does not mean the factor does not exist.",
   "- Label factor status honestly: OBSERVED_CURRENT_DRIVER only where evidence shows current effect; otherwise POTENTIAL_DRIVER / CATALYST / RISK / DEPENDENCY / SPECULATIVE_FACTOR.",
-  "- This flow NEVER outputs price predictions, return probabilities, or trade signals — conditional influence only.",
+  "- This flow NEVER outputs price predictions, return probabilities, or trade signals; conditional influence only.",
   "- PRIORITY: factors whose materiality is uncertain but impact-relevant get one more targeted look; do not research every conceivable factor.",
 ].join("\n");
 
@@ -49,7 +49,7 @@ export const FLOW3_OBJECTIVE: FlowObjective = {
 };
 
 // ---------------------------------------------------------------------------
-// Factor schema — output structure over validated evidence (no new domain objects)
+// Factor schema; output structure over validated evidence (no new domain objects)
 // ---------------------------------------------------------------------------
 
 export type FactorStatus =
@@ -67,13 +67,13 @@ const FACTOR_STATUSES = new Set<string>([
 export interface Factor {
   /** What the factor is. */
   readonly name: string;
-  /** Why it could materially affect the target — the transmission mechanism. */
+  /** Why it could materially affect the target; the transmission mechanism. */
   readonly mechanism: string;
-  /** Current vs potential vs speculative — the epistemic heart of Flow 3. */
+  /** Current vs potential vs speculative; the epistemic heart of Flow 3. */
   readonly status: FactorStatus;
   /** Conditions under which this factor would actually matter (conditional influence). */
   readonly wouldMatterWhen: readonly string[];
-  /** Evidence supporting the factor's relevance (must cite context refs — validated below). */
+  /** Evidence supporting the factor's relevance (must cite context refs; validated below). */
   readonly supportingRefs: readonly string[];
   /** Evidence contradicting or weakening the factor's relevance (contradictions preserved). */
   readonly contradictingRefs: readonly string[];
@@ -82,10 +82,10 @@ export interface Factor {
 }
 
 export interface FactorLandscape {
-  /** One coherent statement of what could move the target — not a factor dump. */
+  /** One coherent statement of what could move the target; not a factor dump. */
   readonly overallAssessment: string;
   readonly factors: readonly Factor[];
-  /** Factors the research could NOT establish — absence of evidence, not evidence of absence. */
+  /** Factors the research could NOT establish; absence of evidence, not evidence of absence. */
   readonly unresolvedFactors: readonly string[];
   readonly missingInformation: readonly string[];
   readonly confidence: "HIGH" | "MODERATE" | "LOW";
@@ -121,15 +121,16 @@ export const FACTOR_LANDSCAPE_SCHEMA_DESC = [
 ].join("\n");
 
 const FACTOR_SYSTEM = [
-  "You are the factor analyst of a trading RESEARCH workbench (Flow 3 — WHAT COULD AFFECT IT?).",
+  "You are the factor analyst of a trading RESEARCH workbench (Flow 3; WHAT COULD AFFECT IT?).",
   "You receive the VALIDATED research context (epistemic classes preserved). You investigate influence, you do not predict prices.",
   "Hard rules:",
   "- A POSSIBLE driver is not a CURRENT driver. Use OBSERVED_CURRENT_DRIVER only when context evidence demonstrates a current effect; otherwise use POTENTIAL_DRIVER / CATALYST / RISK / DEPENDENCY / SPECULATIVE_FACTOR.",
-  "- Every factor needs a transmission MECHANISM (how it reaches the target) and the conditions under which it would matter — 'could affect' stays conditional.",
+  "- Every factor needs a transmission MECHANISM (how it reaches the target) and the conditions under which it would matter; 'could affect' stays conditional.",
   "- Your own background knowledge is NOT evidence. Only cite evidence ids present in the context; do not fabricate refs.",
-  "- Missing data is NOT evidence that a factor does not exist — list it under unresolvedFactors/missingInformation instead.",
-  "- Record evidence that WEAKENS a factor too (contradictingRefs) — do not curate only supportive items.",
+  "- Missing data is NOT evidence that a factor does not exist; list it under unresolvedFactors/missingInformation instead.",
+  "- Record evidence that WEAKENS a factor too (contradictingRefs); do not curate only supportive items.",
   "- NO price predictions, NO probability of returns, NO buy/sell recommendations. Influence and conditions only.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 // ---------------------------------------------------------------------------
@@ -142,9 +143,14 @@ export interface Flow3Options {
   readonly workspace: Workspace;
   readonly store: WorkspaceStore;
   readonly asset?: string;
-  readonly horizon?: string; // e.g. "next few weeks" — a scope input, never a prediction
+  readonly horizon?: string; // e.g. "next few weeks"; a scope input, never a prediction
   readonly constraints?: readonly string[];
   readonly maxRounds?: number;
+  /**
+   * Wall-clock deadline for the whole run (epoch ms); forwarded to the shared flow runner's
+   * honest TIME_BUDGET_EXHAUSTED stop. Optional; tests omit it.
+   */
+  readonly deadlineMs?: number;
   readonly now?: () => Date;
 }
 
@@ -176,6 +182,7 @@ export async function runFlow3(objective: string, options: Flow3Options): Promis
     ...(options.constraints !== undefined ? { constraints: options.constraints } : {}),
     capabilityParams: options.asset !== undefined ? { asset: options.asset } : {},
     ...(options.maxRounds !== undefined ? { maxRounds: options.maxRounds } : {}),
+    ...(options.deadlineMs !== undefined ? { deadlineMs: options.deadlineMs } : {}),
     ...(options.now !== undefined ? { now: options.now } : {}),
   });
 
@@ -183,12 +190,12 @@ export async function runFlow3(objective: string, options: Flow3Options): Promis
   try {
     landscape = await mapFactors(flowOutcome, objective, options);
   } catch (error) {
-    // M4 §33 failure law: provider-level failure keeps its type — never laundered.
+    // M4 §33 failure law: provider-level failure keeps its type; never laundered.
     const failure = error instanceof ModelFailure ? error : new ModelFailure("INVALID_OUTPUT", String(error), false);
     return { outcome: flowOutcome, landscape: undefined, modelFailure: failure, response: failureResponse(failure) };
   }
   if (landscape === undefined) {
-    const failure = new ModelFailure("INVALID_OUTPUT", "factor landscape failed validation — no factor claims asserted", false);
+    const failure = new ModelFailure("INVALID_OUTPUT", "factor landscape failed validation; no factor claims asserted", false);
     return { outcome: flowOutcome, landscape: undefined, modelFailure: failure, response: failureResponse(failure) };
   }
 
@@ -199,7 +206,7 @@ export async function runFlow3(objective: string, options: Flow3Options): Promis
       inputs: flowOutcome.evidence.map((e) => e.id),
       findings: [
         landscape.overallAssessment,
-        ...landscape.factors.map((f) => `[${f.status}] ${f.name} — mechanism: ${f.mechanism}`),
+        ...landscape.factors.map((f) => `[${f.status}] ${f.name}; mechanism: ${f.mechanism}`),
       ],
       conclusion: landscape.overallAssessment,
       uncertainty: [...landscape.uncertainty, ...landscape.unresolvedFactors.map((u) => `unresolved factor: ${u}`)],
@@ -208,7 +215,7 @@ export async function runFlow3(objective: string, options: Flow3Options): Promis
     at(),
   );
 
-  // Judgment: what could affect the target — with current-vs-potential distinction preserved.
+  // Judgment: what could affect the target; with current-vs-potential distinction preserved.
   const judgment = workspace.addJudgment(
     {
       researchRef: research.id,
@@ -223,7 +230,7 @@ export async function runFlow3(objective: string, options: Flow3Options): Promis
       uncertainty: [...landscape.uncertainty, ...landscape.unresolvedFactors.map((u) => `unresolved: ${u}`)],
       unresolvedQuestions: landscape.missingInformation,
       implications: [
-        "factors are influence candidates with conditions — not predictions or trade signals",
+        "factors are influence candidates with conditions; not predictions or trade signals",
         "monitoring specific factors requires separate trader confirmation",
       ],
     },
@@ -250,7 +257,7 @@ async function mapFactors(flowOutcome: FlowOutcome, objective: string, options: 
     system: FACTOR_SYSTEM,
     prompt: [
       `Research objective: ${objective}`,
-      `Research status: ${flowOutcome.stoppedBecause} — ${flowOutcome.finalDecision.rationale}`,
+      `Research status: ${flowOutcome.stoppedBecause}; ${flowOutcome.finalDecision.rationale}`,
       "VALIDATED RESEARCH CONTEXT:",
       renderResearchContext(flowOutcome.context),
     ].join("\n"),
@@ -299,18 +306,18 @@ function buildFlow3Response(landscape: FactorLandscape, flowOutcome: FlowOutcome
   const potential = landscape.factors.filter((f) => f.status !== "OBSERVED_CURRENT_DRIVER");
   if (current.length > 0) {
     lines.push(`**Observed current drivers:**`);
-    for (const f of current.slice(0, 3)) lines.push(`  • ${f.name} — ${f.mechanism}`);
+    for (const f of current.slice(0, 3)) lines.push(`  • ${f.name}; ${f.mechanism}`);
   }
   if (potential.length > 0) {
-    lines.push(`**Potential factors (conditional — not predictions):**`);
-    for (const f of potential.slice(0, 4)) lines.push(`  • [${f.status}] ${f.name} — matters when: ${f.wouldMatterWhen.slice(0, 2).join("; ") || "conditions unclear"}`);
+    lines.push(`**Potential factors (conditional; not predictions):**`);
+    for (const f of potential.slice(0, 4)) lines.push(`  • [${f.status}] ${f.name}; matters when: ${f.wouldMatterWhen.slice(0, 2).join("; ") || "conditions unclear"}`);
   }
   if (landscape.unresolvedFactors.length > 0) {
     lines.push(`**Unresolved factors:** ${landscape.unresolvedFactors.slice(0, 3).join("; ")} (missing data is not evidence of absence)`);
   }
-  lines.push(`**Confidence:** ${landscape.confidence}${landscape.uncertainty.length > 0 ? ` — key uncertainty: ${landscape.uncertainty[0]}` : ""}`);
+  lines.push(`**Confidence:** ${landscape.confidence}${landscape.uncertainty.length > 0 ? `; key uncertainty: ${landscape.uncertainty[0]}` : ""}`);
   if (landscape.whatWouldChange.length > 0) lines.push(`**What would change this:** ${landscape.whatWouldChange.slice(0, 2).join("; ")}`);
-  lines.push(`**Traceability:** research ${flowOutcome.researchId} — every factor's evidence lives in the research state; deeper levels available on request.`);
+  lines.push(`**Traceability:** research ${flowOutcome.researchId}; every factor's evidence lives in the research state; deeper levels available on request.`);
   void objective;
   return lines.join("\n");
 }

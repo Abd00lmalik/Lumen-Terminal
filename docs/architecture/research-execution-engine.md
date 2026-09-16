@@ -8,7 +8,7 @@ related: [research-planning.md, execution-scheduler.md, tool-skill-orchestration
 
 **Related documents:** `research-planning.md` · `execution-scheduler.md` · `tool-skill-orchestration.md` · `quality-control.md`
 
-> Converted from `RESEARCH EXECUTION ENGINE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `RESEARCH EXECUTION ENGINE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 RESEARCH EXECUTION ENGINE
 

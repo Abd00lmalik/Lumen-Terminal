@@ -1,10 +1,10 @@
 /**
- * Landing page — the most expressive surface. Signature art: a candlestick spine that
+ * Landing page; the most expressive surface. Signature art: a candlestick spine that
  * dissolves upward into an evidence constellation (CSS/SVG only, no images, no 3D libs).
  */
 import { useNavigate } from "react-router-dom";
 
-/** Deterministic pseudo-random candle series (fixed seed — no flicker between renders). */
+/** Deterministic pseudo-random candle series (fixed seed; no flicker between renders). */
 function candles(n: number): { up: boolean; h: number }[] {
   const out: { up: boolean; h: number }[] = [];
   let s = 7;
@@ -62,8 +62,8 @@ function HeroArt() {
 }
 
 const CAPABILITIES = [
-  { glyph: "◎", title: "Evidence-first answers", body: "Every judgment traces to classified evidence — observations stay observations, interpretations stay labeled, proxy data carries its basis." },
-  { glyph: "⨂", title: "Built-in falsification", body: "The workbench actively searches for what could prove your thesis wrong — and tells you when it finds nothing instead of pretending." },
+  { glyph: "◎", title: "Evidence-first answers", body: "Every judgment traces to classified evidence; observations stay observations, interpretations stay labeled, proxy data carries its basis." },
+  { glyph: "⨂", title: "Built-in falsification", body: "The workbench actively searches for what could prove your thesis wrong; and tells you when it finds nothing instead of pretending." },
   { glyph: "∿", title: "Continuity that decays honestly", body: "Saved knowledge is tracked with freshness. Stale memory never silently outranks current research." },
 ];
 
@@ -95,7 +95,7 @@ export function LandingPage() {
         </h1>
         <p className="hero-sub">
           Lumen is an AI research workstation for traders. It plans investigations, gathers
-          classified evidence, tests your thesis against it — and shows its uncertainty instead
+          classified evidence, tests your thesis against it; and shows its uncertainty instead
           of hiding it.
         </p>
         <div className="hero-ctas">
@@ -106,7 +106,7 @@ export function LandingPage() {
         <div className="research-note-bar">
           <span className="badge teal">research only</span>
           <span style={{ color: "var(--text-2)", fontSize: 13 }}>
-            No order tickets, no execution, no leverage controls — the trader makes every decision.
+            No order tickets, no execution, no leverage controls; the trader makes every decision.
             Lumen does the investigating.
           </span>
         </div>
@@ -128,13 +128,13 @@ export function LandingPage() {
 
       <section className="landing-section" id="workflow">
         <h2>How a question becomes a judgment</h2>
-        <p className="lead">A structured pipeline — every stage produces artifacts you can inspect, not a wall of text.</p>
+        <p className="lead">A structured pipeline; every stage produces artifacts you can inspect, not a wall of text.</p>
         <div className="flow-strip">
           {[
             ["01", "You ask", "Plain language in. The workbench classifies intent and resolves context from your workspace."],
-            ["02", "It plans", "A living research plan picks capabilities by information value — never a fixed script."],
+            ["02", "It plans", "A living research plan picks capabilities by information value; never a fixed script."],
             ["03", "It investigates", "Market, news, sentiment and macro evidence gathered, classified and time-stamped."],
-            ["04", "It cross-checks", "Contradictions are preserved and typed — never forced into a tidy story."],
+            ["04", "It cross-checks", "Contradictions are preserved and typed; never forced into a tidy story."],
             ["05", "You decide", "A judgment with confidence, uncertainty, and what would change it. The call is yours."],
           ].map(([n, t, b]) => (
             <div className="flow-step" key={n}>
@@ -153,7 +153,7 @@ export function LandingPage() {
           Research content comes from your own workspace via the workbench backend.
         </div>
         <div>
-          Research workstation — not an exchange interface. Not affiliated with Bitget.
+          Research workstation; not an exchange interface. Not affiliated with Bitget.
           <br />Research only · no trading execution · no keys in the browser.
         </div>
       </footer>

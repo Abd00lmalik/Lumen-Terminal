@@ -1,5 +1,5 @@
 /**
- * Persistence — smallest layer that satisfies lock §14: workspaces, research objects, evidence,
+ * Persistence; smallest layer that satisfies lock §14: workspaces, research objects, evidence,
  * hypotheses, claims, judgments, provenance, and history must survive beyond individual messages.
  * In-memory + file-backed MVP is explicitly acceptable; the object model must be respected and
  * the research workspace must not be flattened into a conversation transcript.
@@ -46,7 +46,7 @@ export class FileStore implements WorkspaceStore {
     try {
       raw = await fs.readFile(this.filePath, "utf8");
     } catch {
-      return undefined; // no workspace yet — not an error
+      return undefined; // no workspace yet; not an error
     }
     return Workspace.fromSnapshot(JSON.parse(raw) as WorkspaceSnapshot);
   }

@@ -8,7 +8,7 @@ related: [lui-universal-core.md, object-lifecycle-state-machine.md]
 
 **Related documents:** `lui-universal-core.md` · `object-lifecycle-state-machine.md`
 
-> Converted from `MANAGE_STATE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `MANAGE_STATE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 MANAGE_STATE
 

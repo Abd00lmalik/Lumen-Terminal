@@ -8,7 +8,7 @@ related: [source-discovery-retrieval.md, evidence-source.md]
 
 **Related documents:** `source-discovery-retrieval.md` · `evidence-source.md`
 
-> Converted from `SOURCE INTELLIGENCE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `SOURCE INTELLIGENCE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 SOURCE INTELLIGENCE
 

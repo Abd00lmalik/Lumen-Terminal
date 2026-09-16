@@ -8,7 +8,7 @@ related: [research-object-model.md, context-session.md, thesis-monitor-reassessm
 
 **Related documents:** `research-object-model.md` · `context-session.md` · `thesis-monitor-reassessment.md`
 
-> Converted from `RESEARCH MEMORY  KNOWLEDGE PERSISTE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `RESEARCH MEMORY  KNOWLEDGE PERSISTE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 RESEARCH MEMORY / KNOWLEDGE PERSISTENCE
 

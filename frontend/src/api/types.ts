@@ -1,5 +1,5 @@
 /**
- * API contract types — mirrored from the backend's src/api/dto.ts and API_CONTRACT.md.
+ * API contract types; mirrored from the backend's src/api/dto.ts and API_CONTRACT.md.
  * These describe what the F0 backend actually returns; the view types in data/types.ts
  * are adapted FROM these (never the other way around). Keep in sync with the backend.
  */
@@ -94,7 +94,7 @@ export interface ResearchDto {
   readonly hypothesisRefs: readonly string[];
   readonly judgmentRefs: readonly string[];
   readonly history: readonly string[];
-  /** Present on list endpoints: explicit current-ness — the client never infers it. */
+  /** Present on list endpoints: explicit current-ness; the client never infers it. */
   readonly isCurrent?: boolean;
 }
 
@@ -138,7 +138,7 @@ export interface ThesisAssessmentDto {
   readonly unresolved: readonly string[];
   readonly whatWouldChange: readonly string[];
   readonly confidence?: ConfidenceDto;
-  /** QUALITY ≠ CONFIDENCE — separate data, rendered separately. */
+  /** QUALITY ≠ CONFIDENCE; separate data, rendered separately. */
   readonly researchQuality?: "STRONG" | "MIXED" | "WEAK" | "UNAVAILABLE";
   readonly researchRef?: string;
   readonly createdAt: string;
@@ -356,7 +356,7 @@ export interface MonitorsDto {
   readonly completed: readonly MonitorDto[];
 }
 
-/** GET /api/health — process availability ONLY (never claims provider/monitoring health). */
+/** GET /api/health; process availability ONLY (never claims provider/monitoring health). */
 export interface HealthDto {
   readonly status: string;
 }

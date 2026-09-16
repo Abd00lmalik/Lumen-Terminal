@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FRESHNESS_PROFILES, assessFreshness, freshnessLimitations } from "../../src/adapters/freshness.js";
 
-describe("freshness profiles (final lock §8 — derived from FINDINGS.md §2)", () => {
+describe("freshness profiles (final lock §8; derived from FINDINGS.md §2)", () => {
   it("profiles carry the documented lag verbatim for provenance", () => {
     expect(FRESHNESS_PROFILES.rss.documentedLag).toContain("15-60 minutes");
     expect(FRESHNESS_PROFILES.community.documentedLag).toContain("~15 min lag");

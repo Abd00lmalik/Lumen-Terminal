@@ -8,7 +8,7 @@ related: [source-intelligence.md, evidence-source.md, tool-skill-orchestration.m
 
 **Related documents:** `source-intelligence.md` · `evidence-source.md` · `tool-skill-orchestration.md`
 
-> Converted from `SOURCE DISCOVERY & RETRIEVAL INTELL.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `SOURCE DISCOVERY & RETRIEVAL INTELL.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 SOURCE DISCOVERY & RETRIEVAL INTELLIGENCE
 
@@ -346,37 +346,37 @@ Narrowing may introduce:
 
 Research may use multiple search passes.
 
-### PASS 1 — DISCOVERY
+### PASS 1; DISCOVERY
 
 Goal:
 
 Identify relevant entities, sources, terminology, and initial evidence.
 
-### PASS 2 — VALIDATION
+### PASS 2; VALIDATION
 
 Goal:
 
 Verify important claims and locate stronger or primary sources.
 
-### PASS 3 — CONTRADICTION
+### PASS 3; CONTRADICTION
 
 Goal:
 
 Search for evidence that weakens the current interpretation.
 
-### PASS 4 — GAP FILLING
+### PASS 4; GAP FILLING
 
 Goal:
 
 Retrieve information specifically missing from the current evidence graph.
 
-### PASS 5 — DISCRIMINATING EVIDENCE
+### PASS 5; DISCRIMINATING EVIDENCE
 
 Goal:
 
 Search for evidence capable of distinguishing competing hypotheses.
 
-### PASS 6 — FRESHNESS
+### PASS 6; FRESHNESS
 
 Goal:
 

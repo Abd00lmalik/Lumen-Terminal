@@ -87,7 +87,7 @@ describe("REST transport boundary (technical-analysis data path, FINDINGS.md §2
     const err2 = await permanent.get("/api/v2/spot/market/candles").catch((e) => e);
     expect(err2.failureType).toBe("AUTHENTICATION_FAILURE");
     expect(err2.retriable).toBe(false);
-    expect(sleeps).toHaveLength(1); // unchanged — permanent failures don't retry
+    expect(sleeps).toHaveLength(1); // unchanged; permanent failures don't retry
   });
 
   it("non-JSON body → INVALID_RESPONSE (permanent); failed responses are raw-captured for provenance", async () => {

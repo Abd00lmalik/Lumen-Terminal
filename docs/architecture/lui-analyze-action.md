@@ -1,6 +1,6 @@
 ---
-title: "ANALYZE — Universal Core Action"
-source: ANALYZE — Universal Core Action.txt
+title: "ANALYZE; Universal Core Action"
+source: ANALYZE; Universal Core Action.txt
 converted: 2026-09-12
 type: architecture-spec
 related: [lui-universal-core.md, analysis-synthesis.md]
@@ -8,9 +8,9 @@ related: [lui-universal-core.md, analysis-synthesis.md]
 
 **Related documents:** `lui-universal-core.md` · `analysis-synthesis.md`
 
-> Converted from `ANALYZE — Universal Core Action.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `ANALYZE; Universal Core Action.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
-ANALYZE — Universal Core Action
+ANALYZE; Universal Core Action
 1. Definition
 ANALYZE = perform analytical work toward a trader-defined objective.
 The analytical intent remains primary, but the agent may conduct additional research whenever the available evidence is insufficient for a reliable analysis.

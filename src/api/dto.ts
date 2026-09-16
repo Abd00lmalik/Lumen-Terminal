@@ -1,13 +1,13 @@
 /**
- * F0 API DTOs — safe frontend view models (FRONTEND_ARCHITECTURE.md §9).
+ * F0 API DTOs; safe frontend view models (FRONTEND_ARCHITECTURE.md §9).
  *
  * Transport boundary rules (F0 mandate §2/§6/§7/§8):
  * - The API never exposes raw domain objects; every response is an explicit DTO.
  * - Epistemic distinctions are preserved AS DATA (evidence class, freshness, proxy basis,
- *   memory status, monitor lifecycle) — the frontend never re-derives them.
+ *   memory status, monitor lifecycle); the frontend never re-derives them.
  * - DTOs exclude: model prompts/reasoning, raw provider payloads, env/config, secrets,
  *   internal persistence paths. Provenance appears as references (ids + notes), not dumps.
- * - Mappers are pure functions — no logic, no state, no business decisions (F0 mandate §2).
+ * - Mappers are pure functions; no logic, no state, no business decisions (F0 mandate §2).
  */
 
 import type {
@@ -23,7 +23,7 @@ import type { Provenance, ProvenanceOrigin } from "../domain/provenance.js";
 // Shared primitives
 // ---------------------------------------------------------------------------
 
-/** Epistemic evidence class — exposed verbatim so the UI can badge without re-deriving. */
+/** Epistemic evidence class; exposed verbatim so the UI can badge without re-deriving. */
 export type EvidenceClassDTO = EvidenceClass; // RAW_DATA | OBSERVATION | DERIVED_OBSERVATION | INTERPRETATION | PROXY_EVIDENCE | SPECULATION
 
 export type FreshnessDTO = Freshness; // CURRENT | STALE | HISTORICAL
@@ -63,7 +63,7 @@ export interface EvidenceDTO {
   readonly ref: string;
   readonly observation: string;
   readonly evidenceType: string;
-  /** Epistemic status AS DATA — the frontend badges this verbatim. */
+  /** Epistemic status AS DATA; the frontend badges this verbatim. */
   readonly evidenceClass: EvidenceClassDTO;
   /** Present ONLY for PROXY_EVIDENCE: what the proxy actually measures. */
   readonly proxyBasis?: string;
@@ -316,7 +316,7 @@ export interface MemoryDTO {
   readonly ref: string;
   readonly category: MemoryCategoryDTO;
   readonly content: string;
-  /** Status AS DATA — the frontend demotes STALE/HISTORICAL; the API never merges them away. */
+  /** Status AS DATA; the frontend demotes STALE/HISTORICAL; the API never merges them away. */
   readonly status: MemoryStatusDTO;
   readonly statusReason?: string;
   readonly createdAt: string;
@@ -347,7 +347,7 @@ export type MonitorLifecycleDTO = Monitor["status"]; // PROPOSED | ACTIVE | PAUS
 
 export interface MonitorConditionDTO {
   readonly description: string;
-  /** INVALIDATION vs EARLY_WARNING stay distinct kinds — the UI must never merge them. */
+  /** INVALIDATION vs EARLY_WARNING stay distinct kinds; the UI must never merge them. */
   readonly kind: MonitorCondition["kind"];
   readonly triggerType: MonitorCondition["triggerType"];
   readonly conditionStatus: MonitorCondition["conditionStatus"];
@@ -495,7 +495,16 @@ export function toHistoricalAnalysisDTO(a: {
 
 export type ResponseConfidenceDTO = "HIGH" | "MODERATE" | "LOW" | "UNKNOWN";
 
-/** The progressive-disclosure answer card (L0) — the primary frontend answer surface. */
+/**
+ * Typography normalization for USER-FACING strings only. Model output is instructed to avoid
+ * em/en dashes, but prompts are not a guarantee; the product renders plain punctuation.
+ * Applied at the DTO boundary so stored research objects keep the model's verbatim output.
+ */
+export function uiText(s: string): string {
+  return s.replace(/[\u2014\u2013]/g, "; ").replace(/\s{2,}/g, " ");
+}
+
+/** The progressive-disclosure answer card (L0); the primary frontend answer surface. */
 export interface AnswerDTO {
   readonly answer: string;
   readonly supportingReasons: readonly string[];
@@ -514,7 +523,7 @@ export interface ResearchResponseDTO {
   /** Whether the request halted for clarification/confirmation, was rejected, or completed. */
   readonly outcome: "COMPLETED" | "AWAITING_CONFIRMATION" | "REJECTED" | "MODEL_FAILURE";
   readonly answer: AnswerDTO;
-  /** Typed failure classification when outcome is MODEL_FAILURE — never laundered into evidence. */
+  /** Typed failure classification when outcome is MODEL_FAILURE; never laundered into evidence. */
   readonly modelFailure?: { readonly type: string; readonly message: string };
   /** Limitations preserved verbatim from the research loop (partial results, provider outages). */
   readonly limitations: readonly string[];
@@ -525,7 +534,7 @@ export interface ResearchResponseDTO {
   /** Epistemic view of the evidence this request produced (classes preserved). */
   readonly evidence: readonly EvidenceDTO[];
   readonly judgments: readonly JudgmentDTO[];
-  /** Flow 5 (HAS_THIS_HAPPENED_BEFORE) only: the deterministic historical-episode analysis —
+  /** Flow 5 (HAS_THIS_HAPPENED_BEFORE) only: the deterministic historical-episode analysis
    *  current setup, explained analogues with per-dimension similarity, forward outcome windows.
    *  Structured server-side; the frontend renders it, never recomputes it. */
   readonly historicalAnalysis?: HistoricalAnalysisDTO;

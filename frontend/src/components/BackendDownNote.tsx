@@ -1,5 +1,5 @@
 /**
- * Shared "backend unreachable" notice — the ONLY place that renders transport-level
+ * Shared "backend unreachable" notice; the ONLY place that renders transport-level
  * connectivity failure, so the guidance always matches the environment:
  * - development: the local Fastify server isn't running (dev instruction belongs here only)
  * - production:  the service is unavailable (no dev instructions ever shown)
@@ -21,10 +21,10 @@ export function BackendDownNote({ error, children }: { error: unknown; children?
           ? error.message
           : String(error)}{" "}
       {isNetwork && error.environment === "development" && (
-        <>— start the local API with <code>npm run api</code> and refresh.</>
+        <>start the local API with <code>npm run api</code> and refresh.</>
       )}
       {isNetwork && error.environment === "production" && (
-        <>— try again shortly; if it persists the deployment may need attention.</>
+        <>try again shortly; if it persists the deployment may need attention.</>
       )}
       {children}
     </div>

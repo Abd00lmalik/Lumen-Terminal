@@ -8,7 +8,7 @@ related: [judgment-confidence.md, hypothesis.md, evidence-source.md, thesis-moni
 
 **Related documents:** `judgment-confidence.md` · `hypothesis.md` · `evidence-source.md` · `thesis-monitor-reassessment.md` · `research-flows.md` · `framework.md`
 
-> Converted from `ANALYSIS & SYNTHESIS INTELLIGENCE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `ANALYSIS & SYNTHESIS INTELLIGENCE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 ANALYSIS & SYNTHESIS INTELLIGENCE
 

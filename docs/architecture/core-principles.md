@@ -1,5 +1,5 @@
 ---
-title: "AI Trading Desk — Common Intelligence Layer"
+title: "AI Trading Desk; Common Intelligence Layer"
 source: commonintelligencelayer.txt
 converted: 2026-09-12
 type: architecture-spec
@@ -8,9 +8,9 @@ related: [research-flows.md, research-execution-engine.md, judgment-confidence.m
 
 **Related documents:** `research-flows.md` · `research-execution-engine.md` · `judgment-confidence.md`
 
-> Converted from `commonintelligencelayer.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `commonintelligencelayer.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
-AI Trading Desk — Common Intelligence Layer
+AI Trading Desk; Common Intelligence Layer
 Purpose
 The Common Intelligence Layer is the shared intelligence infrastructure underneath all eight research flows.
 The eight flows define what kind of research the trader wants.

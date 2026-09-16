@@ -22,7 +22,7 @@ describe("five Bitget skills registered through the generic registry (final lock
   });
 
   it("all five skills resolve their capabilities; G1 connected (vendor selected); G2 stub remains unconnected", { timeout: 30_000 }, async () => {
-    // G1's both-venues path exercises real bounded-retry backoff against the fakes — give it
+    // G1's both-venues path exercises real bounded-retry backoff against the fakes; give it
     // an explicit budget so parallel-suite load can never turn it flaky.
     // fallbacks: false → PRIMARY-only wiring law (fallback ordering asserted separately).
     const { registry } = createBitgetAdapterSet({ mcp: mcp as never, rest: rest as never, fallbacks: false });
@@ -32,7 +32,7 @@ describe("five Bitget skills registered through the generic registry (final lock
     expect(registry.resolve("SENTIMENT_ANALYSIS").map((r) => r.adapter.providerId)).toEqual(["bitget-signal/sentiment-analyst"]);
     expect(registry.resolve("NEWS_ANALYSIS").map((r) => r.adapter.providerId)).toEqual(["bitget-signal/news-briefing"]);
     expect(registry.resolve("TECHNICAL_ANALYSIS").map((r) => r.adapter.providerId)).toEqual(["bitget-signal/technical-analysis"]);
-    // G1 (vendor selected 2026-09-15): the REAL provider resolves HISTORICAL_COMPARISON —
+    // G1 (vendor selected 2026-09-15): the REAL provider resolves HISTORICAL_COMPARISON
     // execute() no longer throws NotConnectedError (the both-venues-fail typed-failure law
     // is covered in g1-historical.test.ts). Against the fake REST transport it returns a
     // normalized TOOL_RESULT through the generic registry path.
@@ -51,7 +51,7 @@ describe("five Bitget skills registered through the generic registry (final lock
     expect(registryApi).toContain("execute");
     expect(registryApi).not.toContain("flow");
     // executing by capability routes to the documented tool transparently:
-    mcp.script({ content: [{ type: "text", text: " Fear & Greed: 72 — Extreme greed " }] });
+    mcp.script({ content: [{ type: "text", text: " Fear & Greed: 72; Extreme greed " }] });
     void registry.execute("SENTIMENT_ANALYSIS", { symbol: "BTCUSDT" }, origin).then((result) => {
       expect(result.tool).toBe("bitget-signal/sentiment-analyst");
       expect(result.transport).toBe("mcp:derivatives_sentiment");
@@ -179,7 +179,7 @@ describe("five Bitget skills registered through the generic registry (final lock
     expect((restT as unknown as Record<string, unknown>).placeOrder).toBeUndefined();
   });
 
-  it("adapters are wired as flat instances — no hidden per-flow branches in the factory", () => {
+  it("adapters are wired as flat instances; no hidden per-flow branches in the factory", () => {
     // the factory registers exactly 10 providers by DEFAULT (5 skills + G1 + G2 + 3 capability
     // fallbacks). G1 (vendor selected 2026-09-15) and G2 (bounded web retrieval, implemented
     // 2026-09-15) both replace their NotConnected stubs.
@@ -202,7 +202,7 @@ describe("five Bitget skills registered through the generic registry (final lock
     ]);
   });
 
-  // Reliability-phase regression: the engine plans capabilities, not tool args — a plan with no
+  // Reliability-phase regression: the engine plans capabilities, not tool args; a plan with no
   // params previously sent action:undefined to the MCP hub ("Unknown action:") and the adapter
   // laundered that into an EMPTY result with no failure. Defaults make the unset-args case a
   // VALID request while explicit params still win.

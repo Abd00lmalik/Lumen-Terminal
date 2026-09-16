@@ -1,6 +1,6 @@
 ---
-title: "LUI Layer — Natural Language Interaction Model"
-source: # LUI Layer — Natural Language Inte.txt
+title: "LUI Layer; Natural Language Interaction Model"
+source: # LUI Layer; Natural Language Inte.txt
 converted: 2026-09-12
 type: architecture-spec
 related: [lui-universal-core.md, lui-flow-extensions.md]
@@ -8,9 +8,9 @@ related: [lui-universal-core.md, lui-flow-extensions.md]
 
 **Related documents:** `lui-universal-core.md` · `lui-flow-extensions.md`
 
-> Converted from `# LUI Layer — Natural Language Inte.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `# LUI Layer; Natural Language Inte.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
-# LUI Layer — Natural Language Interaction Model
+# LUI Layer; Natural Language Interaction Model
 
 ## Purpose
 

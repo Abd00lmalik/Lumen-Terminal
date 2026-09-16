@@ -1,5 +1,5 @@
 /**
- * Provider-failover laws (mandate §3/§4) — deterministic, no network.
+ * Provider-failover laws (mandate §3/§4); deterministic, no network.
  *
  * Under test:
  * - REGISTRY-OWNED failover: primary fails → fallback serves; the flow never names providers.
@@ -120,7 +120,7 @@ describe("registry-owned provider failover (mandate §4)", () => {
 
   it("primary succeeds but with EMPTY coverage → fallback is attempted and serves (insufficient-coverage failover)", async () => {
     const registry = new CapabilityRegistry();
-    // Primary that "succeeds" (no failure) but provides zero evidence-grade outputs —
+    // Primary that "succeeds" (no failure) but provides zero evidence-grade outputs
     // the exact shape observed when an upstream returns an empty-but-valid payload.
     registry.register({
       providerId: "bitget-signal/news-empty",
@@ -199,7 +199,7 @@ describe("fallback epistemic honesty (mandate §3A–3C)", () => {
     }));
     const result = await adapter.execute("NEWS_ANALYSIS", {}, );
     expect(result.failure.type).toBe("NONE");
-    expect(result.completeness).toBe("PARTIAL"); // one feed dead — honestly partial
+    expect(result.completeness).toBe("PARTIAL"); // one feed dead; honestly partial
     const item = result.outputs?.[0];
     expect(item?.outputClass).toBe("FACTUAL_OBSERVATION");
     expect((item?.content as { publisher: string }).publisher).toBe("CoinDesk");
@@ -216,10 +216,10 @@ describe("fallback epistemic honesty (mandate §3A–3C)", () => {
     expect(result.outputs?.length).toBe(2);
   });
 
-  it("SENTIMENT fallback is SENTIMENT_SIGNAL with explicit proxyBasis — never upgraded to observation", async () => {
+  it("SENTIMENT fallback is SENTIMENT_SIGNAL with explicit proxyBasis; never upgraded to observation", async () => {
     const adapter = new SentimentFallbackAdapter();
     // Inject the fake transport outcome by stubbing fetch through the RestTransport seam is
-    // not exposed; instead assert against a live-shaped payload via a local fake server —
+    // not exposed; instead assert against a live-shaped payload via a local fake server
     // simplest deterministic path: replace the adapter's private rest with a scripted one.
     const scripted = {
       get: async () => ({

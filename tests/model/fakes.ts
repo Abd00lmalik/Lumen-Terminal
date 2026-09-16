@@ -1,6 +1,6 @@
 /**
  * Shared test doubles for M3: a scripted ModelProvider fake + in-memory store.
- * The fake returns per-schema scripted JSON — no network, no credentials.
+ * The fake returns per-schema scripted JSON; no network, no credentials.
  */
 import { MemoryStore } from "../../src/persistence/index.js";
 import type { ModelProvider, StructuredRequest, StructuredResponse } from "../../src/model/provider.js";

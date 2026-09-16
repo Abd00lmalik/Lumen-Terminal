@@ -1,9 +1,9 @@
 /**
- * LUI — the natural-language research control loop (M3).
+ * LUI; the natural-language research control loop (M3).
  *
  * Architectural basis:
  * - lui-universal-core.md + the human-approved 6-action lock: RESEARCH, ANALYZE, CHALLENGE,
- *   MANAGE_STATE, MONITOR, SAVE. SAVE is first-class. Natural language is the control surface —
+ *   MANAGE_STATE, MONITOR, SAVE. SAVE is first-class. Natural language is the control surface
  *   no phrase-matching: the MODEL interprets, the LUI validates (M3 §4/§5).
  * - Pipeline (M3 §5): USER MESSAGE → INPUT NORMALIZATION → INTENT DETECTION → CONTEXT
  *   RESOLUTION → ENTITY/TARGET RESOLUTION → ACTION CLASSIFICATION → PARAMETER EXTRACTION →
@@ -60,7 +60,7 @@ const ACTION_PLAN_SCHEMA_DESC_LOCAL = [
 
 const RESOLVED_TARGET_SCHEMA_DESC = [
   '{"asset": string?, "flow": string?, "researchRef": string?, "objectRefs": string[],',
-  ' "unresolved": string[]  // what could NOT be resolved from the context — never invent ids',
+  ' "unresolved": string[]  // what could NOT be resolved from the context; never invent ids',
 ].join("\n");
 
 const AMBIGUITY_SCHEMA_DESC = [
@@ -98,7 +98,7 @@ const THESIS_ASSESSMENT_SCHEMA_DESC = [
 
 const MONITOR_SCHEMA_DESC = [
   '{"conditions": string[], "invalidationConditions": string[], "earlyWarningConditions": string[],',
-  ' "suggestedCadence": string, "scopeNote": string}  // proposal only — activation requires confirmation',
+  ' "suggestedCadence": string, "scopeNote": string}  // proposal only; activation requires confirmation',
 ].join("\n");
 
 const SAVE_SCHEMA_DESC = [
@@ -155,7 +155,7 @@ export interface LuiResult {
   challenge?: ChallengeResult;
   /** Thesis assessment when thesis evaluation ran. */
   thesisAssessment?: ThesisAssessment;
-  /** Monitor PROPOSAL (never an active monitor — activation is M5 + confirmation). */
+  /** Monitor PROPOSAL (never an active monitor; activation is M5 + confirmation). */
   monitorProposal?: MonitorProposal;
   /** M5: the persistent monitor object created from the proposal (PROPOSED status, inert). */
   monitor?: import("../domain/memory.js").Monitor;
@@ -183,7 +183,7 @@ export interface LuiResult {
   flow5?: import("../research/flow5.js").Flow5Result;
   /** The final user-facing response (progressive disclosure; no chain-of-thought). */
   response: FinalResponse | undefined;
-  /** Typed model failure — never fabricated into a FinalResponse. */
+  /** Typed model failure; never fabricated into a FinalResponse. */
   modelFailure?: ModelFailure;
 }
 
@@ -195,13 +195,14 @@ const INTERPRETER_SYSTEM = [
   "You are the natural-language interpreter of a trading RESEARCH workbench used by a professional trader.",
   "Classify the trader's request into exactly one of the six first-class actions:",
   "RESEARCH (new investigation), ANALYZE (interpret existing research), CHALLENGE (actively try to falsify the current thesis/hypothesis/explanation),",
-  "MANAGE_STATE (change active working state: target/thesis/framework/working research state), MONITOR (establish watching of conditions — proposal only),",
+  "MANAGE_STATE (change active working state: target/thesis/framework/working research state), MONITOR (establish watching of conditions; proposal only),",
   "SAVE (promote a validated finding/conclusion/framework/preference into persistent reusable memory).",
   "Rules:",
   "- Compound requests list their sub-actions IN ORDER in compoundActions (primary first).",
   "- isExplanationOnly=true when the trader only asks why/how/what-did-you-find about existing research.",
   "- disclosureLevel: 0 answer, 1 why, 2 evidence, 3 research structure, 4 source trail, 5 full history.",
-  "- Copy the trader's objective verbatim — never paraphrase it into something stronger or weaker.",
+  "- Copy the trader's objective verbatim; never paraphrase it into something stronger or weaker.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 const TARGET_SYSTEM = [
@@ -210,38 +211,43 @@ const TARGET_SYSTEM = [
   "- Resolve 'it', 'that', 'my thesis' etc. from the CURRENT WORKSPACE STATE only.",
   "- NEVER invent research/object ids. Anything not resolvable goes into `unresolved`.",
   "- `flow` must be one of: WHAT_HAPPENED, WHY_IT_HAPPENED, WHAT_COULD_AFFECT_IT, DOES_MY_THESIS_HOLD, HAS_THIS_HAPPENED_BEFORE, WHAT_DOES_ALL_INFORMATION_SAY, WHAT_COULD_PROVE_ME_WRONG, EVALUATE_WITH_MY_FRAMEWORK.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 const AMBIGUITY_SYSTEM = [
   "Detect GENUINE ambiguity that blocks correct execution.",
   "Ambiguous: unclear asset, unclear timeframe for consequential actions, unclear which thesis/framework/state object when several exist, unclear requested persistence.",
-  "NOT ambiguous: ordinary research where context resolves the target — do not ask unnecessary questions.",
+  "NOT ambiguous: ordinary research where context resolves the target; do not ask unnecessary questions.",
   "Never invent missing context; if genuinely ambiguous, list the clarifying questions.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 const CONSEQUENCE_SYSTEM = [
   "Classify the consequence level of the request:",
-  "- INFORMATIONAL: research/analysis/explanation only — no state change.",
+  "- INFORMATIONAL: research/analysis/explanation only; no state change.",
   "- STATE_MUTATION: changes active working state (target switch, working-state edits).",
-  "- CONSEQUENTIAL: persistent or decision-impacting: SAVE (persistent memory), MONITOR activation, thesis revision, framework change — these REQUIRE explicit trader confirmation.",
+  "- CONSEQUENTIAL: persistent or decision-impacting: SAVE (persistent memory), MONITOR activation, thesis revision, framework change; these REQUIRE explicit trader confirmation.",
   "MANAGE_STATE (working state) and SAVE (persistent memory) are different operations with different confirmation requirements.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 const SAFETY_SYSTEM = [
   "Screen the interpreted request for trading-EXECUTION intent. The workbench is decision-support ONLY:",
-  "- Execution commands (place/close/stop orders, buy/sell/short/long positions, move/withdraw/transfer funds, change leverage, set stop-loss orders) are FORBIDDEN — mark isExecutionCommand=true and list the violations.",
+  "- Execution commands (place/close/stop orders, buy/sell/short/long positions, move/withdraw/transfer funds, change leverage, set stop-loss orders) are FORBIDDEN; mark isExecutionCommand=true and list the violations.",
   "- Research/analysis about prices, positions, or risk is legitimate and must NOT be flagged.",
   "- 'buy the dip research' style ambiguity: if the sentence is a research question, do not flag it; flag only actionable execution commands.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 const ANALYSIS_SYSTEM = [
   "You are the analyst of a trading RESEARCH workbench. Analyze the VALIDATED research context provided.",
   "Hard rules:",
   "- Preserve epistemic classes: interpretations/inferences/speculation are NOT observations; never upgrade them.",
-  "- LIMITATIONS (tool failures, empty feeds, insufficient evidence) are NOT negative evidence — never cite them as reasons against a claim.",
+  "- LIMITATIONS (tool failures, empty feeds, insufficient evidence) are NOT negative evidence; never cite them as reasons against a claim.",
   "- Only cite object refs that appear in the provided context. Never invent citations.",
-  "- Include the strongest opposing evidence when present — opposition is not optional.",
+  "- Include the strongest opposing evidence when present; opposition is not optional.",
   "- Distinguish what is directly observed from what is inferred; state what would change the conclusion.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 const CHALLENGE_SYSTEM = [
@@ -249,32 +255,37 @@ const CHALLENGE_SYSTEM = [
   "This is not generic criticism. Prioritize: contradictory evidence in the context, alternative explanations, the assumptions most vulnerable to failure, evidence that would invalidate the statement, missing evidence, historical counterexamples.",
   "- Only cite object refs present in the context. Missing evidence you identify must be phrased as what to LOOK FOR, not as if it was found.",
   "- Verdict: WEAKENED (context contains material contradiction), STOOD (contradiction searched, none found in context), INCONCLUSIVE (insufficient evidence either way).",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 const THESIS_SYSTEM = [
-  "You assess evidence AGAINST the trader's thesis. The thesis is the TRADER'S OWN position — you evaluate, you never rewrite it.",
+  "You assess evidence AGAINST the trader's thesis. The thesis is the TRADER'S OWN position; you evaluate, you never rewrite it.",
   "- Classify thesis status as evidence sees it: SUPPORTED / MIXED / CONTESTED / INSUFFICIENT_EVIDENCE.",
   "- List invalidation conditions and early-warning conditions derived from the thesis's own claims/assumptions and the evidence.",
   "- Only cite object refs present in the context. A thesis assessment NEVER mutates the thesis.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 const MONITOR_SYSTEM = [
   "Propose monitoring conditions for the trader's consideration. You are PROPOSING ONLY.",
   "- Derive conditions from the thesis's invalidation conditions and the current research (never invent thresholds absent from the research).",
-  "- Suggest cadence/scope. Activation itself requires explicit trader confirmation and is built in a later phase — never claim a monitor was activated.",
+  "- Suggest cadence/scope. Activation itself requires explicit trader confirmation and is built in a later phase; never claim a monitor was activated.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 const SAVE_SYSTEM = [
   "Prepare a SAVE proposal: promote the trader-validated content into persistent reusable memory.",
   "- artifactType: one of finding | research-conclusion | framework | preference | other.",
   "- content: the exact content to persist (the trader's finding/conclusion, not your opinion).",
-  "- derivedFromRefs: object refs from the provided context the artifact derives from — provenance, never invented.",
+  "- derivedFromRefs: object refs from the provided context the artifact derives from; provenance, never invented.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 const STATE_CHANGE_SYSTEM = [
   "Prepare a MANAGE_STATE change proposal for ACTIVE WORKING STATE (change active target, update working research state, select framework for the session).",
   "- This is distinct from SAVE: working-state changes are not persistent memory.",
   "- Describe precisely what changes; params carry the concrete values.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 const RESPONSE_SYSTEM = [
@@ -285,6 +296,7 @@ const RESPONSE_SYSTEM = [
   "- Confidence: HIGH only with direct multi-source observation; LOW when evidence is thin, partial, or single-source; UNKNOWN when no usable evidence.",
   "- Do not convert tool failures or empty results into negative findings.",
   "- The system researches; it does not tell the trader to trade. Implications are decision-support, not orders.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 export class Lui {
@@ -296,6 +308,8 @@ export class Lui {
     userMessage: string,
     origin: ProvenanceOrigin = { kind: "trader", detail: "LUI message" },
     onProgress?: ProgressListener,
+    /** Wall-clock deadline (epoch ms) threaded into every research loop (honest time budget). */
+    deadlineMs?: number,
   ): Promise<LuiResult> {
     const provider = this.options.provider;
     const progress = onProgress ?? this.options.onProgress;
@@ -339,7 +353,7 @@ export class Lui {
       return this.failureResult(userMessage, error, request);
     }
 
-    // 5. AMBIGUITY CHECK — genuinely ambiguous consequential actions block execution.
+    // 5. AMBIGUITY CHECK; genuinely ambiguous consequential actions block execution.
     let ambiguity: AmbiguityAssessment;
     try {
       const res = await provider.structured<string>({
@@ -360,7 +374,7 @@ export class Lui {
       return this.failureResult(userMessage, error, request, target);
     }
 
-    // 6. CONSEQUENCE CHECK — gates confirmations for state mutation/persistence.
+    // 6. CONSEQUENCE CHECK; gates confirmations for state mutation/persistence.
     let consequence: ConsequenceAssessment;
     try {
       const res = await provider.structured<string>({
@@ -376,7 +390,7 @@ export class Lui {
       return this.failureResult(userMessage, error, request, target);
     }
 
-    // 7. SAFETY SCREEN — execution-like intent is rejected before any dispatch (M3 §14).
+    // 7. SAFETY SCREEN; execution-like intent is rejected before any dispatch (M3 §14).
     let safety: { isExecutionCommand: boolean; detectedViolations: readonly string[]; rationale: string };
     try {
       const res = await provider.structured<string>({
@@ -409,7 +423,7 @@ export class Lui {
       };
     }
 
-    // 8. ACTION PLAN — the model proposes the step plan; the LUI validates it (M3 §5).
+    // 8. ACTION PLAN; the model proposes the step plan; the LUI validates it (M3 §5).
     let plan: ActionPlan;
     try {
       const res = await provider.structured<string>({
@@ -436,7 +450,7 @@ export class Lui {
       return this.failureResult(userMessage, error, request, target);
     }
 
-    // 9. ARCHITECTURE DISPATCH — step-by-step execution with confirmation gates.
+    // 9. ARCHITECTURE DISPATCH; step-by-step execution with confirmation gates.
     const result: LuiResult = {
       request, target, ambiguity, consequence, plan,
       response: undefined,
@@ -466,7 +480,7 @@ export class Lui {
       if (needsConfirmation && (step.action === "SAVE" || step.action === "MONITOR")) {
         // SAVE/MONITOR NEVER execute without explicit trader confirmation (M3 §17/§18).
         // M5 §7: a trader request whose ORIGIN records the explicit confirmation (the trader
-        // themselves asked for this exact save/monitor) is sufficient authorization — the
+        // themselves asked for this exact save/monitor) is sufficient authorization; the
         // dispatchers still verify origin.kind==="trader" before persisting/activating.
         const explicitTraderAuthorization = origin.kind === "trader" && /confirm/i.test(origin.detail ?? "");
         if (!explicitTraderAuthorization) {
@@ -478,16 +492,16 @@ export class Lui {
 
       switch (step.action) {
         case "RESEARCH": {
-          // M4/M4b: flow-classified research objectives dispatch to their methodology — the flow
+          // M4/M4b: flow-classified research objectives dispatch to their methodology; the flow
           // defines objective + analytical mode, the engine picks capabilities (no Flow→Tool
           // hardcoding). Unmapped flows keep the M3 adaptive loop. Flow classification is
-          // INTERNAL research routing — the user-facing action set remains the locked six.
+          // INTERNAL research routing; the user-facing action set remains the locked six.
           const flow = step.params["flow"];
           if (flow === "WHY_IT_HAPPENED" || flow === "WHAT_DOES_ALL_INFORMATION_SAY" || flow === "WHAT_COULD_AFFECT_IT" || flow === "DOES_MY_THESIS_HOLD" || flow === "EVALUATE_WITH_MY_FRAMEWORK" || flow === "HAS_THIS_HAPPENED_BEFORE") {
-            await this.dispatchM4Flow(flow, step, result, origin, progress);
+            await this.dispatchM4Flow(flow, step, result, origin, progress, deadlineMs);
             break;
           }
-          const research = await this.dispatchResearch(step, origin, progress);
+          const research = await this.dispatchResearch(step, origin, progress, deadlineMs);
           result.research = research.outcome;
           if (research.modelFailure !== undefined) result.modelFailure = research.modelFailure;
           break;
@@ -500,10 +514,10 @@ export class Lui {
           }
           break;
         case "CHALLENGE":
-          // M4 §23: CHALLENGE (LUI action) with a falsification objective invokes Flow 7 —
+          // M4 §23: CHALLENGE (LUI action) with a falsification objective invokes Flow 7
           // the research METHODOLOGY. The action and the flow remain distinct.
           if (target.flow === "WHAT_COULD_PROVE_ME_WRONG" || step.params["flow"] === "WHAT_COULD_PROVE_ME_WRONG" || step.params["mode"] === "falsification") {
-            await this.dispatchFlow7(step, result, origin, progress);
+            await this.dispatchFlow7(step, result, origin, progress, deadlineMs);
             break;
           }
           await this.dispatchChallenge(step, result);
@@ -515,7 +529,7 @@ export class Lui {
           await this.dispatchMonitor(step, result);
           break;
         case "SAVE": {
-          // Reaching here means no confirmation was required — e.g. the caller pre-approved.
+          // Reaching here means no confirmation was required; e.g. the caller pre-approved.
           await this.dispatchSave(step, result, origin);
           break;
         }
@@ -523,7 +537,7 @@ export class Lui {
       if (result.awaitingConfirmation !== undefined) break;
     }
 
-    // 10. FINAL RESPONSE — from the actual outcome; model failure stays a failure (M3 §19).
+    // 10. FINAL RESPONSE; from the actual outcome; model failure stays a failure (M3 §19).
     result.response = await this.buildResponse(result, userMessage);
     progress?.(progressEvent("response_ready", new Date(), "response ready", {}));
     return result;
@@ -536,7 +550,7 @@ export class Lui {
    * capability selection stays with the engine). The LUI result keeps the M3 shape
    * (research outcome + response) so downstream behavior is unchanged.
    */
-  private async dispatchM4Flow(flow: string, step: ActionPlan["steps"][number], result: LuiResult, origin: ProvenanceOrigin, onProgress?: ProgressListener): Promise<void> {
+  private async dispatchM4Flow(flow: string, step: ActionPlan["steps"][number], result: LuiResult, origin: ProvenanceOrigin, onProgress?: ProgressListener, deadlineMs?: number): Promise<void> {
     const objective = step.params["objective"] ?? step.description;
     const asset = step.params["asset"] ?? this.options.workspace.activeTheses()[0]?.scope.entities[0];
     const constraints = step.params["constraints"] !== undefined ? step.params["constraints"].split(";").map((s) => s.trim()).filter((s) => s !== "") : undefined;
@@ -595,6 +609,7 @@ export class Lui {
         ...(asset !== undefined ? { asset } : {}),
         ...(constraints !== undefined ? { constraints } : {}),
         ...(now !== undefined ? { now } : {}),
+        ...(deadlineMs !== undefined ? { deadlineMs } : {}),
         ...(onProgress !== undefined ? { onProgress } : {}),
       });
       result.flow5 = flow5;
@@ -633,7 +648,7 @@ export class Lui {
   }
 
   /** M4 §23: CHALLENGE action → Flow 7 falsification methodology (thesis stays trader-owned). */
-  private async dispatchFlow7(step: ActionPlan["steps"][number], result: LuiResult, origin: ProvenanceOrigin, onProgress?: ProgressListener): Promise<void> {
+  private async dispatchFlow7(step: ActionPlan["steps"][number], result: LuiResult, origin: ProvenanceOrigin, onProgress?: ProgressListener, deadlineMs?: number): Promise<void> {
     const { runFlow7 } = await import("../research/flow7.js");
     const objective = step.params["objective"] ?? step.description;
     const asset = step.params["asset"];
@@ -644,11 +659,12 @@ export class Lui {
       workspace: this.options.workspace,
       store: this.options.store,
       // Thesis ref resolved from the validated target when present; otherwise the workspace's
-      // active thesis (trader-owned) is used — never a fabricated belief.
+      // active thesis (trader-owned) is used; never a fabricated belief.
       ...(step.params["thesisRef"] !== undefined ? { thesisRef: step.params["thesisRef"] } : {}),
       ...(step.params["belief"] !== undefined ? { beliefStatement: step.params["belief"] } : {}),
       ...(asset !== undefined ? { asset } : {}),
       ...(now !== undefined ? { now } : {}),
+      ...(deadlineMs !== undefined ? { deadlineMs } : {}),
       ...(onProgress !== undefined ? { onProgress } : {}),
     });
     result.flow7 = flow7;
@@ -660,6 +676,7 @@ export class Lui {
     step: ActionPlan["steps"][number],
     origin: ProvenanceOrigin,
     onProgress?: ProgressListener,
+    deadlineMs?: number,
   ): Promise<{ outcome: AdaptiveLoopOutcome; modelFailure?: ModelFailure }> {
     const workspace = this.options.workspace;
     const objective = step.params["objective"] ?? step.description;
@@ -679,6 +696,7 @@ export class Lui {
         constraints: step.params["constraints"] !== undefined ? step.params["constraints"].split(";").map((s) => s.trim()).filter((s) => s !== "") : [],
         capabilityParams: step.params["asset"] !== undefined ? { asset: step.params["asset"] } : {},
         ...(this.options.now !== undefined ? { now: this.options.now } : {}),
+        ...(deadlineMs !== undefined ? { deadlineMs } : {}),
         ...(onProgress !== undefined ? { onProgress } : {}),
       });
       return { outcome };
@@ -687,7 +705,7 @@ export class Lui {
       const failure = error instanceof ModelFailure ? error : new ModelFailure("INVALID_OUTPUT", String(error), false);
       const outcome: AdaptiveLoopOutcome = {
         research: workspace.getResearch(research.id)!,
-        plan: { objective, scopeIncluded: [], scopeExcluded: [], tasks: [], completionCriteria: [], adaptationPolicy: "n/a — planning failed" },
+        plan: { objective, scopeIncluded: [], scopeExcluded: [], tasks: [], completionCriteria: [], adaptationPolicy: "n/a; planning failed" },
         rounds: [],
         executions: [],
         finalDecision: { decision: "INSUFFICIENT_EVIDENCE", rationale: `research could not start: ${failure.message}`, nextTasks: [] },
@@ -721,13 +739,13 @@ export class Lui {
 
   /**
    * Thesis assessment (M3 §15): evidence evaluated AGAINST the trader's thesis. The assessment
-   * NEVER mutates the thesis — supporting/contradicting evidence is cited, invalidation and
+   * NEVER mutates the thesis; supporting/contradicting evidence is cited, invalidation and
    * early-warning conditions are derived, and the result is returned to the trader.
    */
   private async dispatchThesisAssessment(step: ActionPlan["steps"][number], result: LuiResult): Promise<void> {
     const ctx = this.researchContext();
     if (ctx.thesis === undefined) {
-      result.modelFailure = new ModelFailure("INVALID_OUTPUT", "no active thesis in the workspace — thesis evaluation requires a trader-owned thesis (never fabricate one)", false);
+      result.modelFailure = new ModelFailure("INVALID_OUTPUT", "no active thesis in the workspace; thesis evaluation requires a trader-owned thesis (never fabricate one)", false);
       return;
     }
     try {
@@ -787,7 +805,7 @@ export class Lui {
       const proposal = validateModelOutput<StateChangeProposal>(STATE_CHANGE_SCHEMA, res.raw).data;
       // Apply the working-state change (M3 §17: working state ≠ persistent memory).
       if (proposal.changeType === "set-active-thesis" && proposal.params["thesisRef"] !== undefined) {
-        // M6 (audit D1): the selection must be APPLIED to working state, not just validated —
+        // M6 (audit D1): the selection must be APPLIED to working state, not just validated
         // a validated-but-unapplied MANAGE_STATE is a silent no-op (audit finding).
         this.options.workspace.setActiveThesis(proposal.params["thesisRef"]);
       }
@@ -814,7 +832,7 @@ export class Lui {
       });
       const proposal = validateModelOutput<MonitorProposal>(MONITOR_SCHEMA, res.raw).data;
       result.monitorProposal = { ...proposal, requiresConfirmation: true };
-      // M5 §10/§11: the monitoring HANDOFF is persisted as a PROPOSED monitor — representation
+      // M5 §10/§11: the monitoring HANDOFF is persisted as a PROPOSED monitor; representation
       // only, strictly inert. No background process, no alerts, no activation. Activation is a
       // separate trader-confirmed operation (activateMonitor rejects non-trader origins).
       // Invalidation and early-warning conditions are recorded as DISTINCT kinds (M5 §10).
@@ -822,15 +840,15 @@ export class Lui {
       const conditions = [
         ...proposal.invalidationConditions.map((description) => ({
           description, kind: "INVALIDATION" as const, triggerType: "STATE_CHANGE" as const,
-          conditionStatus: "PROPOSED" as const, rationale: "invalidation condition — model-proposed; confirm before activation", evidenceDependencies: [] as string[],
+          conditionStatus: "PROPOSED" as const, rationale: "invalidation condition; model-proposed; confirm before activation", evidenceDependencies: [] as string[],
         })),
         ...proposal.earlyWarningConditions.map((description) => ({
           description, kind: "EARLY_WARNING" as const, triggerType: "STATE_CHANGE" as const,
-          conditionStatus: "PROPOSED" as const, rationale: "early-warning condition — signals rising risk, does NOT invalidate; confirm before activation", evidenceDependencies: [] as string[],
+          conditionStatus: "PROPOSED" as const, rationale: "early-warning condition; signals rising risk, does NOT invalidate; confirm before activation", evidenceDependencies: [] as string[],
         })),
         ...proposal.conditions.map((description) => ({
           description, kind: "EARLY_WARNING" as const, triggerType: "STATE_CHANGE" as const,
-          conditionStatus: "PROPOSED" as const, rationale: "general condition — model-proposed; confirm before activation", evidenceDependencies: [] as string[],
+          conditionStatus: "PROPOSED" as const, rationale: "general condition; model-proposed; confirm before activation", evidenceDependencies: [] as string[],
         })),
       ];
       result.monitor = this.options.workspace.addMonitorProposal(
@@ -873,7 +891,7 @@ export class Lui {
       const derivedFromRefs = proposal.derivedFromRefs.filter((ref) => known.has(ref)); // drop invented refs
       // Only persist when a SAVE was actually confirmed. The LUI-level pre-approval case is
       // `origin` being explicitly trader-kind AND the caller having passed a confirmation hook
-      // approval — modeled here by requiring the origin detail to record confirmation.
+      // approval; modeled here by requiring the origin detail to record confirmation.
       const confirmed = origin.kind === "trader" && /confirm/i.test(origin.detail ?? "");
       if (!confirmed) {
         result.awaitingConfirmation = { status: "REQUIRED", stepIndex: 0, reason: "SAVE requires explicit trader confirmation before persistence" };
@@ -894,7 +912,7 @@ export class Lui {
       result.saved = artifact;
       // M5 §4: SAVE promotes the artifact into PERSISTENT RESEARCH MEMORY (the existing
       // saveArtifact is the record; the memory entry is the continuity layer with decay and
-      // revalidation). Ordinary research never reaches here — only confirmed SAVEs do.
+      // revalidation). Ordinary research never reaches here; only confirmed SAVEs do.
       const memoryCategory = proposal.artifactType === "framework" ? "framework"
         : proposal.artifactType === "thesis" ? "thesis"
         : proposal.artifactType === "preference" ? "preference"
@@ -919,7 +937,7 @@ export class Lui {
   // ----- response -------------------------------------------------------------
 
   private async buildResponse(result: LuiResult, userMessage: string): Promise<FinalResponse | undefined> {
-    // M4: flow-specific responses are already progressive-disclosure structured — convert to
+    // M4: flow-specific responses are already progressive-disclosure structured; convert to
     // the FinalResponse shape without re-synthesizing (the flow output IS the answer).
     const flowResult = result.flow2 ?? result.flow6 ?? result.flow7 ?? result.flow3 ?? result.flow4 ?? result.flow8 ?? result.flow5;
     if (flowResult !== undefined) {
@@ -959,14 +977,14 @@ export class Lui {
         citedObjectRefs: cited,
       };
     }
-    // Honest failure response — never fabricate (M3 §19/§20).
+    // Honest failure response; never fabricate (M3 §19/§20).
     if (result.modelFailure !== undefined && result.research === undefined && result.analysis === undefined && result.challenge === undefined) {
       return {
         answer: `The interpretation model is currently unavailable, so this request could not be processed: ${result.modelFailure.message}`,
         supportingReasons: [],
         opposingReasons: [],
         confidence: "UNKNOWN",
-        keyUncertainty: "model provider failure — research state is preserved and the request can be retried",
+        keyUncertainty: "model provider failure; research state is preserved and the request can be retried",
         implication: "No research was executed and nothing was changed.",
         citedObjectRefs: [],
       };
@@ -991,7 +1009,7 @@ export class Lui {
         implication: `Research ${research.research.id} preserved ${research.evidence.length} evidence object(s); deeper levels available on request.`,
         citedObjectRefs: cited,
       };
-      // Model-polished response only when the disclosure level requests more than the default —
+      // Model-polished response only when the disclosure level requests more than the default
       // and even then from the validated context only.
       if (disclosureLevel >= 2) {
         try {
@@ -1011,7 +1029,7 @@ export class Lui {
           const polished = validateModelOutput<FinalResponse>(FINAL_RESPONSE_SCHEMA, res.raw).data;
           return this.validateCitations<FinalResponse>(polished, ctx);
         } catch (error) {
-          // Model polish failed — return the deterministic response (never fabricate).
+          // Model polish failed; return the deterministic response (never fabricate).
           void toModelFailure(error);
           return response;
         }
@@ -1023,7 +1041,7 @@ export class Lui {
       const ctx = this.researchContext();
       const cited = [...(analysis?.citedObjectRefs ?? []), ...(challenge?.citedObjectRefs ?? [])].filter((ref) => objectExists(ctx, ref));
       const verdict = challenge !== undefined
-        ? `falsification verdict: ${challenge.falsificationVerdict} — ${challenge.rationale}`
+        ? `falsification verdict: ${challenge.falsificationVerdict}; ${challenge.rationale}`
         : (analysis?.conclusion ?? "");
       return {
         answer: verdict,
@@ -1032,7 +1050,7 @@ export class Lui {
         confidence: challenge !== undefined && challenge.falsificationVerdict === "WEAKENED" ? "LOW" : "MODERATE",
         keyUncertainty: (analysis?.uncertainty ?? challenge?.missingEvidence ?? []).join("; ") || "see research state for open questions",
         implication: challenge?.falsificationVerdict === "WEAKENED"
-          ? "The challenged statement has material contradictions in the current evidence — consider reassessing."
+          ? "The challenged statement has material contradictions in the current evidence; consider reassessing."
           : "Deeper levels (evidence/structure/trail) are available on request.",
         citedObjectRefs: [...new Set(cited)],
       };
@@ -1040,7 +1058,7 @@ export class Lui {
 
     if (result.stateChange !== undefined) {
       // M6 (audit D2): a successful MANAGE_STATE must not fall through to "produced no research
-      // outcome" — it changed working state, and the response must say what changed.
+      // outcome"; it changed working state, and the response must say what changed.
       const change = result.stateChange;
       return {
         answer: `Working state updated (${change.changeType}): ${change.description}`,
@@ -1048,7 +1066,7 @@ export class Lui {
         opposingReasons: [],
         confidence: "HIGH",
         keyUncertainty: "",
-        implication: "Working state only — persistent memory was not changed (SAVE is a separate action).",
+        implication: "Working state only; persistent memory was not changed (SAVE is a separate action).",
         citedObjectRefs: [],
       };
     }
@@ -1118,7 +1136,7 @@ export class Lui {
     };
   }
 
-  /** Drop invented citations — only refs present in the context survive (M3 §21). */
+  /** Drop invented citations; only refs present in the context survive (M3 §21). */
   private validateCitations<T extends { citedObjectRefs?: readonly string[] }>(data: T, ctx: ResearchContext): T {
     if (data.citedObjectRefs === undefined) return data;
     const known = new Set<string>([
@@ -1151,11 +1169,11 @@ export class Lui {
         : {
             target: {
               objectRefs: [],
-              unresolved: ["target not resolved — interpretation failed"],
+              unresolved: ["target not resolved; interpretation failed"],
             } as ResolvedTarget,
           }),
       ambiguity: { isAmbiguous: false, questions: [], reason: "" },
-      consequence: { level: "INFORMATIONAL", rationale: "not assessed — model failure", requiresConfirmation: false },
+      consequence: { level: "INFORMATIONAL", rationale: "not assessed; model failure", requiresConfirmation: false },
       plan: { steps: [], requiresConfirmationFor: [] },
       modelFailure: failure,
       response: {
@@ -1163,7 +1181,7 @@ export class Lui {
         supportingReasons: [],
         opposingReasons: [],
         confidence: "UNKNOWN",
-        keyUncertainty: "model provider failure — nothing was executed and no state was changed",
+        keyUncertainty: "model provider failure; nothing was executed and no state was changed",
         implication: "Retry when the model provider is available.",
         citedObjectRefs: [],
       },

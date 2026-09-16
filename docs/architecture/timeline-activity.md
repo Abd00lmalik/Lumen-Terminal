@@ -8,7 +8,7 @@ related: [workspace-presentation.md, research-object-model.md]
 
 **Related documents:** `workspace-presentation.md` · `research-object-model.md`
 
-> Converted from `RESEARCH TIMELINE & ACTIVITY INTELL.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `RESEARCH TIMELINE & ACTIVITY INTELL.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 RESEARCH TIMELINE & ACTIVITY INTELLIGENCE
 
@@ -608,12 +608,12 @@ Example:
 ```text id="e3x7qa"
 TODAY
 
-14:02 — Research started
-14:08 — Macro evidence added
-14:15 — Alternative hypothesis created
-14:23 — Contradictory evidence discovered
-14:31 — Leading hypothesis changed
-14:34 — Judgment revised
+14:02; Research started
+14:08; Macro evidence added
+14:15; Alternative hypothesis created
+14:23; Contradictory evidence discovered
+14:31; Leading hypothesis changed
+14:34; Judgment revised
 ```
 
 ---
@@ -746,7 +746,7 @@ Related events should be grouped.
 Example:
 
 ```text id="p4m7vc"
-14:20 — New derivatives evidence discovered
+14:20; New derivatives evidence discovered
 
 Expanded:
 • Source retrieved

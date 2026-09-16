@@ -126,7 +126,7 @@ function newRegistry(): CapabilityRegistry {
   return registry;
 }
 
-describe("Flow 3 — WHAT COULD AFFECT IT? (factor landscape)", () => {
+describe("Flow 3; WHAT COULD AFFECT IT? (factor landscape)", () => {
   beforeEach(() => resetIdCounters());
 
   it("distinguishes OBSERVED_CURRENT_DRIVER from potential/catalyst/risk/dependency/speculative factors", async () => {
@@ -142,10 +142,10 @@ describe("Flow 3 — WHAT COULD AFFECT IT? (factor landscape)", () => {
     expect(byStatus("SPECULATIVE_FACTOR")).toHaveLength(1);
     // Response preserves the current-vs-conditional distinction.
     expect(result.response).toContain("Observed current drivers");
-    expect(result.response).toContain("Potential factors (conditional — not predictions)");
+    expect(result.response).toContain("Potential factors (conditional; not predictions)");
   });
 
-  it("preserves transmission mechanisms and matter-conditions — influence stays conditional", async () => {
+  it("preserves transmission mechanisms and matter-conditions; influence stays conditional", async () => {
     const provider = newProvider();
     const result = await runFlow3("What factors could change this situation?", { provider, registry: newRegistry(), workspace: new Workspace(), store: new MemoryStore() });
     const catalyst = result.landscape?.factors.find((f) => f.status === "CATALYST");
@@ -154,7 +154,7 @@ describe("Flow 3 — WHAT COULD AFFECT IT? (factor landscape)", () => {
     expect(result.response).toContain("matters when");
   });
 
-  it("captures supporting AND contradicting evidence per factor — no curation", async () => {
+  it("captures supporting AND contradicting evidence per factor; no curation", async () => {
     const provider = newProvider();
     const result = await runFlow3("Risks and catalysts to watch?", { provider, registry: newRegistry(), workspace: new Workspace(), store: new MemoryStore() });
     const risk = result.landscape?.factors.find((f) => f.status === "RISK");
@@ -162,7 +162,7 @@ describe("Flow 3 — WHAT COULD AFFECT IT? (factor landscape)", () => {
     expect(result.landscape?.citedObjectRefs).toEqual(["ev_000001", "ev_000002"]);
   });
 
-  it("missing data appears as unresolved/missing — never as evidence of absence", async () => {
+  it("missing data appears as unresolved/missing; never as evidence of absence", async () => {
     const provider = newProvider(landscape({ unresolvedFactors: ["regulatory posture"], missingInformation: ["ETF flow data (G2 unavailable)"] }));
     const result = await runFlow3("What could affect BTC?", { provider, registry: newRegistry(), workspace: new Workspace(), store: new MemoryStore() });
     expect(result.landscape?.unresolvedFactors).toContain("regulatory posture");

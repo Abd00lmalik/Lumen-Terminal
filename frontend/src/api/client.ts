@@ -1,10 +1,10 @@
 /**
- * Typed API client — the single fetch boundary for the whole frontend.
+ * Typed API client; the single fetch boundary for the whole frontend.
  * Centralizes base URL, request handling, error normalization, and SSE connection
  * handling. Components consume typed services; no scattered fetch calls.
  *
  * Hard rules preserved here:
- * - The client sends natural-language research messages only — never a flow name.
+ * - The client sends natural-language research messages only; never a flow name.
  * - No credentials of any kind are sent, stored, or referenced (the backend derives
  *   the trader identity server-side). There is nothing here to leak.
  * - SSE is consumed via fetch + ReadableStream (NOT native EventSource, which cannot POST).
@@ -48,7 +48,7 @@ export class ApiError extends Error {
 /**
  * Transport-level connection failure. `environment` distinguishes dev-local-unreachable
  * from production-service-unavailable so the UI can show the RIGHT recovery guidance
- * (dev: start the local server; prod: the service is down/redeploying — retry later).
+ * (dev: start the local server; prod: the service is down/redeploying; retry later).
  * A development instruction (`npm run api`) must never reach a production user.
  */
 export class NetworkError extends Error {
@@ -59,8 +59,8 @@ export class NetworkError extends Error {
     const production = opts?.production ?? env?.PROD === true;
     super(
       production
-        ? "Research service unavailable — the API is not responding. This is usually temporary (deployment or cold start); try again shortly."
-        : "Cannot reach the research backend — is the API server running (`npm run api`)?",
+        ? "Research service unavailable; the API is not responding. This is usually temporary (deployment or cold start); try again shortly."
+        : "Cannot reach the research backend; is the API server running (`npm run api`)?",
     );
     this.name = "NetworkError";
     this.environment = production ? "production" : "development";
@@ -80,7 +80,7 @@ async function parseErrorBody(res: Response): Promise<never> {
       confirmation = body.error.confirmation;
     }
   } catch {
-    // non-JSON error body — keep the HTTP fallback above
+    // non-JSON error body; keep the HTTP fallback above
   }
   throw new ApiError(code, message, res.status, confirmation);
 }
@@ -107,7 +107,7 @@ export const http = {
 };
 
 // ---------------------------------------------------------------------------
-// SSE — POST /api/research?stream=1
+// SSE; POST /api/research?stream=1
 // ---------------------------------------------------------------------------
 
 export interface StreamHandlers {
@@ -184,7 +184,7 @@ function handleSseChunk(chunk: string, handlers: StreamHandlers): void {
   try {
     payload = JSON.parse(dataLines.join("\n"));
   } catch {
-    return; // malformed event — never render garbage
+    return; // malformed event; never render garbage
   }
   if (eventName === "progress" && isProgressPayload(payload)) {
     handlers.onProgress({ stage: payload.stage, summary: payload.summary, data: payload.data });

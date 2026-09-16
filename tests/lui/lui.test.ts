@@ -185,7 +185,7 @@ describe("six LUI actions (locked set)", () => {
     expect(workspace.listSavedArtifacts()).toHaveLength(0);
   });
 
-  it("MONITOR produces a proposal only — never activates anything", async () => {
+  it("MONITOR produces a proposal only; never activates anything", async () => {
     const provider = new FakeModelProvider(new Map([
       ["monitor.proposal", JSON.stringify({
         conditions: ["BTC below 20k"],
@@ -224,7 +224,7 @@ describe("six LUI actions (locked set)", () => {
     expect(workspace.listSavedArtifacts()).toHaveLength(0);
 
     // Confirmed origin → artifact persisted with provenance.
-    const confirmed = await lui.handle("Save this finding", { kind: "trader", detail: "LUI message — trader confirmed SAVE" });
+    const confirmed = await lui.handle("Save this finding", { kind: "trader", detail: "LUI message; trader confirmed SAVE" });
     expect(confirmed.saved).toBeDefined();
     expect(workspace.listSavedArtifacts()).toHaveLength(1);
     expect(workspace.listSavedArtifacts()[0]?.content).toContain("100-day mean");
@@ -306,7 +306,7 @@ describe("ambiguity + consequence (M3 §13)", () => {
   });
 });
 
-describe("safety boundary (M3 §14 — trader decision boundary)", () => {
+describe("safety boundary (M3 §14; trader decision boundary)", () => {
   it("rejects execution-like requests before any dispatch", async () => {
     const provider = new FakeModelProvider();
     provider.responses.set("lui.normalized_request", responses.normalizedRequest({ primaryAction: "RESEARCH", objective: "buy BTC now" }));
@@ -324,7 +324,7 @@ describe("safety boundary (M3 §14 — trader decision boundary)", () => {
 
   it("capability registry has no trading/execution capability to route to", async () => {
     const registry = registryWith("NEWS_ANALYSIS", "TECHNICAL_ANALYSIS");
-    // Attempting to execute a non-research capability yields an UNAVAILABLE tool result — no execution path exists.
+    // Attempting to execute a non-research capability yields an UNAVAILABLE tool result; no execution path exists.
     const result = await registry.execute("PLACE_ORDER", {}, system);
     expect(result.failure.type).toBe("UNAVAILABLE");
     expect(result.failure.message).toContain("no provider registered");
@@ -346,7 +346,7 @@ describe("adaptive research loop (M3 §7/§8)", () => {
       provider, registry, workspace, store: newStore(),
     });
 
-    // Only the PLANNED capability ran — the un-planned ones never executed.
+    // Only the PLANNED capability ran; the un-planned ones never executed.
     expect(outcome.executions.map((e) => e.capability)).toEqual(["NEWS_ANALYSIS"]);
     expect(outcome.stoppedBecause).toBe("EVIDENCE_SUFFICIENT");
     expect(outcome.evidence.length).toBeGreaterThan(0);
@@ -435,7 +435,7 @@ describe("adaptive research loop (M3 §7/§8)", () => {
   });
 });
 
-describe("thesis handling (M3 §15) — trader ownership", () => {
+describe("thesis handling (M3 §15); trader ownership", () => {
   it("thesis assessment evaluates evidence against the trader's thesis without mutating it", async () => {
     const provider = new FakeModelProvider();
     provider.responses.set("lui.normalized_request", responses.normalizedRequest({ primaryAction: "ANALYZE", objective: "check my thesis" }));
@@ -462,7 +462,7 @@ describe("thesis handling (M3 §15) — trader ownership", () => {
 
     expect(result.thesisAssessment).toBeDefined();
     expect(result.thesisAssessment?.thesisStatusAssessment).toBe("CONTESTED");
-    // Thesis NOT mutated by assessment — same statement, same version.
+    // Thesis NOT mutated by assessment; same statement, same version.
     expect(workspace.getThesis(thesis.id)?.statement).toBe("BTC halves risk after the halving cycle");
     expect(workspace.getThesis(thesis.id)?.version).toBe(1);
   });
@@ -483,7 +483,7 @@ describe("thesis handling (M3 §15) — trader ownership", () => {
     expect(revised.statement).toBe("v2 statement");
   });
 
-  it("thesis evaluation without a thesis is an honest model failure — never a fabricated thesis", async () => {
+  it("thesis evaluation without a thesis is an honest model failure; never a fabricated thesis", async () => {
     const provider = new FakeModelProvider();
     provider.responses.set("lui.normalized_request", responses.normalizedRequest({ primaryAction: "ANALYZE", objective: "check my thesis" }));
     provider.responses.set("lui.resolved_target", responses.resolvedTarget({}));
@@ -497,7 +497,7 @@ describe("thesis handling (M3 §15) — trader ownership", () => {
   });
 });
 
-describe("research context (M3 §9) — epistemic distinctions preserved", () => {
+describe("research context (M3 §9); epistemic distinctions preserved", () => {
   it("interpretation evidence stays interpretation in model context (never upgraded)", async () => {
     const { buildResearchContext } = await import("../../src/research/context.js");
     const workspace = new Workspace();

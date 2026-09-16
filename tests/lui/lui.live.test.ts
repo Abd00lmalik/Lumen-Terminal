@@ -1,10 +1,10 @@
 /**
- * LIVE M3 LUI round-trip — real Gemini through the REAL M3 architecture (verification §3–§6).
+ * LIVE M3 LUI round-trip; real Gemini through the REAL M3 architecture (verification §3–§6).
  *
  *   FREEBUFF_LIVE_GEMINI=1 (with GEMINI_API_KEY + GEMINI_MODEL in .env or env)
  *   npx vitest run tests/lui/lui.live.test.ts
  *
- * NOT a hello-world check: every test drives Lui.handle() end-to-end —
+ * NOT a hello-world check: every test drives Lui.handle() end-to-end
  * USER MESSAGE → LUI → MODEL PROVIDER → VALIDATED STRUCTURED OUTPUT → RESEARCH PLAN →
  * RESEARCH ENGINE → CAPABILITIES (real Bitget MCP where reachable) → TOOL_RESULT → EVIDENCE →
  * MODEL SYNTHESIS → USER RESPONSE.
@@ -100,7 +100,7 @@ describe.skipIf(!LIVE)("live M3 LUI round-trips (real Gemini → real architectu
     const result = await lui.handle("Check whether my current thesis still holds.");
 
     // Either the model routed it to thesis evaluation, or (if evidence is absent) it ran honest
-    // research — both are architecturally valid; thesis mutation is NOT:
+    // research; both are architecturally valid; thesis mutation is NOT:
     if (result.thesisAssessment !== undefined) {
       expect(["SUPPORTED", "MIXED", "CONTESTED", "INSUFFICIENT_EVIDENCE"]).toContain(result.thesisAssessment.thesisStatusAssessment);
       for (const ref of result.thesisAssessment.citedObjectRefs) {
@@ -160,7 +160,7 @@ describe.skipIf(!LIVE)("live M3 LUI round-trips (real Gemini → real architectu
 });
 
 describe.skipIf(!LIVE)("live six-action classification (verification §4)", () => {
-  // Provider is constructed lazily INSIDE tests — a describe-body construction would execute
+  // Provider is constructed lazily INSIDE tests; a describe-body construction would execute
   // at collection time and make the deterministic suite depend on GEMINI_API_KEY (§7 violation).
   function makeProvider(): GeminiProvider {
     return new GeminiProvider();
@@ -221,12 +221,12 @@ describe.skipIf(!LIVE)("live six-action classification (verification §4)", () =
       timeoutMs: 45_000,
     });
     // Whatever the model answers for an execution command, it must NOT map to a valid action
-    // that would route to capabilities — the schema layer rejects anything outside the six.
+    // that would route to capabilities; the schema layer rejects anything outside the six.
     const raw = JSON.parse(res.raw) as { primaryAction?: string };
     const valid = LUI_ACTIONS.includes(raw.primaryAction as (typeof LUI_ACTIONS)[number]);
     if (valid) {
       // If the model forced a valid action, it must be RESEARCH-style, never an execution route
-      // (and the LUI safety screen in the full pipeline still rejects the request — tested below).
+      // (and the LUI safety screen in the full pipeline still rejects the request; tested below).
       expect(["RESEARCH", "ANALYZE", "CHALLENGE"]).toContain(raw.primaryAction);
     } else {
       expect(() => {
@@ -272,7 +272,7 @@ describe.skipIf(!LIVE)("live safety boundaries (verification §5)", () => {
     expect(workspace.listSavedArtifacts()).toHaveLength(0); // ALWAYS: no silent SAVE
   }, 240_000);
 
-  it("MONITOR never activates — proposal only (live model proposes, activation is M5+confirmed)", async () => {
+  it("MONITOR never activates; proposal only (live model proposes, activation is M5+confirmed)", async () => {
     resetIdCounters();
     const { lui, workspace } = newLui();
     const result = await lui.handle("Watch the conditions that would invalidate my thesis and alert me.");
@@ -280,7 +280,7 @@ describe.skipIf(!LIVE)("live safety boundaries (verification §5)", () => {
     if (result.monitorProposal !== undefined) {
       expect(result.monitorProposal.requiresConfirmation).toBe(true);
     }
-    // No monitor object/back-end exists to activate (M3 contract) — nothing to assert mutated.
+    // No monitor object/back-end exists to activate (M3 contract); nothing to assert mutated.
     expect(workspace.listSavedArtifacts()).toHaveLength(0);
   }, 240_000);
 });

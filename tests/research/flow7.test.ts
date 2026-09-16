@@ -106,7 +106,7 @@ function newRegistry(): CapabilityRegistry {
   return registry;
 }
 
-describe("Flow 7 — WHAT COULD PROVE ME WRONG? (falsification research)", () => {
+describe("Flow 7; WHAT COULD PROVE ME WRONG? (falsification research)", () => {
   beforeEach(() => resetIdCounters());
 
   it("retrieves the active trader thesis and stress-tests it without mutating it", async () => {
@@ -148,7 +148,7 @@ describe("Flow 7 — WHAT COULD PROVE ME WRONG? (falsification research)", () =>
     expect(result.assessment?.vulnerableAssumptions).toContain("macro conditions stay stable");
   });
 
-  it("labels falsification targets: derived vs proposed — no invented established thresholds", async () => {
+  it("labels falsification targets: derived vs proposed; no invented established thresholds", async () => {
     const provider = newProvider();
     const result = await runFlow7("Break it", {
       provider, registry: newRegistry(), workspace: new Workspace(), store: new MemoryStore(),
@@ -189,7 +189,7 @@ describe("Flow 7 — WHAT COULD PROVE ME WRONG? (falsification research)", () =>
     expect(result.response).toContain("NOT confirmation");
   });
 
-  it("tool failure becomes a limitation, not negative evidence — assessment still grounds in real evidence", async () => {
+  it("tool failure becomes a limitation, not negative evidence; assessment still grounds in real evidence", async () => {
     const registry = new CapabilityRegistry();
     registry.register(failingCapability("TECHNICAL_ANALYSIS"));
     registry.register(fakeCapability("SENTIMENT_ANALYSIS", "positioning risk-off"));
@@ -228,7 +228,7 @@ describe("Flow 7 — WHAT COULD PROVE ME WRONG? (falsification research)", () =>
     expect(r2.assessment?.falsificationTargets[0]?.condition).toBe("close below opening range");
   });
 
-  it("monitoring stays a PROPOSAL — nothing is activated", async () => {
+  it("monitoring stays a PROPOSAL; nothing is activated", async () => {
     const workspace = new Workspace();
     workspace.addThesis({ statement: "BTC trends up this quarter", objective: "swing" }, trader);
     const provider = newProvider();
@@ -251,7 +251,7 @@ describe("Flow 7 — WHAT COULD PROVE ME WRONG? (falsification research)", () =>
   it("model failure on assessment → typed model failure, research state preserved", async () => {
     const workspace = new Workspace();
     workspace.addThesis({ statement: "BTC trends up", objective: "swing" }, trader);
-    // Fail ONLY the falsification call — the plan/decision calls must succeed so the
+    // Fail ONLY the falsification call; the plan/decision calls must succeed so the
     // failure under test is the assessment step, not plan time.
     const provider = new FakeModelProvider(new Map([
       ["research.plan", FALSIFICATION_PLAN],
@@ -260,7 +260,7 @@ describe("Flow 7 — WHAT COULD PROVE ME WRONG? (falsification research)", () =>
     ]));
     const result = await runFlow7("Challenge my thesis", { provider, registry: newRegistry(), workspace, store: new MemoryStore() });
     expect(result.assessment).toBeUndefined();
-    // M4 §33: provider failure keeps its type — never laundered into a validation failure.
+    // M4 §33: provider failure keeps its type; never laundered into a validation failure.
     expect(result.modelFailure?.type).toBe("PROVIDER_UNAVAILABLE");
     expect(result.outcome.evidence.length).toBeGreaterThan(0); // collected evidence preserved
   });

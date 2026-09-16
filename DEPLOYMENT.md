@@ -1,6 +1,6 @@
 # Deployment
 
-Status: **the full application deploys to Vercel** — frontend (static SPA) and backend
+Status: **the full application deploys to Vercel**; frontend (static SPA) and backend
 (serverless API functions) on one domain. This document describes the deployed
 architecture honestly, including its real limitations.
 
@@ -15,7 +15,7 @@ flowchart TD
     U[Trader browser] -->|https://asklumen.vercel.app| V["Vercel edge"]
     V -->|static assets| SPA["React SPA (frontend/dist)"]
     V -->|"/api/*"| F["Vercel Function (Node.js, 300s, streaming)"]
-    F --> FAST["Fastify app — buildApi() (same app as `npm run api`)"]
+    F --> FAST["Fastify app; buildApi() (same app as `npm run api`)"]
     FAST --> LUI["LUI → Research Engine → Capability Registry"]
     LUI --> BIT["Bitget adapters (primary)"]
     LUI --> FB["Fallback providers (news RSS / Fear&Greed / World Bank)"]
@@ -44,28 +44,28 @@ Key properties:
 
 | Variable | Scope | Purpose |
 |---|---|---|
-| `GEMINI_API_KEY` | production, preview | Gemini model access — **server-side only; never exposed to the browser** |
+| `GEMINI_API_KEY` | production, preview | Gemini model access; **server-side only; never exposed to the browser** |
 | `GEMINI_MODEL` | production, preview | Model override (free-tier-reliable Flash-class default) |
 | `WORKSPACE_FILE` | optional | Opt in to a `FileStore` at an explicit path. **Do not set it to a normal serverless disk path** (see §3) |
 
 There are no `VITE_*` secrets and no credentials in the frontend bundle; the secret scan
 (`grep` over `frontend/src` and the build output) is part of the release checklist.
 
-## 3. Persistence — honest limits
+## 3. Persistence; honest limits
 
 The default production store is **in-memory** (`createProductionStore` in
 `api/research.ts`): serverless local disks are ephemeral, so workspace state survives
 across requests on a warm function instance and is lost on cold start. The UI never
 claims durable persistence, and the health endpoint does not advertise any.
 
-- **Local development** uses the real `FileStore` (`.data/workspace.json`) — state
+- **Local development** uses the real `FileStore` (`.data/workspace.json`); state
   survives restarts and restart-ID-collisions are handled (ID counters are re-seeded
   from the restored workspace).
 - **Production (current)** is per-instance memory. Acceptable for a demo workload;
   runs are visible while the instance is warm.
 - **Production (durable, when needed):** the `WorkspaceStore` interface is two methods
   (`save`/`load`), so the smallest real upgrade is a hosted key-value store (e.g. Vercel
-  Blob / Upstash Redis) behind the same interface — a contained change in
+  Blob / Upstash Redis) behind the same interface; a contained change in
   `src/persistence/`, no engine changes. This is deliberately NOT faked in the current
   deployment.
 
@@ -91,9 +91,9 @@ settings so it always tracks production.
 
 ## 6. Known deployment limitations
 
-1. **Ephemeral workspace state** (§3) — by design, documented, not silently faked.
-2. **300 s function ceiling** — research runs observed so far peak well below it; a
+1. **Ephemeral workspace state** (§3); by design, documented, not silently faked.
+2. **300 s function ceiling**; research runs observed so far peak well below it; a
    pathologically slow provider could still hit it (the run would surface as an honest
    transport failure, never fabricated success).
-3. **No background monitoring** — monitoring remains a persistent handoff record; the
+3. **No background monitoring**; monitoring remains a persistent handoff record; the
    serverless model has no worker, and the product does not pretend to run one.

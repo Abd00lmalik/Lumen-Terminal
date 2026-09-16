@@ -8,10 +8,10 @@ related: [core-principles.md, lui-universal-core.md]
 
 **Related documents:** `core-principles.md` · `lui-universal-core.md`
 
-> Converted from `researchflows.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `researchflows.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 Below is the consolidated version of the 8 locked research flows. This is the version to save as the canonical product-design reference.
-AI Trading Desk — 8 Core Research Flows
+AI Trading Desk; 8 Core Research Flows
 Product Principle
 The workbench is not eight separate products. It is one natural-language research workbench with eight specialized research behaviors.
 The trader speaks naturally. The system identifies the type of research required, constructs an appropriate investigation, uses relevant data/tools, maintains a living research workspace, synthesizes evidence, and produces a decision-ready judgment.
@@ -28,7 +28,7 @@ What could prove me wrong?
 Evaluate this according to my framework.
 
 
-FLOW 1 — WHAT HAPPENED?
+FLOW 1; WHAT HAPPENED?
 Purpose
 Reconstruct and explain a market event.
 This flow answers:
@@ -40,7 +40,7 @@ Example
 
 “BTC just moved 7% in the last few hours. What happened?”
 
-Step 1 — Natural-language question
+Step 1; Natural-language question
 The trader asks the question normally.
 The agent extracts:
 
@@ -52,7 +52,7 @@ Relevant context
 Research intent
 
 The trader does not need to manually configure these.
-Step 2 — AI proposes a research plan
+Step 2; AI proposes a research plan
 The agent presents its intended investigation.
 For example:
 
@@ -70,7 +70,7 @@ For example:
 “Ignore social media sentiment and focus on derivatives and macro.”
 
 The agent modifies the investigation accordingly.
-Step 3 — Investigation
+Step 3; Investigation
 The agent conducts the research.
 It should not simply retrieve one article and summarize it.
 It should:
@@ -82,7 +82,7 @@ Search for competing explanations.
 Distinguish facts from interpretations.
 Look for contradictory evidence.
 
-Step 4 — Living research workspace
+Step 4; Living research workspace
 Research is continuously organized into a structured workspace.
 Possible sections:
 
@@ -99,7 +99,7 @@ For example:
 
 “Why did you rank the ETF news above the liquidation data?”
 
-Step 5 — Synthesis
+Step 5; Synthesis
 The system produces:
 
 Strongest-supported explanation
@@ -131,7 +131,7 @@ Only after meaningful investigation should it conclude that evidence remains ins
 Final sequence
 Natural-language question → Intent understanding → AI research plan → Trader modification/approval → Investigation → Living research workspace → Evidence synthesis → Strongest-supported explanation → Confidence → Trader decides
 
-FLOW 2 — WHY DID IT HAPPEN?
+FLOW 2; WHY DID IT HAPPEN?
 Purpose
 Investigate causality, rather than merely reconstructing an event.
 The central question is:
@@ -142,14 +142,14 @@ Example
 
 “Why did BTC crash after the CPI release?”
 
-Step 1 — Define the event
+Step 1; Define the event
 The agent establishes:
 
 What happened?
 When?
 What needs to be explained?
 
-Step 2 — Candidate-cause map
+Step 2; Candidate-cause map
 Instead of immediately choosing one explanation, the agent generates a map of plausible causes.
 For example:
 
@@ -165,10 +165,10 @@ Related assets
 Technical conditions
 
 The exact structure depends on the event.
-Step 3 — Parallel investigation
+Step 3; Parallel investigation
 The agent investigates relevant branches concurrently.
 It does not investigate one hypothesis from beginning to end before considering the others.
-Step 4 — Adaptive research depth
+Step 4; Adaptive research depth
 The initial investigation is broad.
 As evidence appears:
 
@@ -177,7 +177,7 @@ Weak hypotheses receive less attention.
 New evidence can create new branches.
 
 The investigation dynamically reallocates research effort.
-Step 5 — Test causal relationships
+Step 5; Test causal relationships
 The agent asks whether the evidence actually supports causation.
 It distinguishes:
 
@@ -186,10 +186,10 @@ Temporal association
 Plausible mechanism
 Strong causal evidence
 
-Step 6 — Active falsification
+Step 6; Active falsification
 The agent actively searches for evidence that weakens its leading explanation.
 This happens by default.
-Step 7 — Dynamic hypothesis branching
+Step 7; Dynamic hypothesis branching
 If new evidence weakens the leading explanation:
 
 Preserve the existing research.
@@ -199,20 +199,20 @@ Compare the branches.
 Continue branching if warranted.
 
 The agent does not throw away earlier work.
-Step 8 — Resolve conflicting evidence
+Step 8; Resolve conflicting evidence
 If evidence conflicts, the agent resolves the conflict itself where possible.
 The default behavior is not:
 
 “Here are two explanations. You decide.”
 
 Instead, it determines which explanation is better supported and explains why.
-Step 9 — Event-specific causal structure
+Step 9; Event-specific causal structure
 The agent should not force every event into:
 
 Trigger → Driver → Amplifier
 
 That structure may be useful sometimes, but the agent chooses the causal structure appropriate to the event.
-Step 10 — Final judgment
+Step 10; Final judgment
 Output:
 
 Primary causal explanation
@@ -256,7 +256,7 @@ Conclusions
 Final sequence
 Natural-language question → Event definition → Candidate-cause map → Parallel investigation → Adaptive research depth → Causal testing → Active falsification → Dynamic branching → Conflict resolution → Event-specific causal structure → Final judgment → Confidence
 
-FLOW 3 — WHAT COULD AFFECT IT?
+FLOW 3; WHAT COULD AFFECT IT?
 Purpose
 Identify factors that could materially affect an asset, event, position, or thesis.
 This is an impact analysis flow.
@@ -264,7 +264,7 @@ Example
 
 “What could affect my BTC position over the next few days?”
 
-Step 1 — Adaptive input
+Step 1; Adaptive input
 The trader can start from:
 
 Asset
@@ -275,7 +275,7 @@ Market condition
 Any other relevant context
 
 The agent adapts to the input.
-Step 2 — Discover relevant domains
+Step 2; Discover relevant domains
 The agent determines which domains matter.
 Potential domains include:
 
@@ -293,14 +293,14 @@ Derivatives
 Liquidity
 
 It should not blindly investigate every domain for every question.
-Step 3 — Broad impact discovery
+Step 3; Broad impact discovery
 The agent searches broadly internally.
 The objective is to avoid missing something important.
-Step 4 — Materiality assessment
+Step 4; Materiality assessment
 The agent ranks discovered factors based on their relevance and potential impact.
 The workspace should primarily surface material factors.
 Lower-ranked factors remain inspectable but do not overwhelm the trader.
-Step 5 — Conditional impact analysis
+Step 5; Conditional impact analysis
 For every material factor, the agent determines:
 
 Potential direction of impact
@@ -310,7 +310,7 @@ What evidence would confirm or weaken the expected effect
 
 Thresholds should be derived from the current evidence, expectations, and market context.
 The agent should not invent arbitrary thresholds.
-Step 6 — Decision-ready synthesis
+Step 6; Decision-ready synthesis
 The output focuses on:
 
 Most important factors
@@ -320,7 +320,7 @@ What could change the assessment
 Relative importance
 Confidence
 
-Step 7 — Optional monitoring handoff
+Step 7; Optional monitoring handoff
 Research ends by default.
 If the trader says:
 
@@ -331,7 +331,7 @@ The trader can then modify the monitoring naturally.
 Final sequence
 Natural-language question → Context interpretation → Broad impact discovery → Materiality assessment → Conditional impact analysis → Relevance filtering → Decision-ready synthesis → Optional monitoring handoff → Trader decides
 
-FLOW 4 — DOES MY THESIS HOLD?
+FLOW 4; DOES MY THESIS HOLD?
 Purpose
 Test an existing trader thesis rather than simply confirming it.
 This is the workbench's primary thesis validation/stress-testing flow.
@@ -339,10 +339,10 @@ Example
 
 “My thesis is that BTC will continue higher because ETF inflows are strong and liquidity is improving. Does it hold?”
 
-Step 1 — Capture the thesis
+Step 1; Capture the thesis
 The agent identifies the trader's actual belief.
 It does not assume the thesis is correct.
-Step 2 — Decompose the thesis
+Step 2; Decompose the thesis
 The agent breaks it into:
 
 Claims
@@ -356,9 +356,9 @@ For example:
 ETF inflows → demand → reduced available supply → price support
 
 Each link can be tested.
-Step 3 — Test individual claims
+Step 3; Test individual claims
 The agent gathers supporting and disconfirming evidence for each claim.
-Step 4 — Test dependencies
+Step 4; Test dependencies
 A thesis can contain individually true statements but still fail because the relationships between them are weak.
 The agent therefore tests:
 
@@ -368,15 +368,15 @@ rather than merely:
 
 Is A true?
 
-Step 5 — Falsification
+Step 5; Falsification
 The agent actively searches for evidence that could invalidate the thesis.
-Step 6 — Alternative explanations
+Step 6; Alternative explanations
 The agent always tests alternative explanations that could produce the same expected outcome without the thesis being correct.
 For example:
 
 BTC could rise while ETF inflows are strong, but the actual driver might be short covering rather than structural demand.
 
-Step 7 — Apply research framework
+Step 7; Apply research framework
 The trader can maintain:
 Persistent framework
 A framework they regularly use.
@@ -384,9 +384,9 @@ Or:
 Temporary framework
 A framework provided specifically for this research task.
 Both can be modified through natural language.
-Step 8 — Reconstruct the thesis
+Step 8; Reconstruct the thesis
 After testing the individual components, the agent reassesses the thesis as a whole.
-Step 9 — Nuanced assessment
+Step 9; Nuanced assessment
 The output is not simply:
 
 “Yes.”
@@ -406,7 +406,7 @@ Missing evidence
 What evidence would change the assessment
 Overall degree of support
 
-Step 10 — Thesis refinement without takeover
+Step 10; Thesis refinement without takeover
 If the thesis is weak, the agent can explain:
 
 What needs to change.
@@ -418,7 +418,7 @@ The trader decides whether to adopt a revised thesis.
 Final sequence
 Natural-language thesis → Claim decomposition → Claim testing → Dependency testing → Falsification → Alternative explanations → Framework application → Reconstruction → Nuanced assessment → Required changes → Trader decides
 
-FLOW 5 — HAS THIS HAPPENED BEFORE?
+FLOW 5; HAS THIS HAPPENED BEFORE?
 Purpose
 Use historical precedent to understand the current situation.
 The core principle:
@@ -429,9 +429,9 @@ Example
 
 “Has BTC experienced a similar move after a Fed surprise before?”
 
-Step 1 — Historical case discovery
+Step 1; Historical case discovery
 The agent searches for relevant historical situations.
-Step 2 — Hybrid historical matching
+Step 2; Hybrid historical matching
 Two types of similarity are considered:
 Surface similarity
 Similar:
@@ -452,11 +452,11 @@ Conditions
 Cause/effect relationships
 
 Causal similarity is prioritized because it is more useful than superficial resemblance.
-Step 3 — Relevance ranking
+Step 3; Relevance ranking
 The agent identifies a broad set of precedents and ranks them.
 Strongest matches receive deeper investigation.
 Weaker matches provide contextual background.
-Step 4 — Deep investigation
+Step 4; Deep investigation
 For the strongest precedents, the agent reconstructs:
 
 What happened
@@ -465,10 +465,10 @@ What conditions existed
 What happened afterward
 Which factors mattered
 
-Step 5 — Counterexample search
+Step 5; Counterexample search
 The agent always searches for historical cases where the apparent pattern failed.
 This protects against confirmation bias.
-Step 6 — Current-vs-historical comparison
+Step 6; Current-vs-historical comparison
 The agent explicitly compares:
 Then
 vs.
@@ -477,10 +477,10 @@ It asks:
 
 Are the conditions actually similar enough for this precedent to matter?
 
-Step 7 — Applicability assessment
+Step 7; Applicability assessment
 Historical evidence is not automatically treated as predictive.
 The agent determines whether the precedent is actually applicable.
-Step 8 — Forward-looking conclusion
+Step 8; Forward-looking conclusion
 The agent can say something like:
 
 “Historical cases suggest X under conditions A/B/C, but the current situation differs because of D.”
@@ -489,12 +489,12 @@ Not:
 
 “This happened before, therefore it will happen again.”
 
-Step 9 — Conflicting precedents
+Step 9; Conflicting precedents
 If the strongest precedents conflict, the agent continues researching rather than prematurely choosing one.
 Final sequence
 Historical question → Broad precedent discovery → Relevance ranking → Deep investigation → Pattern extraction → Counterexample search → Current-vs-historical comparison → Applicability assessment → Forward-looking conclusion → Confidence
 
-FLOW 6 — WHAT DOES ALL THE INFORMATION SAY?
+FLOW 6; WHAT DOES ALL THE INFORMATION SAY?
 Purpose
 Produce a comprehensive cross-domain assessment when the trader wants the broader picture.
 This is the multi-source synthesis flow.
@@ -502,7 +502,7 @@ Example
 
 “What does everything currently say about BTC?”
 
-Step 1 — Adaptive information scope
+Step 1; Adaptive information scope
 The agent determines which information domains are relevant.
 Possible domains:
 
@@ -517,16 +517,16 @@ Ecosystem developments
 Regulatory developments
 
 The agent adapts the scope to the question.
-Step 2 — Natural-language modification
+Step 2; Natural-language modification
 The trader can change the scope naturally.
 For example:
 
 “Include derivatives but ignore social sentiment.”
 
 The research plan updates accordingly.
-Step 3 — Broad investigation
+Step 3; Broad investigation
 The agent gathers information across the relevant domains.
-Step 4 — Cross-domain relationship discovery
+Step 4; Cross-domain relationship discovery
 The agent looks for meaningful relationships between domains.
 For example:
 
@@ -534,7 +534,7 @@ Macro change + derivatives positioning + liquidity conditions
 
 But it should not blindly correlate everything.
 A relationship must be contextually meaningful.
-Step 5 — Claim-specific evidence weighting
+Step 5; Claim-specific evidence weighting
 Evidence is not given a universal score independent of context.
 The agent evaluates evidence based on factors such as:
 
@@ -549,7 +549,7 @@ Observation vs interpretation
 Speculation
 
 The importance of each factor depends on the claim being tested.
-Step 6 — Synthesis
+Step 6; Synthesis
 The agent builds one coherent picture.
 The output explicitly separates:
 Supporting evidence
@@ -558,17 +558,17 @@ Opposing evidence
 What argues against it.
 Unresolved uncertainty
 What remains genuinely unclear.
-Step 7 — Conflict resolution
+Step 7; Conflict resolution
 When sources disagree, the agent investigates the conflict and determines which evidence is more defensible.
-Step 8 — Primary judgment
+Step 8; Primary judgment
 The agent produces one primary judgment.
 It does not simply dump ten perspectives on the trader and ask them to synthesize everything themselves.
-Step 9 — Confidence
+Step 9; Confidence
 The judgment includes an appropriate confidence assessment.
 Final sequence
 Natural-language question → Adaptive information scope → Broad investigation → Cross-domain relationship discovery → Claim-specific evidence weighting → Synthesis → Supporting/opposing evidence → Conflict resolution → Primary judgment → Uncertainty + confidence → Trader decides
 
-FLOW 7 — WHAT COULD PROVE ME WRONG?
+FLOW 7; WHAT COULD PROVE ME WRONG?
 Purpose
 Stress-test what the trader currently believes.
 This is the explicit falsification and early-warning flow.
@@ -576,7 +576,7 @@ Example
 
 “I'm bullish on BTC. What could prove me wrong?”
 
-Step 1 — Adaptive input
+Step 1; Adaptive input
 The trader does not need to provide a formal thesis.
 The input can be:
 
@@ -587,11 +587,11 @@ Expected outcome
 Current interpretation
 Strategy assumption
 
-Step 2 — Define failure conditions
+Step 2; Define failure conditions
 The agent determines what would actually make the belief invalid.
-Step 3 — Search for invalidating evidence
+Step 3; Search for invalidating evidence
 The agent actively searches for evidence contradicting the belief.
-Step 4 — Detect early warnings
+Step 4; Detect early warnings
 The agent looks for meaningful signals that indicate the thesis may be weakening before complete invalidation.
 It distinguishes:
 Invalidating evidence
@@ -600,13 +600,13 @@ Warning signal
 The belief may be weakening.
 Noise
 Information that should not materially change the assessment.
-Step 5 — Establish confirmation conditions
+Step 5; Establish confirmation conditions
 For every meaningful warning or potential failure point, the agent determines what observable condition would confirm that the belief has actually become invalid.
 These conditions must be based on research.
 They should not be arbitrary thresholds.
-Step 6 — Reassess
+Step 6; Reassess
 The agent investigates whether current evidence already satisfies any failure conditions.
-Step 7 — Falsification assessment
+Step 7; Falsification assessment
 Output includes:
 
 What could invalidate the belief
@@ -615,7 +615,7 @@ Whether any invalidation condition has been reached
 What evidence is still missing
 Confidence
 
-Step 8 — Optional monitoring
+Step 8; Optional monitoring
 The agent may propose:
 
 “These three conditions are worth monitoring.”
@@ -625,7 +625,7 @@ The trader must explicitly confirm.
 Final sequence
 Belief/thesis → Define failure conditions → Search for invalidating evidence → Detect meaningful warnings → Establish confirmation conditions → Investigate → Reassess → Falsification assessment → Optional monitoring proposal → Trader confirms
 
-FLOW 8 — EVALUATE THIS ACCORDING TO MY FRAMEWORK
+FLOW 8; EVALUATE THIS ACCORDING TO MY FRAMEWORK
 Purpose
 Evaluate an asset, thesis, opportunity, or situation according to the trader's personal research framework.
 This is the primary personalization flow.
@@ -637,13 +637,13 @@ The trader's framework might be:
 
 “For my BTC longs, I care about liquidity, momentum, macro conditions, and derivatives.”
 
-Step 1 — Natural-language framework
+Step 1; Natural-language framework
 The trader can create or modify a framework through natural language.
 For example:
 
 “For my BTC longs, I care about liquidity, momentum, macro conditions and derivatives.”
 
-Step 2 — Structured representation
+Step 2; Structured representation
 Although the interface is natural language, the system maintains a structured representation underneath.
 Possible framework schema:
 
@@ -655,7 +655,7 @@ Threshold/state
 Evaluation rule
 
 This provides reliability and reproducibility.
-Step 3 — Define factors
+Step 3; Define factors
 The agent converts the trader's framework into evaluable factors.
 Example:
 Liquidity
@@ -663,7 +663,7 @@ Momentum
 Macro
 Derivatives
 Each becomes an explicit research dimension.
-Step 4 — Weighting
+Step 4; Weighting
 Default:
 Equal weighting
 The trader can explicitly specify weights.
@@ -674,9 +674,9 @@ For example:
 The system preserves this distinction:
 Importance ≠ Evidence strength
 A highly weighted factor with weak evidence does not automatically become strong evidence.
-Step 5 — Gather relevant evidence
+Step 5; Gather relevant evidence
 The agent investigates evidence required by each framework factor.
-Step 6 — Evaluate each factor
+Step 6; Evaluate each factor
 Each factor is assessed according to its own rules.
 For example:
 
@@ -686,11 +686,11 @@ Momentum → weakening
 Derivatives → supportive
 
 The actual structure depends on the trader's framework.
-Step 7 — Apply framework rules
+Step 7; Apply framework rules
 The system applies the trader's specified rules rather than silently replacing them with generic analysis.
-Step 8 — Aggregate assessment
+Step 8; Aggregate assessment
 The agent combines the factor-level results according to the framework.
-Step 9 — Explain what drives the result
+Step 9; Explain what drives the result
 The trader should be able to see:
 
 Which factors are driving the assessment
@@ -698,7 +698,7 @@ Which factors are weak
 Which factors conflict
 Which factors lack evidence
 
-Step 10 — Framework integrity check
+Step 10; Framework integrity check
 The agent is not blindly obedient to the framework.
 If the framework itself appears internally inconsistent, or its assumptions strongly conflict with available evidence, the agent:
 

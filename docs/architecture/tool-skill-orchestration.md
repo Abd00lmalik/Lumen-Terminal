@@ -8,7 +8,7 @@ related: [data-market-intelligence.md, evidence-source.md, failure-recovery.md, 
 
 **Related documents:** `data-market-intelligence.md` · `evidence-source.md` · `failure-recovery.md` · `research-execution-engine.md`
 
-> Converted from `# TOOL & SKILL ORCHESTRATION INTELL.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `# TOOL & SKILL ORCHESTRATION INTELL.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 # TOOL & SKILL ORCHESTRATION INTELLIGENCE
 

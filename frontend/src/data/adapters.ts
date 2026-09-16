@@ -3,8 +3,8 @@
  * types: presentational components keep their existing props; pages consume adapters.
  *
  * Adaptation rules (integration mandate §18/§20):
- * - Epistemic status is copied verbatim — never flattened, never re-derived.
- * - Missing data renders honestly (—, empty lists, unknown), never invented.
+ * - Epistemic status is copied verbatim; never flattened, never re-derived.
+ * - Missing data renders honestly (, empty lists, unknown), never invented.
  * - Backend failure states (limitations, SOURCE_UNAVAILABLE, STALE) surface as data.
  */
 import type {
@@ -63,7 +63,7 @@ export function researchSummaryFromDto(r: ResearchDto): ResearchSummary {
     confidence: "UNKNOWN", // per-research confidence lives on its judgment; not fabricated here
     updatedAt: r.history.length > 0 ? r.history[r.history.length - 1]! : new Date().toISOString(),
     evidenceCount: r.evidenceRefs.length,
-    sourceCount: 0, // source counts are not part of the research DTO; rendered as —
+    sourceCount: 0, // source counts are not part of the research DTO; rendered as
     ...(r.isCurrent !== undefined ? { isCurrent: r.isCurrent } : {}),
   };
 }
@@ -194,7 +194,7 @@ export function homeDataFromSnapshot(s: ContinuitySnapshotDto, allResearch: read
 }
 
 // ---------------------------------------------------------------------------
-// Challenge (Flow 7) — derived from real hypotheses/evidence, never a script
+// Challenge (Flow 7); derived from real hypotheses/evidence, never a script
 // ---------------------------------------------------------------------------
 
 export function challengeFromSnapshot(s: ContinuitySnapshotDto): ChallengeView {
@@ -217,8 +217,8 @@ export function challengeFromSnapshot(s: ContinuitySnapshotDto): ChallengeView {
   });
   const latest = s.latestThesisAssessment;
   return {
-    belief: s.activeThesis?.statement ?? "No active thesis — select or create one in the thesis workspace.",
-    beliefOwner: s.activeThesis !== undefined ? `${s.activeThesis.ref} v${s.activeThesis.version}` : "—",
+    belief: s.activeThesis?.statement ?? "No active thesis; select or create one in the thesis workspace.",
+    beliefOwner: s.activeThesis !== undefined ? `${s.activeThesis.ref} v${s.activeThesis.version}` : "",
     falsificationTargets: targets,
     warnings: [...s.importantContradictions, ...s.unresolvedUncertainties].map((c) => `Engine-recorded: ${c}`),
     assessment: latest?.assessment,

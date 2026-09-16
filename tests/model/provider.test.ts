@@ -10,7 +10,7 @@ const schema: OutputSchema = {
   properties: { name: "string", count: "number", tags: "string[]" },
 };
 
-describe("validateModelOutput (M3 §6 — never blindly trust model JSON)", () => {
+describe("validateModelOutput (M3 §6; never blindly trust model JSON)", () => {
   it("accepts schema-conformant JSON", () => {
     const { data } = validateModelOutput<{ name: string; count: number; tags: string[] }>(schema, '{"name":"a","count":1,"tags":["x"]}');
     expect(data.name).toBe("a");
@@ -19,7 +19,7 @@ describe("validateModelOutput (M3 §6 — never blindly trust model JSON)", () =
 
   it("extracts JSON from fenced and prose-wrapped responses", () => {
     expect(() => validateModelOutput(schema, '```json\n{"name":"a","count":1,"tags":[]}\n```')).not.toThrow();
-    expect(() => validateModelOutput(schema, 'Here is the result: {"name":"a","count":1,"tags":[]} — done.')).not.toThrow();
+    expect(() => validateModelOutput(schema, 'Here is the result: {"name":"a","count":1,"tags":[]}; done.')).not.toThrow();
   });
 
   it("rejects missing properties", () => {
@@ -56,7 +56,7 @@ describe("extractJson", () => {
   });
 });
 
-describe("requireEnvConfig (M3 §2 — env-only credentials)", () => {
+describe("requireEnvConfig (M3 §2; env-only credentials)", () => {
   it("throws typed AUTH_FAILURE with a key-free message when GEMINI_API_KEY is absent", () => {
     try {
       expect(() => requireEnvConfig({}, "GEMINI_API_KEY", "GEMINI_MODEL", "gemini-x")).toThrow(ModelFailure);
@@ -82,7 +82,7 @@ describe("requireEnvConfig (M3 §2 — env-only credentials)", () => {
   });
 });
 
-describe("GeminiProvider construction (M3 §2 — no key required to run the suite)", () => {
+describe("GeminiProvider construction (M3 §2; no key required to run the suite)", () => {
   it("throws typed AUTH_FAILURE at construction when env lacks the key", () => {
     try {
       expect(() => new GeminiProvider({ env: {} })).toThrow(ModelFailure);
@@ -110,7 +110,7 @@ describe("GeminiProvider construction (M3 §2 — no key required to run the sui
       env: { GEMINI_API_KEY: "k" },
       fetchImpl: (async () =>
         new Response('{"error":"...contains request metadata..."}', { status: 429 })) as unknown as typeof fetch,
-      // Status MAPPING is under test, not retry timing — collapse the retry budget.
+      // Status MAPPING is under test, not retry timing; collapse the retry budget.
       transientRetry: { attempts: 1, baseDelayMs: 0 },
     });
     const promise = provider.structured({
@@ -163,7 +163,7 @@ describe("GeminiProvider construction (M3 §2 — no key required to run the sui
     expect(captured?.body).not.toContain("TOPSECRET-KEY");
   });
 
-  it("retries TRANSIENT 5xx failures with backoff and succeeds — permanent failures do not retry", async () => {
+  it("retries TRANSIENT 5xx failures with backoff and succeeds; permanent failures do not retry", async () => {
     const delays: number[] = [];
     let calls = 0;
     const flaky = new GeminiProvider({
@@ -199,7 +199,7 @@ describe("GeminiProvider construction (M3 §2 — no key required to run the sui
     expect(permanentCalls).toBe(1);
   });
 
-  it("fails FAST on daily-quota exhaustion (429 + PerDay quotaId) — never retry-stalls", async () => {
+  it("fails FAST on daily-quota exhaustion (429 + PerDay quotaId); never retry-stalls", async () => {
     let calls = 0;
     const dailyBody = JSON.stringify({
       error: {
@@ -217,7 +217,7 @@ describe("GeminiProvider construction (M3 §2 — no key required to run the sui
     });
     await expect(provider.structured({ schemaName: "s", schemaDescription: "{}", system: "sys", prompt: "p" }))
       .rejects.toMatchObject({ type: "RATE_LIMITED", retriable: false });
-    expect(calls).toBe(1); // one attempt only — daily quota cannot be retried away
+    expect(calls).toBe(1); // one attempt only; daily quota cannot be retried away
   });
 
   it("keeps per-minute 429 retriable (rate shaping, not daily exhaustion)", async () => {

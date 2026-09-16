@@ -2,8 +2,8 @@
  * F0 SSE progress-event schema (F0 mandate §14/§15; FRONTEND_ARCHITECTURE.md §6).
  *
  * Named SSE events over `POST /api/research` (query `?stream=1`). Each event corresponds to an
- * ACTUAL application lifecycle transition — the LUI pipeline stages, research-plan creation,
- * capability execution, completion — threaded from the engine's optional progress listener.
+ * ACTUAL application lifecycle transition; the LUI pipeline stages, research-plan creation,
+ * capability execution, completion; threaded from the engine's optional progress listener.
  * Nothing is fabricated to make the UI look active; no event contains model reasoning, raw
  * provider payloads, or secrets (the listener only receives safe summaries + identifiers).
  */
@@ -11,7 +11,7 @@
 import type { ProgressEvent } from "../research/progress.js";
 import type { ResearchResponseDTO, ApiErrorDTO } from "./dto.js";
 
-/** The SSE envelope — every event is one of exactly these three shapes. */
+/** The SSE envelope; every event is one of exactly these three shapes. */
 export type SseEvent =
   | { readonly event: "progress"; readonly data: ProgressEvent }
   | { readonly event: "final"; readonly data: ResearchResponseDTO }

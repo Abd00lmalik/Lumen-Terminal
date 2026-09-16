@@ -8,7 +8,7 @@ related: [thesis-monitor-reassessment.md, lui-universal-core.md, research-flows.
 
 **Related documents:** `thesis-monitor-reassessment.md` · `lui-universal-core.md` · `research-flows.md`
 
-> Converted from `# MONITOR.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `# MONITOR.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 # MONITOR
 

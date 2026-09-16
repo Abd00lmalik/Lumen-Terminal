@@ -8,7 +8,7 @@ related: [lui-universal-core.md, research-flows.md, thesis.md, lui-monitor-actio
 
 **Related documents:** `lui-universal-core.md` · `research-flows.md` · `thesis.md` · `lui-monitor-action.md` · `memory.md`
 
-> Converted from `THESIS → MONITOR → REASSESSMENT LOO.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `THESIS → MONITOR → REASSESSMENT LOO.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 THESIS → MONITOR → REASSESSMENT LOOP
 

@@ -1,8 +1,8 @@
 /**
- * Home — workspace-oriented entry, wired to REAL backend state: research history
+ * Home; workspace-oriented entry, wired to REAL backend state: research history
  * with explicit current-ness, active thesis, monitor counts, recent evidence,
  * contradictions and uncertainties from the continuity snapshot.
- * Empty workspace renders an honest empty state — no fictional examples.
+ * Empty workspace renders an honest empty state; no fictional examples.
  */
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -92,14 +92,14 @@ export function HomePage() {
         </>
       }
     >
-      {/* §8G — home hero: the primary action is asking a research question; example
+      {/* §8G; home hero: the primary action is asking a research question; example
           questions seed the ask flow without inventing any data. */}
       <section className="home-hero">
         <div className="hero-kicker">AI research workbench</div>
         <h1 className="home-title">Ask a research question.</h1>
         <p className="home-sub">
           Lumen investigates with real market capabilities, classifies every piece of evidence,
-          and hands you a judgment with its uncertainty — research informs your decision; it never becomes it.
+          and hands you a judgment with its uncertainty; research informs your decision; it never becomes it.
         </p>
         <div className="hero-actions">
           <button className="btn primary" onClick={() => navigate("/research")}>Ask a research question →</button>

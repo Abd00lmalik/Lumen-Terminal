@@ -1,7 +1,7 @@
 /**
- * Frontend view-model types — mirror the documented API contract shapes
+ * Frontend view-model types; mirror the documented API contract shapes
  * (src/api/dto.ts) so integration later replaces mock data with real responses
- * without redesigning components. No backend imports here — this is a prototype.
+ * without redesigning components. No backend imports here; this is a prototype.
  */
 
 export type EvidenceClass =
@@ -110,7 +110,7 @@ export interface MonitorView {
   readonly status: "PROPOSED" | "ACTIVE" | "PAUSED" | "STALE" | "COMPLETED";
   readonly conditions: readonly MonitorConditionView[];
   readonly sourceStates: readonly { ref: string; state: "OK" | "SOURCE_UNAVAILABLE"; note: string }[];
-  /** Backend monitors carry no review timestamp; absence renders honestly as —. */
+  /** Backend monitors carry no review timestamp; absence renders honestly as;. */
   readonly lastReviewed?: string;
   readonly triggerRationale: string;
 }

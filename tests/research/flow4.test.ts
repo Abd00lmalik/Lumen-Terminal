@@ -111,7 +111,7 @@ function workspaceWithThesis(): { workspace: Workspace; thesisId: string } {
   return { workspace, thesisId: thesis.id };
 }
 
-describe("Flow 4 — DOES MY THESIS HOLD? (thesis evaluation)", () => {
+describe("Flow 4; DOES MY THESIS HOLD? (thesis evaluation)", () => {
   beforeEach(() => resetIdCounters());
 
   it("retrieves the active trader thesis and evaluates it component-by-component", async () => {
@@ -122,7 +122,7 @@ describe("Flow 4 — DOES MY THESIS HOLD? (thesis evaluation)", () => {
     expect(result.evaluation?.components).toHaveLength(2);
     expect(result.evaluation?.components[0]?.kind).toBe("CLAIM");
     expect(result.evaluation?.components[1]?.kind).toBe("ASSUMPTION");
-    // Thesis untouched — same version, same statement, no silent revision.
+    // Thesis untouched; same version, same statement, no silent revision.
     expect(workspace.getThesis(thesisId)?.version).toBe(1);
     expect(workspace.getThesis(thesisId)?.statement).toBe("BTC trends up this quarter");
   });
@@ -147,7 +147,7 @@ describe("Flow 4 — DOES MY THESIS HOLD? (thesis evaluation)", () => {
         evidenceQuality: "UNAVAILABLE",
         supportingRefs: [],
         contradictingRefs: [],
-        rationale: "no evidence in context — G2 unavailable; absence is not contradiction",
+        rationale: "no evidence in context; G2 unavailable; absence is not contradiction",
         uncertainty: ["no retrieval path"],
       }],
       overallAssessment: "INDETERMINATE",
@@ -214,7 +214,7 @@ describe("Flow 4 — DOES MY THESIS HOLD? (thesis evaluation)", () => {
   it("model confidence cannot override evidence: schema separates them and response shows the split", async () => {
     const provider = newProvider(evaluation({ confidence: "HIGH", overallAssessment: "WEAKENED", evidenceBasisQuality: "WEAK" }));
     const result = await runFlow4("Does my thesis hold?", { provider, registry: newRegistry(), workspace: workspaceWithThesis().workspace, store: new MemoryStore() });
-    // A HIGH-confidence model output does NOT upgrade a WEAKENED assessment — both fields pass through honestly.
+    // A HIGH-confidence model output does NOT upgrade a WEAKENED assessment; both fields pass through honestly.
     expect(result.evaluation?.overallAssessment).toBe("WEAKENED");
     expect(result.evaluation?.evidenceBasisQuality).toBe("WEAK");
   });

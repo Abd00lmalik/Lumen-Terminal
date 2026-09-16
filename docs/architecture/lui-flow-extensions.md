@@ -1,6 +1,6 @@
 ---
-title: "LUI — Universal Core + Flow-Specific Extensions"
-source: LUI — Universal Core + Flow-Specifi.txt
+title: "LUI; Universal Core + Flow-Specific Extensions"
+source: LUI; Universal Core + Flow-Specifi.txt
 converted: 2026-09-12
 type: architecture-spec
 related: [lui-universal-core.md, lui-interaction-model.md]
@@ -8,11 +8,11 @@ related: [lui-universal-core.md, lui-interaction-model.md]
 
 **Related documents:** `lui-universal-core.md` · `lui-interaction-model.md`
 
-> Converted from `LUI — Universal Core + Flow-Specifi.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `LUI; Universal Core + Flow-Specifi.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 >
-> **Amended 2026-09-12 (final architecture lock, human-approved):** this document originally specified a five-action universal core excluding SAVE. Per the lock, the universal action set is **six actions including SAVE** as a first-class action (see [`lui-universal-core.md`](lui-universal-core.md) and [`lui-save-action.md`](lui-save-action.md)). Rationale: `MANAGE_STATE` modifies current research/workspace state; `SAVE` intentionally promotes eligible state into persistent reusable memory/artifacts — different semantics and confirmation requirements. Inconsistent references in this file were updated to the locked model; the original `.txt` source remains preserved unmodified at the repo root.
+> **Amended 2026-09-12 (final architecture lock, human-approved):** this document originally specified a five-action universal core excluding SAVE. Per the lock, the universal action set is **six actions including SAVE** as a first-class action (see [`lui-universal-core.md`](lui-universal-core.md) and [`lui-save-action.md`](lui-save-action.md)). Rationale: `MANAGE_STATE` modifies current research/workspace state; `SAVE` intentionally promotes eligible state into persistent reusable memory/artifacts; different semantics and confirmation requirements. Inconsistent references in this file were updated to the locked model; the original `.txt` source remains preserved unmodified at the repo root.
 
-LUI — Universal Core + Flow-Specific Extensions
+LUI; Universal Core + Flow-Specific Extensions
 1. Architecture Decision
 The LUI uses a hybrid two-layer architecture:
 
@@ -102,7 +102,7 @@ Examples:
 "Save this as my BTC framework."
 "Keep this research for later."
 
-SAVE is distinct from MANAGE_STATE. MANAGE_STATE modifies current research/workspace state. SAVE intentionally promotes eligible state into persistent reusable memory/artifacts. Persistence of normal workspace state remains system behavior; explicit SAVE creates an intentional, versioned, provenance-carrying artifact. Saving does not activate monitors or replace frameworks — consequential persistence still requires the existing confirmation boundary.
+SAVE is distinct from MANAGE_STATE. MANAGE_STATE modifies current research/workspace state. SAVE intentionally promotes eligible state into persistent reusable memory/artifacts. Persistence of normal workspace state remains system behavior; explicit SAVE creates an intentional, versioned, provenance-carrying artifact. Saving does not activate monitors or replace frameworks; consequential persistence still requires the existing confirmation boundary.
 
 3. What Is NOT a Universal Core Action
 The following are deliberately not first-class universal LUI actions:
@@ -166,7 +166,7 @@ Research State
 
 The same universal action can therefore behave differently depending on the active flow.
 
-Example 1 — Historical Research
+Example 1; Historical Research
 User:
 
 "Find historical cases where this pattern failed."
@@ -181,7 +181,7 @@ Flow-specific extension:
 historical_counterexamples
 
 
-Example 2 — Thesis Falsification
+Example 2; Thesis Falsification
 User:
 
 "Try to prove my BTC thesis wrong using derivatives."
@@ -199,7 +199,7 @@ Flow-specific extension:
 derivatives_falsification
 
 
-Example 3 — Framework Evaluation
+Example 3; Framework Evaluation
 User:
 
 "Evaluate this using my BTC framework, but make macro twice as important."
@@ -271,4 +271,4 @@ The agent performs research and manages its internal process, but consequential 
 ```
              AGENT EXECUTION
 
-Locked decision (amended 2026-09-12, final architecture lock): The LUI uses a six-action Universal Core + Flow-Specific Extensions architecture — RESEARCH, ANALYZE, CHALLENGE, MANAGE_STATE, MONITOR, SAVE — with universal actions representing primary trader intent and specialized flow behavior represented through extensions and parameters.
+Locked decision (amended 2026-09-12, final architecture lock): The LUI uses a six-action Universal Core + Flow-Specific Extensions architecture; RESEARCH, ANALYZE, CHALLENGE, MANAGE_STATE, MONITOR, SAVE; with universal actions representing primary trader intent and specialized flow behavior represented through extensions and parameters.

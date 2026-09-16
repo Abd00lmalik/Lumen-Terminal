@@ -1,4 +1,4 @@
-/** Adapter layer exports — the only surface the research engine and tests need. */
+/** Adapter layer exports; the only surface the research engine and tests need. */
 
 export { CapabilityRegistry, HistoricalDataStub, WebRetrievalStub, NotConnectedError, type ProviderAdapter, type CapabilityName, type Registration, type HistoricalQuery, type HistoricalDataProvider, type WebQuery, type WebRetrievalProvider, type RetrievedSource } from "./capability-registry.js";
 

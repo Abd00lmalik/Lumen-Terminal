@@ -1,5 +1,5 @@
 /**
- * Research context builder — the validated, epistemically-typed research state handed to the
+ * Research context builder; the validated, epistemically-typed research state handed to the
  * model for analysis/synthesis/challenge/thesis work (M3 §9).
  *
  * Architectural basis:
@@ -8,17 +8,17 @@
  *   claims, hypotheses, judgments, contradictions, limitations, provenance, freshness,
  *   confidence, uncertainty. Never collapse them into "facts". The model can reference these
  *   objects; it can never upgrade their epistemic class.
- * - Evidence laws (§9/§12): retrieval failure/tool failure appear ONLY as limitations —
+ * - Evidence laws (§9/§12): retrieval failure/tool failure appear ONLY as limitations
  *   never as negative evidence. Insufficient evidence stays distinguishable from contradiction.
  * - progressive-disclosure.md §74: the explanation layer must not fabricate or reinterpret
- *   evidence beyond the underlying evidence state — same rule here for model input.
+ *   evidence beyond the underlying evidence state; same rule here for model input.
  */
 
 import type { Evidence, EvidenceClass, Freshness, Claim, Hypothesis, Judgment } from "../domain/objects.js";
 import type { Workspace } from "../domain/workspace.js";
 import type { ToolResult } from "../domain/tool-result.js";
 
-/** One context item — every item keeps its architecture object type and epistemic class. */
+/** One context item; every item keeps its architecture object type and epistemic class. */
 export interface ContextItem {
   readonly ref: string;
   readonly kind:
@@ -39,15 +39,15 @@ export interface ContextItem {
   readonly evidenceClass?: EvidenceClass;
   readonly freshness?: Freshness;
   readonly sourceRefs: readonly string[];
-  /** Present only for PROXY_EVIDENCE — what the proxy actually measures (lock §3). */
+  /** Present only for PROXY_EVIDENCE; what the proxy actually measures (lock §3). */
   readonly proxyBasis?: string;
   readonly timestamp?: string;
 }
 
 export interface ContextLimitation {
   readonly kind:
-    | "tool_failure" // a capability invocation failed — NOT evidence against anything
-    | "empty_result" // a tool returned nothing usable — absence of data, not data of absence
+    | "tool_failure" // a capability invocation failed; NOT evidence against anything
+    | "empty_result" // a tool returned nothing usable; absence of data, not data of absence
     | "partial_result" // some feeds/sources answered, others did not
     | "stale_evidence" // usable but outside the freshness window
     | "insufficient_evidence"; // the valid research-completion outcome
@@ -59,24 +59,24 @@ export interface ContextLimitation {
 export interface ResearchContext {
   readonly researchRef?: string;
   readonly objective?: string;
-  /** Evidence, epistemically bucketed — the model receives classes, not a "facts" list. */
+  /** Evidence, epistemically bucketed; the model receives classes, not a "facts" list. */
   readonly items: readonly ContextItem[];
   readonly claims: readonly { ref: string; statement: string; status: string }[];
   readonly hypotheses: readonly { ref: string; statement: string; status: string; ranking: number }[];
   readonly judgment?: { ref: string; statement: string; confidence?: string; uncertainty: readonly string[] };
-  /** Failures/limits — the model may NOT convert these into negative evidence. */
+  /** Failures/limits; the model may NOT convert these into negative evidence. */
   readonly limitations: readonly ContextLimitation[];
   /** Cross-direction evidence pairs observed in the graph (contradiction preservation). */
   readonly contradictions: readonly { supports: readonly string[]; contradicts: readonly string[] }[];
-  /** The trader's active thesis, when one exists — presented as THE TRADER'S position. */
+  /** The trader's active thesis, when one exists; presented as THE TRADER'S position. */
   readonly thesis?: { ref: string; statement: string; status: string; claims: readonly string[]; assumptions: readonly string[]; invalidationConditions: readonly string[] };
-  /** M6 (audit D1): the current theses inventory — lets state-change steps resolve WHICH thesis
+  /** M6 (audit D1): the current theses inventory; lets state-change steps resolve WHICH thesis
    *  a trader means (e.g. "the halving thesis") without inventing refs. Trader-owned objects;
    *  presented for selection only, never for silent modification. */
   readonly theses?: readonly { ref: string; statement: string; status: string; active: boolean }[];
 }
 
-/** Map an evidence object to its context item kind — the epistemic boundary, mechanically. */
+/** Map an evidence object to its context item kind; the epistemic boundary, mechanically. */
 export function contextKindForEvidence(e: Evidence): ContextItem["kind"] {
   switch (e.evidenceClass) {
     case "RAW_DATA":
@@ -96,23 +96,23 @@ export function contextKindForEvidence(e: Evidence): ContextItem["kind"] {
   throw new Error(`unhandled evidence class: ${String((e as Evidence).evidenceClass)}`);
 }
 
-/** Evidence whose observation text is JSON-serialized (news items etc.) — humanize for context. */
+/** Evidence whose observation text is JSON-serialized (news items etc.); humanize for context. */
 function evidenceText(e: Evidence): string {
   try {
     const parsed = JSON.parse(e.observation) as Record<string, unknown>;
     if (typeof parsed.title === "string") {
-      const summary = typeof parsed.summary === "string" ? ` — ${String(parsed.summary).slice(0, 200)}` : "";
+      const summary = typeof parsed.summary === "string" ? `; ${String(parsed.summary).slice(0, 200)}` : "";
       return `${parsed.title}${summary}`;
     }
   } catch {
-    // not JSON — use as-is
+    // not JSON; use as-is
   }
   return e.observation;
 }
 
 /**
  * Build the validated research context from a workspace. Everything included comes from real
- * workspace objects — nothing is invented, and failures enter only through `limitations`.
+ * workspace objects; nothing is invented, and failures enter only through `limitations`.
  */
 export function buildResearchContext(
   workspace: Workspace,
@@ -220,7 +220,7 @@ export function buildResearchContext(
         invalidationConditions: [...activeThesis.invalidationConditions],
       }
     : undefined;
-  // M6 (audit D1): the theses inventory — the model cannot resolve "make the halving thesis
+  // M6 (audit D1): the theses inventory; the model cannot resolve "make the halving thesis
   // active" without knowing which theses exist. The currently-active one is flagged.
   const activeId = workspace.getActiveThesis()?.id;
   const theses: ResearchContext["theses"] = workspace
@@ -245,7 +245,7 @@ export function buildResearchContext(
 }
 
 /**
- * Render the context as the structured text block given to the model. Classes are explicit —
+ * Render the context as the structured text block given to the model. Classes are explicit
  * the prompt makes upgrading classes forbidden. Stale/historical items stay labeled
  * (progressive-disclosure.md §44: historical information must not pass as current).
  */
@@ -259,7 +259,7 @@ export function renderResearchContext(ctx: ResearchContext): string {
     list.push(item);
     byKind.set(item.kind, list);
   }
-  lines.push("RESEARCH OBJECTS (epistemic classes preserved — do NOT treat interpretations, inferences, or speculation as observations):");
+  lines.push("RESEARCH OBJECTS (epistemic classes preserved; do NOT treat interpretations, inferences, or speculation as observations):");
   for (const [kind, list] of byKind) {
     lines.push(`  ${kind.toUpperCase()} (${list.length}):`);
     for (const item of list.slice(0, 40)) {
@@ -285,18 +285,18 @@ export function renderResearchContext(ctx: ResearchContext): string {
     if (ctx.judgment.uncertainty.length > 0) lines.push(`  uncertainty: ${ctx.judgment.uncertainty.join("; ")}`);
   }
   if (ctx.thesis !== undefined) {
-    lines.push(`TRADER'S THESIS ${ctx.thesis.ref} [${ctx.thesis.status}] — the trader's own position; never treat assessment as authority to change it:`);
+    lines.push(`TRADER'S THESIS ${ctx.thesis.ref} [${ctx.thesis.status}]; the trader's own position; never treat assessment as authority to change it:`);
     lines.push(`  ${ctx.thesis.statement.slice(0, 400)}`);
     for (const c of ctx.thesis.claims) lines.push(`  thesis claim: ${c}`);
     for (const a of ctx.thesis.assumptions) lines.push(`  thesis assumption: ${a}`);
     for (const i of ctx.thesis.invalidationConditions) lines.push(`  invalidation condition: ${i}`);
   }
   if (ctx.theses !== undefined && ctx.theses.length > 0) {
-    lines.push("TRADER'S THESES (trader-owned — for selection reference only; never silently modify):" );
+    lines.push("TRADER'S THESES (trader-owned; for selection reference only; never silently modify):" );
     for (const t of ctx.theses) lines.push(`  ${t.ref}${t.active ? " [ACTIVE]" : ""} [${t.status}]: ${t.statement.slice(0, 160)}`);
   }
   if (ctx.limitations.length > 0) {
-    lines.push("LIMITATIONS (data-availability conditions — NOT evidence against any claim; do not convert them into negative findings):");
+    lines.push("LIMITATIONS (data-availability conditions; NOT evidence against any claim; do not convert them into negative findings):");
     for (const l of ctx.limitations) lines.push(`  [${l.kind}] ${l.description}`);
   }
   if (ctx.contradictions.length > 0) {

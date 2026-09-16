@@ -8,7 +8,7 @@ related: [hypothesis.md, execution-scheduler.md, research-flows.md]
 
 **Related documents:** `hypothesis.md` · `execution-scheduler.md` · `research-flows.md`
 
-> Converted from `BRANCH INTELLIGENCE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `BRANCH INTELLIGENCE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 BRANCH INTELLIGENCE
 

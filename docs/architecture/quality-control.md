@@ -8,7 +8,7 @@ related: [completion-stopping.md, evidence-source.md, failure-recovery.md]
 
 **Related documents:** `completion-stopping.md` · `evidence-source.md` · `failure-recovery.md`
 
-> Converted from `RESEARCH QUALITY CONTROL INTELLIGEN.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `RESEARCH QUALITY CONTROL INTELLIGEN.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 RESEARCH QUALITY CONTROL INTELLIGENCE
 

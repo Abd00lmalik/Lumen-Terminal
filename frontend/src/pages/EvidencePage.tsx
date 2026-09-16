@@ -1,8 +1,8 @@
 /**
- * Evidence / source view — REAL evidence objects from the backend with epistemic
+ * Evidence / source view; REAL evidence objects from the backend with epistemic
  * distinctions intact: class rail + badge, freshness, provenance refs, event vs
  * retrieval timestamps, tool identity, support/contradiction relationships.
- * UNAVAILABLE evidence is rendered as recorded unavailability — never negative evidence.
+ * UNAVAILABLE evidence is rendered as recorded unavailability; never negative evidence.
  */
 import { useEffect, useState } from "react";
 import { AppShell } from "../components/AppShell.js";
@@ -47,7 +47,7 @@ export function EvidencePage() {
             <>
               <div className="rail-section">
                 <div className="rail-title">Source record</div>
-                <KV k="source" v={current.sourceRefs[0] ?? "—"} />
+                <KV k="source" v={current.sourceRefs[0] ?? ""} />
                 <KV k="observed at" v={new Date(current.observedAt).toISOString().slice(0, 16).replace("T", " ")} />
                 {current.eventTimestamp !== undefined && (
                   <KV k="event time" v={new Date(current.eventTimestamp).toISOString().slice(0, 16).replace("T", " ")} />
@@ -57,8 +57,8 @@ export function EvidencePage() {
               </div>
               <div className="rail-section">
                 <div className="rail-title">Relationships</div>
-                <KV k="supports" v={current.supports.join(", ") || "—"} />
-                <KV k="contradicts" v={current.contradicts.join(", ") || "—"} />
+                <KV k="supports" v={current.supports.join(", ") || ""} />
+                <KV k="contradicts" v={current.contradicts.join(", ") || ""} />
               </div>
             </>
           ) : (
@@ -78,7 +78,7 @@ export function EvidencePage() {
             </div>
           )}
           <Note tone="info">
-            Classification is data attached by the research engine — the interface never
+            Classification is data attached by the research engine; the interface never
             re-derives or flattens it.
           </Note>
         </>
@@ -88,7 +88,7 @@ export function EvidencePage() {
         <h1 className="page-title">Evidence</h1>
         <p className="page-sub">
           {error === undefined
-            ? `${evidence.length} evidence objects in this workspace — recorded by real research runs.`
+            ? `${evidence.length} evidence objects in this workspace; recorded by real research runs.`
             : "Evidence could not be loaded."}
         </p>
       </div>
@@ -96,7 +96,7 @@ export function EvidencePage() {
       {error !== undefined && <BackendDownNote error={error} />}
 
       {error === undefined && evidence.length === 0 && (
-        <Empty title="No evidence yet" hint="Run research in the workspace — evidence appears here as the engine records it." />
+        <Empty title="No evidence yet" hint="Run research in the workspace; evidence appears here as the engine records it." />
       )}
 
       {evidence.length > 0 && (

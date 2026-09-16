@@ -3,7 +3,7 @@
  *
  * All descriptors encode CONFIRMED facts from FINDINGS.md §2 per-skill matrices:
  * capabilities, documented limitations, freshness profiles, and classification rules.
- * Skills are registered through the generic CapabilityRegistry — no Flow→Tool hardcoding
+ * Skills are registered through the generic CapabilityRegistry; no Flow→Tool hardcoding
  * (final lock §6/§11). G1/G2 remain vendor-neutral stubs (final lock §12).
  */
 
@@ -19,7 +19,7 @@ import { FRESHNESS_PROFILES, assessFreshness, type FreshnessProfile } from "./fr
 import type { ToolResultInput, ToolOutput } from "../domain/tool-result.js";
 
 // ---------------------------------------------------------------------------
-// Descriptors — every field sourced from FINDINGS.md §2 (CONFIRMED)
+// Descriptors; every field sourced from FINDINGS.md §2 (CONFIRMED)
 // ---------------------------------------------------------------------------
 
 export const MACRO_ANALYST: SkillDescriptor = {
@@ -63,7 +63,7 @@ export const NEWS_BRIEFING: SkillDescriptor = {
   providerId: "bitget-signal/news-briefing",
   capabilities: ["NEWS_ANALYSIS"],
   limitations: [
-    "RSS updates every 15-60 min — not real-time (FINDINGS.md §2.5); intra-hour event timing must come from technical-analysis klines (final lock §9)",
+    "RSS updates every 15-60 min; not real-time (FINDINGS.md §2.5); intra-hour event timing must come from technical-analysis klines (final lock §9)",
     "RSS aggregation is NOT unrestricted web retrieval (final lock §3); secondary reports are not primary sources",
     "failed feeds are skipped per-feed; completeness may be PARTIAL",
     "narrative synthesis is skill-authored, not observation (final lock §3)",
@@ -77,7 +77,7 @@ export const TECHNICAL_ANALYSIS: SkillDescriptor = {
   capabilities: ["TECHNICAL_ANALYSIS"],
   limitations: [
     "indicator output is computed locally over public klines; parameters must be preserved (FINDINGS.md §2.4)",
-    "indicator series are recent-window only (default 200 klines) — no deep history (FINDINGS.md §2.4)",
+    "indicator series are recent-window only (default 200 klines); no deep history (FINDINGS.md §2.4)",
     "indicators must not become automatic trading recommendations (final lock §3)",
     "conflicting indicators are presented objectively (FINDINGS.md §2.4)",
   ],
@@ -92,7 +92,7 @@ export const TECHNICAL_REST_PATHS = {
 } as const;
 
 // ---------------------------------------------------------------------------
-// Output mappings — lock §3/§7 classification per skill (FINDINGS.md §2)
+// Output mappings; lock §3/§7 classification per skill (FINDINGS.md §2)
 // ---------------------------------------------------------------------------
 
 const MACRO_MAPPING: OutputMapping = {
@@ -104,7 +104,7 @@ const MARKET_INTEL_MAPPING: OutputMapping = {
   narrativeClass: "INFERENCE",
   dataClass: "QUANTITATIVE_OBSERVATION",
   // market-intel's structural numbers are proxy-derived where they stand in for whale/reserve/
-  // unlock/ETF/cycle data — the label travels with every output (final lock §3).
+  // unlock/ETF/cycle data; the label travels with every output (final lock §3).
   proxyBasis:
     "market-intel structural proxy: derived from TVL/stablecoin/dominance/derivatives-positioning data, NOT direct on-chain or ETF-flow observation (final lock §3, FINDINGS.md §2.2)",
 };
@@ -135,11 +135,11 @@ const actionArgs = (allowed: readonly string[]) => (params: Record<string, unkno
 };
 
 // ---------------------------------------------------------------------------
-// Concrete MCP-backed adapters — args/envelopes DISCOVERED live 2026-09-13:
+// Concrete MCP-backed adapters; args/envelopes DISCOVERED live 2026-09-13:
 // every tool requires an `action` enum (M1's empty-args assumption returned
 // `{"error":"Unknown action:"}`), and responses are per-record JSON objects/arrays carrying
 // `{"<key>": {"error": ""}}` envelopes where "" means OK and non-empty means that record's
-// upstream fetch failed (preserved as UNAVAILABLE, never fabricated over — lock §18).
+// upstream fetch failed (preserved as UNAVAILABLE, never fabricated over; lock §18).
 // ---------------------------------------------------------------------------
 
 export function createMacroAnalystAdapter(transport: McpTransport): BitgetSkillAdapter {
@@ -167,7 +167,7 @@ export function createMarketIntelAdapter(transport: McpTransport): BitgetSkillAd
             toolName: "crypto_market",
             // actions: search | price | ohlcv | markets | trending | global.
             // Default action: the engine plans capabilities, not tool args (orchestration
-            // capability-first) — an unset action must still produce a VALID request, so fall
+            // capability-first); an unset action must still produce a VALID request, so fall
             // back to the broad market snapshot (global: market cap, BTC dominance, volumes).
             buildArgs: (params) => ({
               ...actionArgs(["action", "query", "coin_id", "coin_ids", "symbol", "interval", "limit"])(params),
@@ -187,7 +187,7 @@ export function createSentimentAnalystAdapter(transport: McpTransport): BitgetSk
       capability === "SENTIMENT_ANALYSIS"          ? {
             toolName: "derivatives_sentiment",
             // actions: reddit_trending | long_short | top_ls | top_position | open_interest |
-            // taker_ratio. No funding-rate action exists (live-verified) — funding context
+            // taker_ratio. No funding-rate action exists (live-verified); funding context
             // must come from other capabilities when needed. Default: BTC long/short ratio,
             // the canonical positioning-sentiment signal (params remain overridable).
             buildArgs: (params) => ({
@@ -210,7 +210,7 @@ export function createNewsBriefingAdapter(transport: McpTransport): BitgetSkillA
         ? {
             toolName: "news_feed",
             // DISCOVERED (live 2026-09-13): args are { action: "latest"|"sources", keyword?,
-            // feeds?, limit? 1-10 (default 5) } — FINDINGS.md's `limit 1-50` was wrong, and
+            // feeds?, limit? 1-10 (default 5) }; FINDINGS.md's `limit 1-50` was wrong, and
             // M1's `{keywords}` array arg was silently ignored (0 items). `keyword` is a
             // case-insensitive title+summary filter.
             buildArgs: (params) => {
@@ -226,7 +226,7 @@ export function createNewsBriefingAdapter(transport: McpTransport): BitgetSkillA
         : undefined,
     outputMapping: NEWS_MAPPING,
     // DISCOVERED: news_feed returns one text block containing a JSON ARRAY of
-    // { feed, error, items[] } — flatten into item-level outputs (the useful evidence unit),
+    // { feed, error, items[] }; flatten into item-level outputs (the useful evidence unit),
     // with feed-level errors preserved as UNAVAILABLE outputs (never silently dropped, and
     // they drive PARTIAL completeness per failure-recovery.md §10).
     extractSourceTimestamp: (content) => {
@@ -243,7 +243,7 @@ export function createNewsBriefingAdapter(transport: McpTransport): BitgetSkillA
             if (!Number.isNaN(t)) return new Date(t).toISOString();
           }
         }
-      } catch { /* narrative block without a JSON payload — no event time */ }
+      } catch { /* narrative block without a JSON payload; no event time */ }
       return undefined;
     },
     flattenOutput: (output) => {
@@ -273,7 +273,7 @@ export function createNewsBriefingAdapter(transport: McpTransport): BitgetSkillA
 }
 
 // ---------------------------------------------------------------------------
-// technical-analysis — MCP tool primary (DISCOVERED live 2026-09-13: the market-data MCP
+// technical-analysis; MCP tool primary (DISCOVERED live 2026-09-13: the market-data MCP
 // server exposes a WORKING `technical_analysis` tool; direct api.bitget.com REST was
 // unreachable from the dev environment), with REST klines as a registry fallback.
 // ---------------------------------------------------------------------------
@@ -295,12 +295,12 @@ export interface TechnicalQuery {
 
 /**
  * DISCOVERED (live 2026-09-13): the MCP `technical_analysis` response mixes exact numeric
- * indicator values with skill-authored interpretive fields — `verdict` ("STRONG BEARISH"),
+ * indicator values with skill-authored interpretive fields; `verdict` ("STRONG BEARISH"),
  * `signal` ("neutral"), `trend` ("bear"), `bull_signals`/`bear_signals`, and `suggested_stop`
  * (a trade recommendation). Lock §3: indicators must never become automatic trading
  * recommendations, and a skill verdict is analysis, not observation.
  * The split is leaf-level and TYPE-AWARE (live-discovered ambiguity): `signal: "neutral"` is a
- * judgment, but `signal: -44.24` inside the macd record is the MACD signal LINE — a measurement.
+ * judgment, but `signal: -44.24` inside the macd record is the MACD signal LINE; a measurement.
  */
 /** Judgment fields when they carry text (verdicts/threshold labels). */
 const TA_TEXT_JUDGMENT_FIELDS = new Set(["verdict", "signal", "trend", "position", "cross"]);
@@ -352,7 +352,7 @@ function splitTaOutput(symbol?: string, timeframe?: string) {
         outputClass: "ANALYST_INTERPRETATION",
         content: interp,
         ...meta,
-        interpretationBasis: `skill-authored technical verdict fields (verdict/signal/trend/cross/position/suggested_stop tallies) from the technical_analysis tool — analysis, not measurement (final lock §3)`,
+        interpretationBasis: `skill-authored technical verdict fields (verdict/signal/trend/cross/position/suggested_stop tallies) from the technical_analysis tool; analysis, not measurement (final lock §3)`,
       });
     }
     return outputs.length > 0 ? outputs : [output];
@@ -428,7 +428,7 @@ export class TechnicalKlinesRestAdapter implements ProviderAdapter {
 /**
  * `technical-analysis` composite adapter: the MCP `technical_analysis` tool first (live-verified
  * indicator analysis over Binance-sourced klines), REST klines as registry-level fallback when
- * the MCP path fails. Both paths are read-only market data — never trading operations (lock §13).
+ * the MCP path fails. Both paths are read-only market data; never trading operations (lock §13).
  */
 export class TechnicalAnalysisAdapter implements ProviderAdapter {
   readonly providerId = TECHNICAL_ANALYSIS.providerId;
@@ -476,7 +476,7 @@ export class TechnicalAnalysisAdapter implements ProviderAdapter {
       return await this.mcpAdapter.execute(capability, params);
     } catch (error) {
       // Registry-level fallback: surface the MCP failure, then let the klines path answer.
-      // NOTE: the fallback serves the same capability with a different method — the registry
+      // NOTE: the fallback serves the same capability with a different method; the registry
       // cannot see this, so the limitation must travel with the result.
       if (capability !== "TECHNICAL_ANALYSIS") throw error;
       const klines = await new TechnicalKlinesRestAdapter(this.rest).execute(capability, params);
@@ -515,7 +515,7 @@ function intervalWindowMs(interval?: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// Registry factory — the only wiring point; the engine never learns any of this
+// Registry factory; the only wiring point; the engine never learns any of this
 // ---------------------------------------------------------------------------
 
 export interface BitgetAdapterSetOptions {
@@ -548,15 +548,15 @@ export function createBitgetAdapterSet(options: BitgetAdapterSetOptions = {}): {
   registry.register(createSentimentAnalystAdapter(mcp));
   registry.register(createNewsBriefingAdapter(mcp));
   registry.register(new TechnicalAnalysisAdapter(rest, mcp));
-  // G1 (vendor selected 2026-09-15): real historical OHLCV — Bitget REST primary,
+  // G1 (vendor selected 2026-09-15): real historical OHLCV; Bitget REST primary,
   // Binance Vision public mirror fallback. Tests may override via options.historical.
   registry.register(options.historical ?? new G1HistoricalDataAdapter(rest, new RestTransport({ baseUrl: BINANCE_VISION_BASE_URL })));
-  // G2 (implemented 2026-09-15): bounded web/primary-source retrieval — SSRF-guarded,
+  // G2 (implemented 2026-09-15): bounded web/primary-source retrieval; SSRF-guarded,
   // source-classified, source≠evidence. Tests may override via options.webRetrieval.
   registry.register(options.webRetrieval ?? new G2WebRetrievalAdapter());
   // Capability-level fallbacks (2026-09-16): Bitget stays PRIMARY (default priority 100);
   // these register at lower priority (200) so the registry's failover loop reaches them
-  // only when the primary fails/unavailable. The registry owns this selection — flows
+  // only when the primary fails/unavailable. The registry owns this selection; flows
   // never hardcode providers. Tests may disable via options.fallbacks === false.
   if (options.fallbacks !== false) {
     registry.register(new NewsFallbackAdapter(), 200);

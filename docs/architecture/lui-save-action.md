@@ -8,7 +8,7 @@ related: [lui-universal-core.md, memory.md]
 
 **Related documents:** `lui-universal-core.md` · `memory.md`
 
-> Converted from `# SAVE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `# SAVE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 # SAVE
 

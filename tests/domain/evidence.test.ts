@@ -124,7 +124,7 @@ describe("evidence classification (evidence-source.md, lock §7)", () => {
       result,
       result.normalizedOutput[0]!,
       origin,
-      { forceProxy: { basis: "derivatives positioning proxy — NOT direct on-chain whale observation" } },
+      { forceProxy: { basis: "derivatives positioning proxy; NOT direct on-chain whale observation" } },
     );
     expect(evidence.evidenceClass).toBe("PROXY_EVIDENCE");
     expect(evidence.proxyBasis).toMatch(/NOT direct on-chain/);

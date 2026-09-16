@@ -1,5 +1,5 @@
 /**
- * Reassessment pathway — M5 (thesis-monitor-reassessment.md; M5 §13–§15).
+ * Reassessment pathway; M5 (thesis-monitor-reassessment.md; M5 §13–§15).
  *
  * The continuity loop: NEW EVIDENCE → VALIDATE → CHECK MATERIALITY → determine whether
  * reassessment is needed → REASSESS (via the EXISTING Flow 4 evaluation pathway) → RECORD the
@@ -27,13 +27,13 @@ import type { Evidence } from "../domain/objects.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
 
 // ---------------------------------------------------------------------------
-// Materiality decision — model proposes, system validates (M5 §13)
+// Materiality decision; model proposes, system validates (M5 §13)
 // ---------------------------------------------------------------------------
 
 export interface MaterialityDecision {
   /** Whether the new evidence warrants full reassessment of the thesis. */
   readonly reassessmentNeeded: boolean;
-  /** Why — grounded in the evidence, not model sentiment. */
+  /** Why; grounded in the evidence, not model sentiment. */
   readonly rationale: string;
   /** Relevance to the thesis's claims/assumptions/invalidation conditions. */
   readonly affectsClaims: readonly string[];
@@ -57,7 +57,7 @@ export const MATERIALITY_SCHEMA: OutputSchema = {
 };
 
 // ---------------------------------------------------------------------------
-// Reassessment result — assessment history + monitor revalidation (M5 §14/§15)
+// Reassessment result; assessment history + monitor revalidation (M5 §14/§15)
 // ---------------------------------------------------------------------------
 
 export interface MonitorRevalidationProposal {
@@ -68,12 +68,12 @@ export interface MonitorRevalidationProposal {
 }
 
 export interface ReassessmentResult {
-  /** Whether reassessment ran (false = below materiality threshold — an honest no-op). */
+  /** Whether reassessment ran (false = below materiality threshold; an honest no-op). */
   readonly reassessed: boolean;
   readonly materiality: MaterialityDecision;
   /** The new assessment-history record (thesis object untouched) when reassessment ran. */
   readonly assessment?: ThesisAssessmentRecord;
-  /** Monitor revalidation outcomes (proposals only — nothing silently changed). */
+  /** Monitor revalidation outcomes (proposals only; nothing silently changed). */
   readonly monitorRevalidations: readonly MonitorRevalidationProposal[];
   /** Memories revalidated during this reassessment (originals preserved, outcomes recorded). */
   readonly revalidatedMemories: readonly { readonly memoryId: string; readonly confirmed: boolean; readonly note: string }[];
@@ -119,6 +119,7 @@ const MATERIALITY_SYSTEM = [
   "- Do NOT recommend reassessment merely because new data exists. Recommend it when the evidence is RELEVANT to the thesis's claims/assumptions/invalidation conditions, of usable quality, and capable of materially changing the assessment or the uncertainty picture.",
   "- LIMITATIONS (tool failures, empty feeds) are not evidence and never make evidence material.",
   "- Retrieval failure is not negative evidence.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 const REASSESSMENT_SYSTEM = [
@@ -126,12 +127,13 @@ const REASSESSMENT_SYSTEM = [
   "You receive the trader's thesis (NEVER rewrite it), its assessment history, and the VALIDATED research context including NEW evidence.",
   "Rules:",
   "- Assess with the existing vocabulary: SUPPORTED / WEAKENED / MATERIALLY_CHALLENGED / UNSUPPORTED / INDETERMINATE.",
-  "- Current validated evidence OUTRANKS memory and historical conclusions. If a stored memory conflicts with current evidence, the memory is marked NOT confirmed — current research wins for current judgment.",
+  "- Current validated evidence OUTRANKS memory and historical conclusions. If a stored memory conflicts with current evidence, the memory is marked NOT confirmed; current research wins for current judgment.",
   "- Retrieval failure and tool limitations are data-availability conditions, NOT negative evidence.",
-  "- Revalidate each proposed monitor: STILL_RELEVANT if its conditions remain material; REVIEW if new evidence makes a condition no longer material. Never claim a monitor was changed — you only propose.",
+  "- Revalidate each proposed monitor: STILL_RELEVANT if its conditions remain material; REVIEW if new evidence makes a condition no longer material. Never claim a monitor was changed; you only propose.",
   "- Revalidate flagged memories (memoryId + whether current research confirms them). Originals are preserved by the system.",
-  "- Only cite evidence ids present in the context — never fabricate refs.",
+  "- Only cite evidence ids present in the context; never fabricate refs.",
   "- The thesis object is never modified by reassessment; your output informs the trader, who decides.",
+  "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
 // ---------------------------------------------------------------------------
@@ -160,14 +162,14 @@ export async function reassessThesis(options: ReassessOptions): Promise<Reassess
   const workspace = options.workspace;
   const thesis: Thesis | undefined = options.thesisRef !== undefined ? workspace.getThesis(options.thesisRef) : workspace.activeTheses()[0];
   if (thesis === undefined) {
-    const failure = new ModelFailure("INVALID_OUTPUT", "no active thesis to reassess — nothing to evaluate (never fabricate one)", false);
+    const failure = new ModelFailure("INVALID_OUTPUT", "no active thesis to reassess; nothing to evaluate (never fabricate one)", false);
     return noOpResult(new MaterialityDecisionShape(false, "no thesis", [], [], false, "n/a"), failure, "no thesis to reassess");
   }
   if (options.newEvidence.length === 0) {
-    return noOpResult(new MaterialityDecisionShape(false, "no new evidence supplied — nothing to weigh", [], [], false, "n/a"), undefined, "No new evidence was supplied, so no reassessment ran.");
+    return noOpResult(new MaterialityDecisionShape(false, "no new evidence supplied; nothing to weigh", [], [], false, "n/a"), undefined, "No new evidence was supplied, so no reassessment ran.");
   }
 
-  // 1. MATERIALITY GATE — model proposes; system validates. Irrelevant evidence = honest no-op.
+  // 1. MATERIALITY GATE; model proposes; system validates. Irrelevant evidence = honest no-op.
   let materiality: MaterialityDecision;
   try {
     const res = await options.provider.structured<string>({
@@ -187,14 +189,14 @@ export async function reassessThesis(options: ReassessOptions): Promise<Reassess
     materiality = validateModelOutput<MaterialityDecision>(MATERIALITY_SCHEMA, res.raw).data;
   } catch (error) {
     const failure = error instanceof ModelFailure ? error : new ModelFailure("INVALID_OUTPUT", String(error), false);
-    return noOpResult(new MaterialityDecisionShape(false, `materiality gate failed: ${failure.message}`, [], [], false, "n/a"), failure, "The materiality check could not run (model failure) — no reassessment was performed.");
+    return noOpResult(new MaterialityDecisionShape(false, `materiality gate failed: ${failure.message}`, [], [], false, "n/a"), failure, "The materiality check could not run (model failure); no reassessment was performed.");
   }
 
   if (!materiality.reassessmentNeeded) {
     return noOpResult(materiality, undefined, `New evidence was reviewed and judged non-material for the thesis: ${materiality.rationale} No reassessment was performed (new data alone does not trigger reassessment).`);
   }
 
-  // 2. REASSESS — via the existing evaluation pathway semantics (Flow 4 vocabulary), over the
+  // 2. REASSESS; via the existing evaluation pathway semantics (Flow 4 vocabulary), over the
   //    thesis + its assessment history + new evidence + relevant memories (stale labeled).
   const priorAssessments = workspace.listThesisAssessments(thesis.id);
   const memories = workspace.listMemories().filter((m) => m.thesisRef === thesis.id || m.contextTags.some((tag) => thesis.scope.entities.some((e) => tag.toLowerCase().includes(e.toLowerCase()))));
@@ -221,9 +223,9 @@ export async function reassessThesis(options: ReassessOptions): Promise<Reassess
       schemaDescription: REASSESSMENT_SCHEMA_DESC,
       system: REASSESSMENT_SYSTEM,
       prompt: [
-        `TRADER'S THESIS (version ${thesis.version} — assess, never rewrite): "${thesis.statement}"`,
+        `TRADER'S THESIS (version ${thesis.version}; assess, never rewrite): "${thesis.statement}"`,
         `ASSESSMENT HISTORY (oldest first):\n${historyText}`,
-        memories.length > 0 ? `RELEVANT MEMORY (continuity context — NOT current evidence; stale items must be flagged if unconfirmed):\n${memories.map((m: MemoryEntry) => `- [${m.status}] ${m.content.slice(0, 140)} (id ${m.id})`).join("\n")}` : "",
+        memories.length > 0 ? `RELEVANT MEMORY (continuity context; NOT current evidence; stale items must be flagged if unconfirmed):\n${memories.map((m: MemoryEntry) => `- [${m.status}] ${m.content.slice(0, 140)} (id ${m.id})`).join("\n")}` : "",
         `NEW EVIDENCE (validated):\n${options.newEvidence.map((e) => `- [${e.evidenceClass}] ${e.observation.slice(0, 240)} (id ${e.id})`).join("\n")}`,
         monitors.length > 0 ? `MONITORS to revalidate:\n${monitors.map((m: Monitor) => `- ${m.id} (${m.status}): ${m.conditions.map((c) => `[${c.kind}] ${c.description}`).join("; ").slice(0, 200)}`).join("\n")}` : "",
         "VALIDATED RESEARCH CONTEXT:",
@@ -234,7 +236,7 @@ export async function reassessThesis(options: ReassessOptions): Promise<Reassess
     res = { raw: resp.raw };
   } catch (error) {
     const failure = error instanceof ModelFailure ? error : new ModelFailure("INVALID_OUTPUT", String(error), false);
-    return noOpResult(materiality, failure, `Reassessment failed at the model layer: ${failure.message} — the thesis is unchanged and no assessment was recorded.`);
+    return noOpResult(materiality, failure, `Reassessment failed at the model layer: ${failure.message}; the thesis is unchanged and no assessment was recorded.`);
   }
 
   // 3. SYSTEM VALIDATES the reassessment output.
@@ -244,12 +246,12 @@ export async function reassessThesis(options: ReassessOptions): Promise<Reassess
   const confidence = parsed["confidence"];
   const researchQuality = parsed["researchQuality"];
   if (typeof assessment !== "string" || !validAssessments.has(assessment)) {
-    const failure = new ModelFailure("INVALID_OUTPUT", "reassessment vocabulary invalid — no assessment recorded", false);
-    return noOpResult(materiality, failure, "Reassessment output failed validation — nothing was recorded and the thesis is unchanged.");
+    const failure = new ModelFailure("INVALID_OUTPUT", "reassessment vocabulary invalid; no assessment recorded", false);
+    return noOpResult(materiality, failure, "Reassessment output failed validation; nothing was recorded and the thesis is unchanged.");
   }
   if (typeof confidence !== "string" || !["HIGH", "MODERATE", "LOW"].includes(confidence)) {
-    const failure = new ModelFailure("INVALID_OUTPUT", "reassessment confidence invalid — no assessment recorded", false);
-    return noOpResult(materiality, failure, "Reassessment output failed validation — nothing was recorded and the thesis is unchanged.");
+    const failure = new ModelFailure("INVALID_OUTPUT", "reassessment confidence invalid; no assessment recorded", false);
+    return noOpResult(materiality, failure, "Reassessment output failed validation; nothing was recorded and the thesis is unchanged.");
   }
   const known = new Set<string>(options.newEvidence.map((e) => e.id));
   const refs = (arr: unknown): string[] => (Array.isArray(arr) ? (arr as unknown[]).filter((r): r is string => typeof r === "string" && known.has(r)) : []);
@@ -271,7 +273,7 @@ export async function reassessThesis(options: ReassessOptions): Promise<Reassess
     return [{ memoryId: m.memoryId, confirmed: m.confirmed, note: typeof m.note === "string" ? m.note : "" }];
   });
 
-  // 4. RECORD the assessment (history entry — the thesis object is NOT mutated; M5 §14).
+  // 4. RECORD the assessment (history entry; the thesis object is NOT mutated; M5 §14).
   const rq = typeof researchQuality === "string" && ["STRONG", "MIXED", "WEAK", "UNAVAILABLE"].includes(researchQuality)
     ? researchQuality as "STRONG" | "MIXED" | "WEAK" | "UNAVAILABLE"
     : undefined;
@@ -289,7 +291,7 @@ export async function reassessThesis(options: ReassessOptions): Promise<Reassess
   }, origin, at());
 
   // 5. APPLY memory revalidation to real entries (originals preserved; outcomes recorded; M5 §18).
-  // A memory NOT confirmed by current research loses current influence (STALE) — the record
+  // A memory NOT confirmed by current research loses current influence (STALE); the record
   // itself is never overwritten or deleted (current research outranks memory; M5 §3/§18).
   const appliedMemories: { memoryId: string; confirmed: boolean; note: string }[] = [];
   for (const mr of memoryRevalidations) {
@@ -297,7 +299,7 @@ export async function reassessThesis(options: ReassessOptions): Promise<Reassess
     appliedMemories.push(mr);
   }
 
-  // 6. MONITOR REVALIDATION — proposals; REVIEW flags set monitor status STALE for trader review
+  // 6. MONITOR REVALIDATION; proposals; REVIEW flags set monitor status STALE for trader review
   //    (never deleted, never silently reworded; M5 §15).
   const revalidations: MonitorRevalidationProposal[] = monitorRevalidations.map((mr) => {
     if (mr.outcome === "REVIEW") {
@@ -306,7 +308,7 @@ export async function reassessThesis(options: ReassessOptions): Promise<Reassess
     return mr;
   });
 
-  // 7. THESIS STATUS — reassessment may propose a thesis status transition; it is recorded as
+  // 7. THESIS STATUS; reassessment may propose a thesis status transition; it is recorded as
   //    part of the assessment history only. The status transition itself stays a TRADER decision
   //    (thesis.md §6: thesis state is not a system decision).
   const response = buildReassessmentResponse(thesis, record, revalidations, appliedMemories, materiality);
@@ -363,7 +365,7 @@ function buildReassessmentResponse(
 ): string {
   const lines: string[] = [];
   lines.push(`**Thesis (trader-owned, version ${thesis.version}, unchanged):** "${thesis.statement}"`);
-  lines.push(`**Reassessment:** ${record.assessment} — ${record.rationale}`);
+  lines.push(`**Reassessment:** ${record.assessment}; ${record.rationale}`);
   lines.push(`**Why now:** ${materiality.rationale}`);
   if (record.contradictingEvidence.length > 0) lines.push(`**New contradicting evidence:** ${record.contradictingEvidence.join(", ")}`);
   if (record.supportingEvidence.length > 0) lines.push(`**New supporting evidence:** ${record.supportingEvidence.join(", ")}`);
@@ -375,6 +377,6 @@ function buildReassessmentResponse(
     lines.push(`**Monitors:** ${revalidations.map((m) => `${m.monitorId} → ${m.outcome === "REVIEW" ? "flagged for your review (conditions may no longer be material)" : "still relevant"}`).join("; ")}`);
   }
   lines.push(`**What would change this:** ${record.whatWouldChange.slice(0, 2).join("; ") || "see assessment history"}`);
-  lines.push(`**Traceability:** assessment ${record.id} recorded in the thesis's assessment history — your thesis was not modified.`);
+  lines.push(`**Traceability:** assessment ${record.id} recorded in the thesis's assessment history; your thesis was not modified.`);
   return lines.join("\n");
 }

@@ -1,17 +1,17 @@
 /**
- * G2 — Web / primary-source retrieval provider (capability: SOURCE_VALIDATION).
+ * G2; Web / primary-source retrieval provider (capability: SOURCE_VALIDATION).
  *
  * Architectural basis:
  * - capability-registry.ts `WebRetrievalProvider` / `RetrievedSource` / `WebQuery` (M0
  *   interface, unchanged): DISCOVER → RETRIEVE → VALIDATE → EXTRACT → SOURCE → EVIDENCE,
  *   "snippets are not authoritative evidence", source/evidence separation.
- * - Mandate §14–22: a BOUNDED research capability — not an autonomous browsing agent. The
+ * - Mandate §14–22: a BOUNDED research capability; not an autonomous browsing agent. The
  *   Research Engine selects it through the registry (capability-first); Gemini never browses.
  *
  * Laws implemented here:
  * - SOURCE ≠ EVIDENCE: `retrieve` returns a SOURCE record (metadata + extracted excerpt +
  *   raw-content reference). The registry `execute` path packages sources as outputs carrying
- *   `sourceClass` — downstream evidence keeps that class and never treats secondary reporting
+ *   `sourceClass`; downstream evidence keeps that class and never treats secondary reporting
  *   as primary (§17).
  * - Source classification is explicit and conservative: primary/official only for government/
  *   central-bank/official-project domains; known encyclopedic → secondary/encyclopedic; known
@@ -26,7 +26,7 @@
  *   bounded; no code execution; raw capture for provenance.
  * - Live-verified reachable sources from this machine (2026-09-15): en.wikipedia.org (200),
  *   federalreserve.gov (200), coindesk.com (200); reuters.com 401 (bot-wall), sec.gov 403
- *   (UA policy) — recorded, not faked around.
+ *   (UA policy); recorded, not faked around.
  */
 
 import { lookup } from "node:dns/promises";
@@ -40,7 +40,7 @@ export const G2_CAPABILITIES: readonly CapabilityName[] = ["SOURCE_VALIDATION"];
 /** Default discovery endpoint: Wikipedia opensearch-style query API (no key, reachable). */
 export const DEFAULT_SEARCH_ENDPOINT = "https://en.wikipedia.org/w/api.php";
 
-/** Hard cap on downloaded page text (bytes) — bounded retrieval, no memory exhaustion. */
+/** Hard cap on downloaded page text (bytes); bounded retrieval, no memory exhaustion. */
 const MAX_PAGE_BYTES = 512_000;
 /** Extracted excerpt bound per source. */
 const MAX_EXCERPT_CHARS = 4000;
@@ -50,7 +50,7 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const USER_AGENT = "LumenTerminal-Research/1.0 (bounded research retrieval; local deployment)";
 
 // ---------------------------------------------------------------------------
-// Source classification — explicit, conservative, tested.
+// Source classification; explicit, conservative, tested.
 // ---------------------------------------------------------------------------
 
 const PRIMARY_DOMAINS = new Set([
@@ -75,7 +75,7 @@ export function classifySource(url: string): string {
   for (const d of ENCYCLOPEDIC_DOMAINS) if (host === d || host.endsWith(`.${d}`)) return "secondary/encyclopedic";
   for (const d of NEWS_DOMAINS) if (host === d || host.endsWith(`.${d}`)) return "secondary/news-report";
   for (const d of COMMUNITY_DOMAINS) if (host === d || host.endsWith(`.${d}`)) return "community/social-signal";
-  return "secondary/unclassified"; // conservative default — never silently primary
+  return "secondary/unclassified"; // conservative default; never silently primary
 }
 
 function hostnameOf(url: string): string {
@@ -87,7 +87,7 @@ function hostnameOf(url: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// SSRF guard — resolve DNS and reject private/loopback/link-local targets.
+// SSRF guard; resolve DNS and reject private/loopback/link-local targets.
 // ---------------------------------------------------------------------------
 
 function isForbiddenIp(ip: string): boolean {
@@ -141,7 +141,7 @@ async function assertPublicHost(url: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// HTML extraction — dependency-free, bounded.
+// HTML extraction; dependency-free, bounded.
 // ---------------------------------------------------------------------------
 
 export function extractHtml(raw: string): { title?: string; publishedAt?: string; author?: string; text: string } {

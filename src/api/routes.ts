@@ -1,5 +1,5 @@
 /**
- * F0 HTTP routes — thin transport over the application service (F0 mandate §2/§4/§5/§9–§13).
+ * F0 HTTP routes; thin transport over the application service (F0 mandate §2/§4/§5/§9–§13).
  *
  * Every route: validate transport input → call ResearchApp → map to DTO / typed error.
  * No research logic, no flow selection, no tool calls, no direct state mutation here.
@@ -24,7 +24,7 @@ function requireString(body: unknown, field: string): string {
   return value;
 }
 
-/** Optional confirmation flag — mirrors the frontend's explicit confirmation dialog. */
+/** Optional confirmation flag; mirrors the frontend's explicit confirmation dialog. */
 function readConfirmed(body: unknown): boolean {
   if (typeof body !== "object" || body === null) return false;
   const value = (body as Record<string, unknown>).confirmed;
@@ -67,7 +67,7 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
   app.get("/api/workspace", { handler: withErrors(async () => researchApp.continuity()) });
 
   // ------------------------------------------------------------------
-  // Research request (F0 mandate §5) — natural language only; NO flow in the API contract.
+  // Research request (F0 mandate §5); natural language only; NO flow in the API contract.
   // ------------------------------------------------------------------
 
   app.post("/api/research", async (req, reply) => {
@@ -94,13 +94,17 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
     }
 
     // SSE path: REAL progress events from the engine listener + terminal final/error event.
-    // `reply.hijack()` gives this handler exclusive control of the raw stream — the supported
+    // `reply.hijack()` gives this handler exclusive control of the raw stream; the supported
     // Fastify pattern for server-driven streaming (works identically under inject()).
     void reply.hijack();
     const raw = reply.raw;
     raw.writeHead(200, sseHeaders());
     raw.write(": research stream opened\n\n");
 
+    // Heartbeats: model calls and capability executions can stay silent for minutes.
+    // An SSE comment tick keeps intermediaries (and Vercel's function streaming) from
+    // treating the run as stalled. Cleared on every terminal path.
+    const heartbeat = setInterval(() => raw.write(": heartbeat\n\n"), 15000);
     const send = (event: SseEvent) => {
       raw.write(formatSseEvent(event));
     };
@@ -108,16 +112,23 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
 
     try {
       const dto = await researchApp.submitResearchRequest(message, onProgress, confirmed);
-      send({ event: "final", data: dto });
+      // The terminal event is written, then a padded tail flush follows so no intermediary
+      // buffer can sit on the last bytes; the client parses events, never the padding.
+      raw.write(formatSseEvent({ event: "final", data: dto }));
+      raw.write(" ".repeat(2048) + "\n\n");
+      raw.end();
     } catch (err) {
       const mapped = mapApiError(err);
-      send({ event: "error", data: mapped.body });
+      raw.write(formatSseEvent({ event: "error", data: mapped.body }));
+      raw.write(" ".repeat(2048) + "\n\n");
+      raw.end();
+    } finally {
+      clearInterval(heartbeat);
     }
-    raw.end();
   });
 
   // ------------------------------------------------------------------
-  // Research objects + history (F0 mandate §10) — explicit status fields
+  // Research objects + history (F0 mandate §10); explicit status fields
   // ------------------------------------------------------------------
 
   app.get("/api/research", { handler: withErrors(async () => researchApp.listResearch()) });
@@ -133,7 +144,7 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
   app.get("/api/judgments", { handler: withErrors(async () => researchApp.listJudgments()) });
 
   // ------------------------------------------------------------------
-  // Thesis workspace (F0 mandate §11) — selection routed through the domain boundary only
+  // Thesis workspace (F0 mandate §11); selection routed through the domain boundary only
   // ------------------------------------------------------------------
 
   app.get("/api/thesis", { handler: withErrors(async () => researchApp.listTheses()) });
@@ -158,16 +169,16 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
   });
 
   // ------------------------------------------------------------------
-  // Memory / saved artifacts (F0 mandate §12) — READ-ONLY; SAVE stays behind the LUI
+  // Memory / saved artifacts (F0 mandate §12); READ-ONLY; SAVE stays behind the LUI
   // authorization boundary (a natural-language SAVE through /api/research), never a direct
-  // HTTP shortcut. No persistMemory route exists — by construction.
+  // HTTP shortcut. No persistMemory route exists; by construction.
   // ------------------------------------------------------------------
 
   app.get("/api/memory", { handler: withErrors(async () => researchApp.listMemories()) });
   app.get("/api/artifacts", { handler: withErrors(async () => researchApp.listSavedArtifacts()) });
 
   // ------------------------------------------------------------------
-  // Monitoring handoff state (F0 mandate §13) — NO background infrastructure exists or is
+  // Monitoring handoff state (F0 mandate §13); NO background infrastructure exists or is
   // implied. Activation goes through the domain's trader-confirmation boundary.
   // ------------------------------------------------------------------
 

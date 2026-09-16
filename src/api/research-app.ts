@@ -1,9 +1,9 @@
 /**
- * F0 Research Application Service — the seam between HTTP and the engine (F0 mandate §2).
+ * F0 Research Application Service; the seam between HTTP and the engine (F0 mandate §2).
  *
  * This layer contains NO research logic. It:
  * - validates transport input,
- * - derives the (stubbed) trader origin server-side — never from the client,
+ * - derives the (stubbed) trader origin server-side; never from the client,
  * - calls `Lui.handle` (the existing LUI/engine boundary) for research requests,
  * - persists the workspace through the existing WorkspaceStore exactly where the engine's
  *   mutation paths ended (the LUI deliberately does not persist itself),
@@ -23,7 +23,7 @@ import type { ProgressListener } from "../research/progress.js";
 import {
   evidenceToDTO, judgmentToDTO, researchToDTO, continuitySnapshotToDTO,
   thesisToDTO, thesisAssessmentToDTO, artifactToDTO, memoryToDTO, monitorToDTO,
-  toHistoricalAnalysisDTO,
+  toHistoricalAnalysisDTO, uiText,
   type ResearchResponseDTO, type AnswerDTO, type EvidenceDTO, type JudgmentDTO,
 } from "./dto.js";
 import { InvalidRequestError, ModelFailureError, PersistenceFailureError, NotFoundError } from "./errors.js";
@@ -41,7 +41,7 @@ export interface ResearchAppOptions {
 
 /**
  * The application boundary the routes talk to. Holds one workspace (loaded from the store at
- * construction) and the engine wiring; every mutation flows through the engine/domain — the
+ * construction) and the engine wiring; every mutation flows through the engine/domain; the
  * service itself only validates input and persists.
  */
 export class ResearchApp {
@@ -60,7 +60,7 @@ export class ResearchApp {
       throw new PersistenceFailureError(cause);
     }
     const app = new ResearchApp(options, workspace ?? options.workspace);
-    // Sweep only a RESTORED graph — a fresh in-memory workspace has nothing interrupted.
+    // Sweep only a RESTORED graph; a fresh in-memory workspace has nothing interrupted.
     if (workspace !== undefined) await app.sweepInterruptedResearch(workspace);
     return app;
   }
@@ -120,12 +120,12 @@ export class ResearchApp {
   // ------------------------------------------------------------------
 
   /**
-   * Submit a natural-language research request. The client sends ONLY a message — never a flow
+   * Submit a natural-language research request. The client sends ONLY a message; never a flow
    * name. `onProgress` receives REAL lifecycle events (threaded through the engine); when the
    * caller (route) supplies one, the route streams them as SSE.
    *
    * `confirmed` mirrors the frontend's explicit confirmation dialog (F0 mandate §12): SAVE/
-   * MONITOR steps remain gated by the LUI's authorization boundary — an unconfirmed request
+   * MONITOR steps remain gated by the LUI's authorization boundary; an unconfirmed request
    * halts at AWAITING_CONFIRMATION persisting NOTHING; with the explicit confirmation flag the
    * origin records the trader's authorization and the LUI still validates trader kind before
    * persisting. There is no HTTP shortcut around the boundary.
@@ -154,7 +154,11 @@ export class ResearchApp {
     };
     let result: LuiResult;
     try {
-      result = await this.engine().handle(trimmed, origin, onProgress);
+      // Honest wall-clock budget: finish (and persist) before the caller's execution window
+      // expires so a run always delivers its real state instead of dying mid-flight. Sized for
+      // the 300s serverless function ceiling; local dev keeps the same contract.
+      const deadlineMs = Date.now() + 270_000;
+      result = await this.engine().handle(trimmed, origin, onProgress, deadlineMs);
     } catch (cause) {
       // The engine itself failing (vs the LUI's internal typed model failures) is unexpected.
       throw new ModelFailureError({ type: "PROVIDER_UNAVAILABLE", message: cause instanceof Error ? cause.message : String(cause) });
@@ -186,12 +190,12 @@ export class ResearchApp {
           citedObjectRefs: [],
         }
       : {
-          answer: result.response?.answer ?? "",
-          supportingReasons: [...(result.response?.supportingReasons ?? [])],
-          opposingReasons: [...(result.response?.opposingReasons ?? [])],
+          answer: uiText(result.response?.answer ?? ""),
+          supportingReasons: result.response?.supportingReasons.map(uiText) ?? [],
+          opposingReasons: result.response?.opposingReasons.map(uiText) ?? [],
           confidence: result.response?.confidence ?? "UNKNOWN",
-          keyUncertainty: result.response?.keyUncertainty ?? "",
-          implication: result.response?.implication ?? "",
+          keyUncertainty: uiText(result.response?.keyUncertainty ?? ""),
+          implication: uiText(result.response?.implication ?? ""),
           citedObjectRefs: [...(result.response?.citedObjectRefs ?? [])],
         };
 
@@ -221,7 +225,7 @@ export class ResearchApp {
       for (const j of flowJudgments) if (!judgments.some((d) => d.ref === j.ref)) judgments.push(j);
     }
 
-    const limitations = collectLimitations(result);
+    const limitations = collectLimitations(result).map(uiText);
     // Honest outcome mapping: a pure interpretation failure (no research ran) is a MODEL_FAILURE;
     // a run that completed research but ended on a model failure is a partial COMPLETED with the
     // typed failure attached (the LUI's law: failure ≠ fabricated evidence, partial ≠ false success).
@@ -244,7 +248,7 @@ export class ResearchApp {
       ...(judgments.length > 0 ? { judgmentRef: judgments[judgments.length - 1]!.ref } : {}),
       evidence,
       judgments,
-      // Flow 5 structured historical analysis (server-computed; §8D — the frontend renders,
+      // Flow 5 structured historical analysis (server-computed; §8D; the frontend renders,
       // never derives): mapped only when this request ran the historical-comparison flow.
       ...(result.flow5?.historicalAnalysis !== undefined
         ? { historicalAnalysis: toHistoricalAnalysisDTO(result.flow5.historicalAnalysis) }
@@ -264,7 +268,7 @@ export class ResearchApp {
     return continuitySnapshotToDTO(this.ws().getContinuitySnapshot());
   }
 
-  /** Research history: explicit status fields — the client never infers staleness/currentness. */
+  /** Research history: explicit status fields; the client never infers staleness/currentness. */
   listResearch() {
     return this.ws().listResearch().map((r) => ({
       ...researchToDTO(r),
@@ -319,7 +323,7 @@ export class ResearchApp {
     return { ...thesisToDTO(t), isActive: t.id === this.ws().getActiveThesis()?.id, assessments: this.ws().listThesisAssessments(ref).map(thesisAssessmentToDTO) };
   }
 
-  /** Selection only — routed through the domain (setActiveThesis), never direct thesis mutation. */
+  /** Selection only; routed through the domain (setActiveThesis), never direct thesis mutation. */
   async selectThesis(ref: string) {
     if (typeof ref !== "string" || ref.length === 0) throw new InvalidRequestError("thesisRef is required");
     let thesis;
@@ -361,7 +365,7 @@ export class ResearchApp {
   }
 
   /**
-   * Activate a monitor through the DOMAIN boundary — `activateMonitor` itself rejects
+   * Activate a monitor through the DOMAIN boundary; `activateMonitor` itself rejects
    * non-trader origins, and the API never impersonates confirmation. This endpoint exists for
    * the local single-trader MVP where the HTTP caller IS the trader; the origin records the
    * explicit confirmation context. There is still no background worker behind an ACTIVE monitor.

@@ -8,7 +8,7 @@ related: [object-lifecycle-state-machine.md, object-relationships.md, workspace-
 
 **Related documents:** `object-lifecycle-state-machine.md` · `object-relationships.md` · `workspace-presentation.md`
 
-> Converted from `# Research Object Model.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `# Research Object Model.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 # Research Object Model
 
@@ -733,7 +733,7 @@ Research #123
 Saved Artifact
   ↓
 ```
-"My BTC Macro Research — September 2026"
+"My BTC Macro Research; September 2026"
 ```
 
 The artifact preserves:

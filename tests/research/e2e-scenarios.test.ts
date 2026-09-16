@@ -1,5 +1,5 @@
 /**
- * M6 PHASE 2 — END-TO-END SCENARIO AUDIT.
+ * M6 PHASE 2; END-TO-END SCENARIO AUDIT.
  *
  * Realistic deterministic integration scenarios through the REAL architecture:
  * USER MESSAGE → LUI → ModelProvider → validated structured intent → safety/ambiguity gates →
@@ -71,7 +71,7 @@ function scriptDefaults(provider: FakeModelProvider, plan: unknown, overrides: R
 }
 
 // ---------------------------------------------------------------------------
-// Scenario 1 — Basic research (current market question)
+// Scenario 1; Basic research (current market question)
 // ---------------------------------------------------------------------------
 describe("Scenario 1: basic research request", () => {
   it("flows end to end: interpretation → planned capabilities → evidence → honest response", async () => {
@@ -91,7 +91,7 @@ describe("Scenario 1: basic research request", () => {
     expect(result.response?.keyUncertainty.length).toBeGreaterThan(0);
   });
 
-  it("tool failure never becomes negative evidence — unavailability is recorded as a limitation", async () => {
+  it("tool failure never becomes negative evidence; unavailability is recorded as a limitation", async () => {
     const failing: ProviderAdapter = {
       providerId: "fake/down",
       capabilities: ["NEWS_ANALYSIS"],
@@ -126,14 +126,14 @@ describe("Scenario 1: basic research request", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Scenario 2 — Ambiguous consequential request
+// Scenario 2; Ambiguous consequential request
 // ---------------------------------------------------------------------------
 describe("Scenario 2: ambiguous consequential request halts for clarification", () => {
   it("blocks before any state change and asks for clarification", async () => {
     const provider = new FakeModelProvider(new Map([
       ["lui.normalized_request", responses.normalizedRequest({ primaryAction: "MANAGE_STATE", objective: "switch to the thesis" })],
       ["lui.resolved_target", responses.resolvedTarget({ asset: "", flow: "" })],
-      ["lui.ambiguity", responses.ambiguity(true, ["Which thesis — the halving thesis or the ETF-flow thesis?"])],
+      ["lui.ambiguity", responses.ambiguity(true, ["Which thesis; the halving thesis or the ETF-flow thesis?"])],
       ["lui.consequence", responses.consequence("STATE_MUTATION", true)],
       ["safety.screen", responses.safety(false)],
       // The plan carries the step it WOULD run; the ambiguity halt fires before dispatch.
@@ -150,7 +150,7 @@ describe("Scenario 2: ambiguous consequential request halts for clarification", 
 });
 
 // ---------------------------------------------------------------------------
-// Scenario 3 — Conflicting evidence (Flow 6 disagreement preservation)
+// Scenario 3; Conflicting evidence (Flow 6 disagreement preservation)
 // ---------------------------------------------------------------------------
 describe("Scenario 3: conflicting evidence is preserved, not forced into agreement", () => {
   it("Flow 6 records a typed disagreement and the response reflects the conflict", async () => {
@@ -176,7 +176,7 @@ describe("Scenario 3: conflicting evidence is preserved, not forced into agreeme
           sideA: "technicals constructive (TECHNICAL_ANALYSIS)",
           sideB: "positioning deteriorating (SENTIMENT_ANALYSIS)",
           type: "INTERPRETATION_VS_OBSERVATION",
-          assessment: "analyst interpretation vs measured positioning — interpretation cannot override observation",
+          assessment: "analyst interpretation vs measured positioning; interpretation cannot override observation",
           objectRefsA: ["ev_000001"],
           objectRefsB: ["ev_000002"],
         }],
@@ -201,7 +201,7 @@ describe("Scenario 3: conflicting evidence is preserved, not forced into agreeme
 });
 
 // ---------------------------------------------------------------------------
-// Scenario 4 — Thesis lifecycle: create → assess → challenge → reassess
+// Scenario 4; Thesis lifecycle: create → assess → challenge → reassess
 // ---------------------------------------------------------------------------
 describe("Scenario 4: thesis lifecycle across assessment, challenge, and reassessment", () => {
   function workspaceWithThesis(): { workspace: Workspace; thesisId: string } {
@@ -263,7 +263,7 @@ describe("Scenario 4: thesis lifecycle across assessment, challenge, and reasses
   });
 
   it("material new evidence triggers reassessment; irrelevant evidence is an honest no-op", async () => {
-    // reassessThesis resolves the workspace's active thesis when thesisRef is omitted —
+    // reassessThesis resolves the workspace's active thesis when thesisRef is omitted
     // each half of this test uses its own isolated workspace (id + workspace kept together).
     const materiality = (needed: boolean) => JSON.stringify({
       reassessmentNeeded: needed,
@@ -329,7 +329,7 @@ describe("Scenario 4: thesis lifecycle across assessment, challenge, and reasses
 });
 
 // ---------------------------------------------------------------------------
-// Scenario 5 — Save and memory
+// Scenario 5; Save and memory
 // ---------------------------------------------------------------------------
 describe("Scenario 5: save vs memory (continuity)", () => {
   it("unconfirmed SAVE persists nothing; explicit trader authorization persists artifact + memory", async () => {
@@ -391,7 +391,7 @@ describe("Scenario 5: save vs memory (continuity)", () => {
       system,
     );
     expect(revalidated.status).toBe("STALE");
-    // Memory decay appends a provenance entry to the readonly array — the original stays.
+    // Memory decay appends a provenance entry to the readonly array; the original stays.
     // Continuity snapshot reflects the decayed memory, not the stale claim as current.
     const snap = workspace.getContinuitySnapshot();
     expect(snap.memories.find((m) => m.id === memory.id)?.status).toBe("STALE");
@@ -399,7 +399,7 @@ describe("Scenario 5: save vs memory (continuity)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Scenario 6 — Monitoring proposal vs activation
+// Scenario 6; Monitoring proposal vs activation
 // ---------------------------------------------------------------------------
 describe("Scenario 6: monitoring handoff (proposal-only until trader confirms)", () => {
   it("MONITOR creates a persistent PROPOSED monitor; activation requires trader origin; source failure is not invalidation", async () => {
@@ -424,14 +424,14 @@ describe("Scenario 6: monitoring handoff (proposal-only until trader confirms)",
     const result = await lui.handle("keep an eye on my invalidation conditions", traderConfirmed);
 
     // proposal persisted, inert (trader-confirmed origin reaches the dispatch gate; the
-    // dispatcher still persists a PROPOSED — never an ACTIVE — monitor)
+    // dispatcher still persists a PROPOSED; never an ACTIVE; monitor)
     expect(result.monitorProposal).toBeDefined();
     expect(result.activatedMonitor).toBeUndefined();
     const proposed = workspace.listMonitors();
     expect(proposed).toHaveLength(1);
     expect(proposed[0]?.status).toBe("PROPOSED");
 
-    // activation requires trader origin — system/model cannot activate
+    // activation requires trader origin; system/model cannot activate
     const monitorId = proposed[0]?.id ?? "";
     expect(() => workspace.activateMonitor(monitorId, system, "auto")).toThrow(/trader/);
     const activated = workspace.activateMonitor(monitorId, traderConfirmed, "trader confirmed");
@@ -451,11 +451,11 @@ describe("Scenario 6: monitoring handoff (proposal-only until trader confirms)",
 });
 
 // ---------------------------------------------------------------------------
-// Scenario 7 — Insufficient evidence completes honestly
+// Scenario 7; Insufficient evidence completes honestly
 // ---------------------------------------------------------------------------
 describe("Scenario 7: insufficient evidence completes honestly with surfaced limitations", () => {
   it("partial capability availability yields an honest limited answer, no fabricated fills", async () => {
-    // Only NEWS is registered; the plan asks for NEWS + MACRO — MACRO is unavailable.
+    // Only NEWS is registered; the plan asks for NEWS + MACRO; MACRO is unavailable.
     const provider = new FakeModelProvider(new Map([
       ["research.plan", JSON.stringify({
         objective: "what happened to BTC",
@@ -488,7 +488,7 @@ describe("Scenario 7: insufficient evidence completes honestly with surfaced lim
 });
 
 // ---------------------------------------------------------------------------
-// Scenario 8 — Execution boundary (defense in depth)
+// Scenario 8; Execution boundary (defense in depth)
 // ---------------------------------------------------------------------------
 describe("Scenario 8: execution boundary holds at every layer", () => {
   it("model classification cannot smuggle an execution action into the locked six", async () => {
@@ -564,7 +564,7 @@ describe("M6 audit regressions: MANAGE_STATE applies and reports the working-sta
     const lui = buildLui(manageStateProvider(), registryWith(), workspace);
     const result = await lui.handle("make the halving thesis my active thesis", {
       kind: "trader",
-      detail: `trader message: set-active-thesis ${a.id} — confirmed`,
+      detail: `trader message: set-active-thesis ${a.id}; confirmed`,
     });
 
     // The dispatcher receives the thesisRef from the origin record (no invented target); the
@@ -577,7 +577,7 @@ describe("M6 audit regressions: MANAGE_STATE applies and reports the working-sta
     expect(restored.getActiveThesis()?.id).toBe(a.id);
   });
 
-  it("D1b: activating an unknown thesis is rejected — no invented state", async () => {
+  it("D1b: activating an unknown thesis is rejected; no invented state", async () => {
     const provider = manageStateProvider();
     provider.responses.set("state.change_proposal", JSON.stringify({
       changeType: "set-active-thesis",
@@ -591,7 +591,7 @@ describe("M6 audit regressions: MANAGE_STATE applies and reports the working-sta
     expect(result.stateChange).toBeUndefined();
   });
 
-  it("D2: a successful MANAGE_STATE answers with what changed — never 'produced no research outcome'", async () => {
+  it("D2: a successful MANAGE_STATE answers with what changed; never 'produced no research outcome'", async () => {
     const workspace = new Workspace();
     const a = workspace.addThesis({ statement: "halving thesis", objective: "swing" }, trader, new Date("2026-01-01"));
     const lui = buildLui(manageStateProvider(), registryWith(), workspace);

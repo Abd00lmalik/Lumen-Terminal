@@ -8,7 +8,7 @@ related: [lui-flow-extensions.md, lui-research-action.md, lui-analyze-action.md,
 
 **Related documents:** `lui-flow-extensions.md` · `lui-research-action.md` · `lui-analyze-action.md` · `lui-challenge-action.md` · `lui-manage-state-action.md` · `lui-monitor-action.md` · `lui-save-action.md` · `lui-interaction-model.md`
 
-> Converted from `# UNIVERSAL LUI CORE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `# UNIVERSAL LUI CORE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 # UNIVERSAL LUI CORE
 

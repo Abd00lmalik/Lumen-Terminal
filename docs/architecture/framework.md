@@ -8,7 +8,7 @@ related: [research-flows.md, memory.md, personalization.md]
 
 **Related documents:** `research-flows.md` · `memory.md` · `personalization.md`
 
-> Converted from `FRAMEWORK INTELLIGENCE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+> Converted from `FRAMEWORK INTELLIGENCE.txt` on 2026-09-12. Formatting only; architectural content, schemas, and decisions are unchanged.
 
 FRAMEWORK INTELLIGENCE
 
