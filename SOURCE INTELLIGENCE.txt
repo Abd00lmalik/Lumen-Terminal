@@ -1,0 +1,1160 @@
+SOURCE INTELLIGENCE
+
+PURPOSE
+
+Source Intelligence manages the origin layer of research information.
+
+It determines:
+
+- where information comes from
+- which sources should be searched
+- which sources are appropriate for a claim
+- how sources should be retrieved
+- how source provenance is preserved
+- how source reliability is assessed
+- whether sources are independent
+- whether information is current
+- whether sources conflict
+- whether a source has changed
+- whether an existing source can be reused
+- when additional source discovery is necessary
+
+Source Intelligence does not determine the final truth of a claim by source reputation alone.
+
+Source quality is contextual and claim-specific.
+
+Core principle:
+
+SOURCE = where information originated
+
+EVIDENCE = what was extracted or observed from that source
+
+CLAIM = what the research is trying to establish
+
+The system must preserve this distinction throughout the research lifecycle.
+
+--------------------------------------------------
+SOURCE OBJECT
+--------------------------------------------------
+
+SOURCE {
+  id
+
+  type
+  subtype
+
+  locator
+  publisher
+  author
+
+  title
+  description
+
+  published_at
+  updated_at
+  retrieved_at
+
+  content_reference
+
+  source_reliability
+  source_independence
+
+  jurisdiction
+  language
+
+  provenance
+  source_relationships
+
+  freshness
+  status
+
+  access_state
+
+  history
+}
+
+--------------------------------------------------
+SOURCE TYPES
+--------------------------------------------------
+
+Sources may include:
+
+- PRIMARY_SOURCE
+- SECONDARY_SOURCE
+- TERTIARY_SOURCE
+- OFFICIAL_SOURCE
+- GOVERNMENT_SOURCE
+- REGULATORY_SOURCE
+- COMPANY_SOURCE
+- PROTOCOL_SOURCE
+- MARKET_DATA_SOURCE
+- ONCHAIN_SOURCE
+- BLOCKCHAIN_SOURCE
+- RESEARCH_PUBLICATION
+- ACADEMIC_SOURCE
+- NEWS_SOURCE
+- ANALYST_SOURCE
+- EXPERT_SOURCE
+- COMMUNITY_SOURCE
+- SOCIAL_SOURCE
+- DATABASE
+- API
+- DOCUMENT
+- USER_PROVIDED_SOURCE
+- OTHER
+
+Source type is descriptive.
+
+A source type does not automatically determine reliability.
+
+--------------------------------------------------
+SOURCE DISCOVERY
+--------------------------------------------------
+
+Source discovery identifies candidate sources capable of answering the research requirement.
+
+Discovery may consider:
+
+- claim requirements
+- target
+- timeframe
+- geography
+- asset
+- event
+- evidence type
+- required specificity
+- required freshness
+- source authority
+- availability
+- independence
+- cost
+- reliability
+
+The system should prioritize sources based on information value rather than simply returning the largest number of results.
+
+--------------------------------------------------
+SOURCE SELECTION
+--------------------------------------------------
+
+Source selection should consider:
+
+- relevance
+- directness
+- reliability
+- specificity
+- recency
+- source independence
+- provenance
+- accessibility
+- jurisdiction
+- publication quality
+- potential conflicts of interest
+
+Primary sources should generally be preferred when they directly establish the required fact.
+
+Secondary sources remain useful when:
+
+- primary information is unavailable
+- independent reporting is required
+- interpretation is necessary
+- the research question concerns public reaction or reporting itself
+
+Source selection is claim-specific.
+
+There is no universal source ranking that applies equally to every question.
+
+--------------------------------------------------
+PRIMARY VS SECONDARY SOURCES
+--------------------------------------------------
+
+A primary source directly originates the information.
+
+Examples:
+
+- regulatory filing
+- official announcement
+- blockchain transaction
+- official statistics
+- protocol documentation
+- company statement
+- original research publication
+
+A secondary source reports, interprets, or summarizes information from elsewhere.
+
+The system must distinguish:
+
+SOURCE INDEPENDENCE
+
+from
+
+SOURCE COUNT.
+
+Ten articles repeating one original announcement do not automatically represent ten independent confirmations.
+
+--------------------------------------------------
+SOURCE INDEPENDENCE
+--------------------------------------------------
+
+Source independence determines whether multiple sources provide genuinely separate information.
+
+The system should identify:
+
+- shared original source
+- shared dataset
+- shared reporting
+- shared analyst
+- shared press release
+- copied language
+- syndicated reporting
+- independent observation
+
+If multiple sources derive from the same origin, the evidence graph should preserve that relationship.
+
+The system must not inflate confidence through duplicated reporting.
+
+--------------------------------------------------
+SOURCE RELIABILITY
+--------------------------------------------------
+
+Source reliability is contextual.
+
+It may consider:
+
+- historical accuracy
+- methodological quality
+- transparency
+- provenance
+- authority
+- editorial standards
+- technical reliability
+- correction history
+- incentives
+- conflicts of interest
+- directness to the underlying information
+
+Reliability must not be treated as a permanent universal score.
+
+A source may be highly reliable for one type of information and less useful for another.
+
+--------------------------------------------------
+SOURCE AUTHORITY
+--------------------------------------------------
+
+Authority depends on the claim.
+
+Examples:
+
+A regulator may be authoritative for a regulatory decision.
+
+A blockchain may be authoritative for an on-chain transaction.
+
+An official protocol source may be authoritative for its own published documentation.
+
+A market-data provider may be appropriate for a specific market measurement.
+
+Authority does not mean the source is automatically correct about every interpretation surrounding the claim.
+
+--------------------------------------------------
+SOURCE CONFLICTS OF INTEREST
+--------------------------------------------------
+
+The system should identify relevant conflicts of interest when known.
+
+Examples:
+
+- issuer discussing its own asset
+- analyst with disclosed position
+- paid research
+- promotional content
+- anonymous source
+- commercial data provider with methodology limitations
+
+A conflict of interest does not automatically invalidate information.
+
+It affects contextual source assessment.
+
+--------------------------------------------------
+SOURCE PROVENANCE
+--------------------------------------------------
+
+Every source should preserve provenance where available.
+
+Provenance may include:
+
+- original locator
+- retrieval method
+- retrieval timestamp
+- publisher
+- author
+- publication timestamp
+- update timestamp
+- parent/original source
+- intermediary
+- extraction method
+- transformation history
+
+The provenance chain should support:
+
+ORIGIN
+→ SOURCE
+→ RETRIEVAL
+→ EXTRACTION
+→ EVIDENCE
+
+The system must be able to trace evidence back to its source.
+
+--------------------------------------------------
+SOURCE RETRIEVAL
+--------------------------------------------------
+
+Retrieval should preserve:
+
+- source identity
+- exact locator
+- retrieval timestamp
+- retrieved representation
+- relevant content reference
+- source metadata
+
+If a source changes after retrieval, the original retrieval should remain historically identifiable.
+
+The system should distinguish:
+
+WHAT THE SOURCE CURRENTLY SAYS
+
+from
+
+WHAT THE SOURCE SAID WHEN IT WAS RETRIEVED.
+
+--------------------------------------------------
+SOURCE FRESHNESS
+--------------------------------------------------
+
+Freshness depends on the research context.
+
+Some information becomes stale quickly:
+
+- prices
+- market conditions
+- sentiment
+- liquidity
+- breaking news
+
+Some information remains stable longer:
+
+- historical records
+- established documentation
+- past regulatory decisions
+
+Freshness should therefore be evaluated relative to:
+
+- research objective
+- evidence type
+- timeframe
+- market conditions
+- source update frequency
+
+A source is not stale merely because it is old.
+
+It is stale when its age makes it unsuitable for the current research requirement.
+
+--------------------------------------------------
+SOURCE STATUS
+--------------------------------------------------
+
+Possible source statuses include:
+
+ACTIVE
+VERIFIED
+UPDATED
+CONTESTED
+STALE
+INVALID
+ARCHIVED
+
+ACTIVE
+
+Source is currently usable.
+
+VERIFIED
+
+Source identity and relevant content have been sufficiently validated.
+
+UPDATED
+
+A newer version exists.
+
+CONTESTED
+
+Material disagreement or reliability concern exists.
+
+STALE
+
+Source may remain historically valid but is not sufficiently current for the current use.
+
+INVALID
+
+Source should not currently be relied upon.
+
+ARCHIVED
+
+Source is retained historically but is no longer active.
+
+--------------------------------------------------
+SOURCE ACCESS STATES
+--------------------------------------------------
+
+The system may encounter:
+
+- ACCESSIBLE
+- PARTIALLY_ACCESSIBLE
+- TEMPORARILY_UNAVAILABLE
+- PAYWALLED
+- BLOCKED
+- REMOVED
+- BROKEN
+- UNKNOWN
+
+Access failure is not evidence against the underlying claim.
+
+The system must distinguish:
+
+SOURCE UNAVAILABLE
+
+from
+
+SOURCE CONTRADICTS CLAIM.
+
+--------------------------------------------------
+SOURCE DISCOVERY STRATEGY
+--------------------------------------------------
+
+Source discovery should be adaptive.
+
+Initial discovery should prioritize high-value sources.
+
+Additional discovery should occur when:
+
+- evidence is insufficient
+- sources conflict
+- source independence is weak
+- a critical claim depends on one source
+- a primary source is missing
+- a claim is high-impact
+- evidence quality is low
+- a hypothesis remains unresolved
+
+The system should stop source discovery when additional sources are unlikely to materially improve the judgment.
+
+--------------------------------------------------
+SOURCE DIVERSITY
+--------------------------------------------------
+
+Where useful, source discovery should diversify across:
+
+- source types
+- publishers
+- jurisdictions
+- methodologies
+- data providers
+- perspectives
+
+Diversity is useful when it improves independent corroboration or reveals disagreement.
+
+The system must not pursue diversity for its own sake.
+
+--------------------------------------------------
+SOURCE CORROBORATION
+--------------------------------------------------
+
+Corroboration should consider:
+
+- independent origin
+- directness
+- agreement
+- methodological consistency
+- timeframe
+- scope
+
+Corroboration increases confidence only when sources provide meaningful independent support.
+
+Duplicated reporting does not equal independent corroboration.
+
+--------------------------------------------------
+SOURCE CONTRADICTION
+--------------------------------------------------
+
+When sources disagree:
+
+1. preserve all relevant sources
+2. identify the exact disagreement
+3. compare publication/retrieval times
+4. compare definitions
+5. compare scope
+6. compare methodology
+7. compare directness
+8. inspect provenance
+9. assess source independence
+10. determine whether one source supersedes another
+11. preserve unresolved conflict if necessary
+
+The system must not select a source simply because it produces a preferred conclusion.
+
+--------------------------------------------------
+SOURCE UPDATES
+--------------------------------------------------
+
+When a source publishes an update:
+
+1. identify the new version
+2. preserve the prior version
+3. compare material differences
+4. determine affected evidence
+5. determine affected claims
+6. propagate material changes
+7. reassess analysis and judgment when necessary
+
+A source update must not erase historical provenance.
+
+--------------------------------------------------
+SOURCE CORRECTIONS
+--------------------------------------------------
+
+If a source corrects previously published information:
+
+- preserve the original version
+- identify the correction
+- mark affected evidence appropriately
+- reassess dependent claims
+- propagate material changes
+- preserve the correction history
+
+Corrected information should not silently rewrite historical research.
+
+--------------------------------------------------
+SOURCE REUSE
+--------------------------------------------------
+
+Sources may be reused across research objects.
+
+Reuse should preserve:
+
+- original source identity
+- retrieval history
+- evidence extraction
+- context
+- timestamps
+- relationships
+- original research references
+
+The same source may provide different evidence for different research questions.
+
+Its relevance and interpretation must be evaluated separately in each context.
+
+--------------------------------------------------
+SOURCE CONTEXT
+--------------------------------------------------
+
+Source interpretation must consider:
+
+- publication date
+- event date
+- retrieval date
+- target
+- timeframe
+- jurisdiction
+- market conditions
+- source purpose
+
+Publication date is not necessarily the same as event date.
+
+A historical source may describe an older event while remaining useful for historical research.
+
+--------------------------------------------------
+SOURCE RELATIONSHIPS
+--------------------------------------------------
+
+Sources may have relationships such as:
+
+- derived_from
+- cites
+- references
+- updates
+- corrects
+- duplicates
+- summarizes
+- contradicts
+- corroborates
+- republishes
+- originates_from
+- related_to
+
+Relationships help determine source independence and provenance.
+
+They must not automatically imply agreement or disagreement.
+
+--------------------------------------------------
+SOURCE DUPLICATION
+--------------------------------------------------
+
+The system should detect duplicate or near-duplicate sources.
+
+Possible duplication includes:
+
+- syndicated article
+- copied announcement
+- mirrored document
+- reposted statement
+- identical dataset
+- derivative reporting
+
+Duplicate sources may remain visible for traceability.
+
+They should not be counted as independent corroboration.
+
+--------------------------------------------------
+SOURCE CLAIM MAPPING
+--------------------------------------------------
+
+Sources connect to evidence and claims indirectly through the evidence layer.
+
+Preferred chain:
+
+SOURCE
+→ EVIDENCE
+→ CLAIM
+
+A source may support multiple evidence items.
+
+An evidence item may reference multiple sources.
+
+A claim may therefore have multiple independent source paths.
+
+The system must preserve these paths.
+
+--------------------------------------------------
+SOURCE SELECTION BY CLAIM
+--------------------------------------------------
+
+Source quality must be evaluated relative to the claim.
+
+For example:
+
+Claim:
+"Protocol X announced an upgrade."
+
+Best source may be the official announcement.
+
+Claim:
+"Traders reacted negatively."
+
+Useful sources may include:
+
+- market data
+- sentiment data
+- independent reporting
+- community signals
+
+Claim:
+"The upgrade caused the price increase."
+
+This requires more than a source saying the upgrade happened.
+
+The system must investigate causal evidence separately.
+
+--------------------------------------------------
+SOURCE AND EVIDENCE
+--------------------------------------------------
+
+Source Intelligence answers:
+
+"Where did this information come from?"
+
+Evidence Intelligence answers:
+
+"What does this information establish, and how strong is it?"
+
+Neither should silently replace the other.
+
+Source credibility alone does not establish the truth of an interpretation.
+
+Strong evidence should retain provenance to its originating source.
+
+--------------------------------------------------
+SOURCE AND HYPOTHESIS
+--------------------------------------------------
+
+Sources may provide evidence for or against hypotheses.
+
+A source should not be labeled as supporting a hypothesis merely because it contains information relevant to the hypothesis.
+
+The evidence extracted from that source determines the relationship.
+
+--------------------------------------------------
+SOURCE AND ANALYSIS
+--------------------------------------------------
+
+Analysis may compare sources.
+
+Examples:
+
+- compare reporting
+- identify methodological differences
+- reconcile conflicting data
+- identify narrative divergence
+
+Source disagreement should be treated as analytical input rather than automatically resolved.
+
+--------------------------------------------------
+SOURCE AND JUDGMENT
+--------------------------------------------------
+
+Judgment should rely on evidence whose provenance can be traced to sources.
+
+The final judgment should not cite a source as if the source itself were the complete reasoning basis.
+
+The system should preserve:
+
+SOURCE
+→ EVIDENCE
+→ CLAIM
+→ HYPOTHESIS / ANALYSIS
+→ JUDGMENT.
+
+--------------------------------------------------
+SOURCE AND MONITOR
+--------------------------------------------------
+
+Monitoring may watch:
+
+- specific sources
+- source updates
+- source categories
+- recurring data feeds
+- official announcements
+- regulatory publications
+
+A monitor must preserve source provenance.
+
+Source updates should trigger reassessment only when materially relevant.
+
+--------------------------------------------------
+SOURCE AND MEMORY
+--------------------------------------------------
+
+Source information may enter research memory when useful.
+
+Memory should preserve:
+
+- source identity
+- source reliability context
+- source relationships
+- historical source behavior
+- prior use
+- provenance
+
+Source memory must not replace fresh retrieval when current information is required.
+
+A previously reliable source may still require current verification.
+
+--------------------------------------------------
+SOURCE AND SAVE
+--------------------------------------------------
+
+SAVE may preserve:
+
+- source collection
+- source set
+- source comparison
+- source map
+- source references
+- reusable research sources
+
+Saving sources does not imply that their information remains current indefinitely.
+
+Freshness must be re-evaluated when reused.
+
+--------------------------------------------------
+USER-PROVIDED SOURCES
+--------------------------------------------------
+
+The trader may provide:
+
+- links
+- documents
+- screenshots
+- copied text
+- datasets
+- research papers
+- source references
+
+User-provided information should be treated as a source or source candidate with explicit provenance.
+
+The system must distinguish:
+
+TRADER-PROVIDED INFORMATION
+
+from
+
+INDEPENDENTLY VERIFIED INFORMATION.
+
+User-provided information may be highly reliable but must not automatically be treated as independently corroborated.
+
+--------------------------------------------------
+SOURCE QUALITY ASSESSMENT
+--------------------------------------------------
+
+Source quality should consider:
+
+- reliability
+- directness
+- recency
+- specificity
+- provenance quality
+- source independence
+- methodological transparency
+- context completeness
+- relevance
+- conflicts of interest
+- correction history
+
+These dimensions should remain available individually.
+
+The system should avoid reducing source quality to one opaque score unless a downstream operation explicitly requires one.
+
+--------------------------------------------------
+SOURCE PRIORITIZATION
+--------------------------------------------------
+
+Source discovery priority should increase when:
+
+- claim importance is high
+- current evidence is weak
+- contradiction is material
+- source independence is low
+- current information is time-sensitive
+- hypothesis uncertainty is high
+- judgment could materially change
+
+Source priority should decrease when:
+
+- evidence is already sufficient
+- sources are redundant
+- additional sources have low information value
+- the claim is low impact
+
+--------------------------------------------------
+SOURCE STOPPING RULE
+--------------------------------------------------
+
+Stop source discovery when:
+
+- sufficient independent evidence exists
+- required primary source has been located
+- contradictions are sufficiently understood
+- additional sources have low information value
+- research objective is sufficiently addressed
+- available sources are exhausted
+
+Do not continue searching indefinitely for confirmation.
+
+--------------------------------------------------
+SOURCE FAILURE HANDLING
+--------------------------------------------------
+
+If a preferred source fails:
+
+1. determine whether failure is temporary
+2. retry when appropriate
+3. identify alternative sources
+4. preserve the unavailable source as a failed retrieval attempt
+5. reassess evidence sufficiency
+
+A source failure should not automatically cause a research conclusion.
+
+--------------------------------------------------
+SOURCE RETRY
+--------------------------------------------------
+
+Retry may use:
+
+- same source
+- alternate endpoint
+- cached representation
+- alternate retrieval method
+- independent source
+
+Repeated failure should cause adaptive strategy changes rather than infinite retries.
+
+--------------------------------------------------
+SOURCE STALENESS
+--------------------------------------------------
+
+When a source becomes stale:
+
+- preserve it historically
+- identify affected evidence
+- determine whether current research requires fresh information
+- retrieve updated information when necessary
+- preserve old and new versions
+
+Historical research may continue using stale sources when historically appropriate.
+
+--------------------------------------------------
+SOURCE INVALIDATION
+--------------------------------------------------
+
+A source may become invalid because of:
+
+- demonstrated fabrication
+- corrupted data
+- authoritative correction
+- broken provenance
+- severe methodological failure
+- removal of the underlying record
+
+Invalidation must preserve historical provenance.
+
+Evidence derived from an invalid source must be reassessed.
+
+Dependent claims and judgments may require reassessment.
+
+--------------------------------------------------
+SOURCE ARCHIVING
+--------------------------------------------------
+
+Archived sources remain available for:
+
+- historical research
+- provenance
+- previous judgments
+- auditability
+- version comparison
+
+Archived sources should not automatically participate in current research.
+
+--------------------------------------------------
+SOURCE RESTORATION
+--------------------------------------------------
+
+Restoring an archived source requires:
+
+1. restore source metadata
+2. verify availability
+3. assess freshness
+4. assess validity
+5. revalidate provenance
+6. determine whether current use is appropriate
+
+Restoration does not automatically make old evidence current.
+
+--------------------------------------------------
+SOURCE MONITORING
+--------------------------------------------------
+
+The system may monitor sources when:
+
+- source updates are expected
+- information is highly time-sensitive
+- a source is critical to an active research thesis
+- regulatory or official updates may materially affect judgment
+
+Persistent monitoring requires explicit confirmation.
+
+--------------------------------------------------
+SOURCE CONFIDENCE
+--------------------------------------------------
+
+Source confidence describes confidence in the source assessment itself.
+
+It is distinct from:
+
+- evidence confidence
+- claim confidence
+- hypothesis confidence
+- judgment confidence
+
+A highly reliable source may provide weak evidence for a particular claim if it is indirect.
+
+--------------------------------------------------
+SOURCE MATERIALITY
+--------------------------------------------------
+
+Not every source change matters.
+
+Materiality should consider:
+
+- importance of affected claim
+- relationship to current judgment
+- magnitude of information change
+- source authority
+- evidence dependency
+- current uncertainty
+
+Minor source metadata changes should not trigger unnecessary research-wide propagation.
+
+--------------------------------------------------
+SOURCE PROPAGATION
+--------------------------------------------------
+
+When a material source change occurs:
+
+SOURCE CHANGE
+→ IDENTIFY AFFECTED EVIDENCE
+→ IDENTIFY AFFECTED CLAIMS
+→ IDENTIFY AFFECTED HYPOTHESES
+→ IDENTIFY AFFECTED ANALYSES
+→ ASSESS JUDGMENT IMPACT
+→ REASSESS IF MATERIAL
+→ PRESERVE PREVIOUS STATE
+→ RECORD PROVENANCE
+
+Unrelated research must remain untouched.
+
+Propagation should use the object dependency graph.
+
+--------------------------------------------------
+SOURCE CONFLICT WITH CURRENT EVIDENCE
+--------------------------------------------------
+
+If a newly retrieved source conflicts with current evidence:
+
+- preserve both
+- assess independence
+- assess source quality
+- assess directness
+- assess freshness
+- determine whether the new source changes the evidence balance
+- update claims if warranted
+- reassess analysis/judgment if material
+
+The system must not automatically prefer the newest source.
+
+--------------------------------------------------
+SOURCE CONFLICT WITH HISTORICAL EVIDENCE
+--------------------------------------------------
+
+New evidence may contradict historical evidence.
+
+The system should determine whether:
+
+- the underlying reality changed
+- the historical evidence was incorrect
+- the measurement changed
+- the definitions changed
+- the sources refer to different contexts
+
+Historical evidence should remain preserved.
+
+--------------------------------------------------
+SOURCE TRANSPARENCY
+--------------------------------------------------
+
+When presenting evidence, the system should expose source information progressively.
+
+Default:
+
+- source name/type
+- publication/retrieval time
+- relevance
+- key evidence
+
+On request:
+
+- full provenance
+- source relationships
+- reliability assessment
+- independence analysis
+- conflicting sources
+- retrieval history
+
+--------------------------------------------------
+SOURCE INTEGRITY RULES
+--------------------------------------------------
+
+The system must never:
+
+- fabricate a source
+- fabricate source metadata
+- claim a source was consulted when it was not
+- treat inaccessible sources as verified
+- count duplicated reporting as independent corroboration
+- silently replace a source
+- silently erase historical source versions
+- treat source authority as universal truth
+- treat source reputation as evidence itself
+- convert source interpretation into fact without classification
+- hide material source conflicts
+- silently upgrade user-provided information into independent corroboration
+- silently treat stale information as current
+- confuse retrieval failure with evidence against a claim
+
+Every evidence item must remain traceable to its source where possible.
+
+--------------------------------------------------
+SOURCE DISCOVERY LOOP
+--------------------------------------------------
+
+DEFINE INFORMATION REQUIREMENT
+
+→ IDENTIFY CLAIM / HYPOTHESIS NEED
+
+→ DETERMINE REQUIRED SOURCE TYPE
+
+→ DISCOVER CANDIDATE SOURCES
+
+→ RANK BY RELEVANCE / QUALITY / DIRECTNESS / FRESHNESS
+
+→ SELECT SOURCES
+
+→ RETRIEVE
+
+→ VERIFY SOURCE IDENTITY
+
+→ PRESERVE PROVENANCE
+
+→ CHECK INDEPENDENCE
+
+→ EXTRACT EVIDENCE
+
+→ MAP EVIDENCE TO CLAIMS
+
+→ DETECT DUPLICATION
+
+→ DETECT CONFLICTS
+
+→ ASSESS SOURCE QUALITY
+
+→ ASSESS EVIDENCE SUFFICIENCY
+
+→ DISCOVER ADDITIONAL SOURCES IF NECESSARY
+
+→ STOP WHEN INFORMATION VALUE FALLS BELOW RESEARCH NEED
+
+--------------------------------------------------
+GLOBAL PRINCIPLE
+--------------------------------------------------
+
+Source Intelligence exists to ensure that research knows WHERE ITS INFORMATION CAME FROM, HOW THAT INFORMATION WAS OBTAINED, HOW CURRENT IT IS, HOW INDEPENDENT IT IS, AND WHETHER THE SOURCE IS appropriate for the claim being evaluated.
+
+Source reputation is not truth.
+
+Source count is not corroboration.
+
+Freshness is contextual.
+
+Primary sources are preferred when directly relevant, but secondary and independent sources remain valuable.
+
+Every important evidence path should remain traceable:
+
+ORIGIN
+→ SOURCE
+→ EVIDENCE
+→ CLAIM
+→ HYPOTHESIS
+→ ANALYSIS
+→ JUDGMENT.
+
+The objective is not to collect the maximum number of sources.
+
+The objective is to identify the smallest set of sufficiently reliable, relevant, independent, and traceable sources needed to produce the strongest defensible research judgment.

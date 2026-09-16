@@ -1,0 +1,297 @@
+/**
+ * Adaptive research loop — model-assisted planning over the capability-first engine (M3 §7/§8).
+ *
+ * Architectural basis:
+ * - M3 §7: the model may plan (what's needed, which capabilities, gaps, sufficiency) but NEVER
+ *   executes tools. The engine converts validated plans into capability requests. No
+ *   hardcoded Flow→Skill mappings — capabilities only (final lock §6/§11).
+ * - M3 §8: the living loop QUESTION → PLAN → RESEARCH → EVIDENCE → CLAIMS → … → DECIDE —
+ *   plans CHANGE when validated evidence contradicts the working view; the loop STOPS when
+ *   evidence is sufficient. Information value, uncertainty, contradiction, and expected
+ *   judgment impact drive continuation — never "run every capability".
+ * - Failure semantics (§19): tool failure ≠ research failure ≠ model failure. A failed round
+ *   is recorded, not retried forever, and never becomes negative evidence.
+ * - Bounded rounds: the engine owns the loop budget (MAX_ROUNDS); the model can propose but
+ *   the engine decides when the loop must stop — with the reason recorded.
+ */
+
+import type { CapabilityRegistry } from "../adapters/capability-registry.js";
+import type { ModelProvider } from "../model/provider.js";
+import { ModelFailure } from "../model/provider.js";
+import {
+  RESEARCH_PLAN_SCHEMA_DESC, ADAPTIVE_DECISION_SCHEMA_DESC, parseResearchPlan, parseAdaptiveDecision,
+  type ProposedResearchPlan, type AdaptiveDecision, type PlannedStep,
+} from "../model/schemas.js";
+import { evidenceFromToolResult } from "../domain/evidence.js";
+import type { Evidence, Research } from "../domain/objects.js";
+import type { ProvenanceOrigin } from "../domain/provenance.js";
+import type { Workspace } from "../domain/workspace.js";
+import { progressEvent, type ProgressListener } from "./progress.js";
+import type { WorkspaceStore } from "../persistence/index.js";
+import type { ToolResult } from "../domain/tool-result.js";
+import { buildResearchContext, renderResearchContext, type ResearchContext } from "./context.js";
+
+export const MAX_RESEARCH_ROUNDS = 3;
+
+export interface RoundExecution {
+  readonly round: number;
+  readonly capability: string;
+  readonly result: ToolResult;
+  readonly evidenceIds: readonly string[];
+}
+
+export interface AdaptiveLoopOutcome {
+  readonly research: Research;
+  readonly plan: ProposedResearchPlan;
+  readonly rounds: readonly {
+    readonly round: number;
+    readonly executions: readonly RoundExecution[];
+    readonly decision: AdaptiveDecision;
+  }[];
+  readonly executions: readonly RoundExecution[];
+  readonly finalDecision: AdaptiveDecision;
+  readonly evidence: readonly Evidence[];
+  readonly stoppedBecause: "EVIDENCE_SUFFICIENT" | "MODEL_INSUFFICIENT_EVIDENCE" | "ROUND_BUDGET_EXHAUSTED" | "MODEL_FAILURE";
+  /** Typed model failure when the loop ended that way — never fabricated around. */
+  readonly modelFailure?: ModelFailure;
+  readonly context: ResearchContext;
+}
+
+/** Schemas as prompt fragments — the model must answer in one of these shapes. */
+export { RESEARCH_PLAN_SCHEMA_DESC, ADAPTIVE_DECISION_SCHEMA_DESC };
+
+const PLAN_SYSTEM = [
+  "You are the research planner inside a trading RESEARCH workbench. You plan; you never execute.",
+  "The system executes capabilities on your behalf and returns validated evidence.",
+  "Plan rules:",
+  "- Request CAPABILITIES (e.g. NEWS_ANALYSIS, TECHNICAL_ANALYSIS, SENTIMENT_ANALYSIS, MACRO_ANALYSIS, MARKET_DATA_ANALYSIS, ONCHAIN_ANALYSIS, HISTORICAL_COMPARISON, FALSIFICATION, SOURCE_VALIDATION). Never name providers or vendor tools.",
+  "- Select the smallest capability set with material information value. Do not request every capability.",
+  "- Respect trader constraints (e.g. exclusions) in scope.",
+  "- Never assume evidence that does not exist yet; plan tasks around what would decide the question.",
+].join("\n");
+
+const ADAPTIVE_SYSTEM = [
+  "You are the adaptive decision-maker inside a trading RESEARCH workbench. You decide whether research continues; you never execute anything.",
+  "You receive the validated research context with epistemic classes preserved. Rules:",
+  "- Interpretations/inferences/speculation are NOT observations. Do not upgrade them.",
+  "- LIMITATIONS are data-availability conditions. They are NOT evidence against any claim. Never convert a tool failure into a negative finding.",
+  "- Insufficient evidence is a valid outcome — prefer honesty over forced conclusions.",
+  "- Continue only when additional capabilities have MATERIAL information value (could change the judgment). Otherwise COMPLETE.",
+  "- Contradictory evidence may warrant one more targeted investigation — with capabilities, never providers.",
+].join("\n");
+
+function planPrompt(objective: string, constraints: readonly string[]): string {
+  return [
+    `Research objective: ${objective}`,
+    constraints.length > 0 ? `Trader constraints: ${constraints.join("; ")}` : "",
+    "Produce a research plan as JSON conforming to schema \"research.plan\".",
+    RESEARCH_PLAN_SCHEMA_DESC,
+  ].filter((l) => l !== "").join("\n");
+}
+
+function adaptivePrompt(ctx: ResearchContext, round: number): string {
+  return [
+    `Round ${round} of the adaptive loop for the research objective above.`,
+    "Validated research context follows.",
+    "---",
+    renderResearchContext(ctx),
+    "---",
+    "Decide: CONTINUE (with nextTasks naming capabilities), COMPLETE (evidence sufficient), or INSUFFICIENT_EVIDENCE (valid completion when evidence cannot answer the objective).",
+    "Respond as JSON conforming to schema \"research.adaptive_decision\".",
+    ADAPTIVE_DECISION_SCHEMA_DESC,
+  ].join("\n");
+}
+
+export interface AdaptiveLoopOptions {
+  readonly provider: ModelProvider;
+  readonly registry: CapabilityRegistry;
+  readonly workspace: Workspace;
+  readonly store: WorkspaceStore;
+  /** Trader constraints from the LUI (e.g. ["ignore social sentiment"]). */
+  readonly constraints?: readonly string[];
+  /** Fixed news-style capability params (asset etc.) merged into every capability call. */
+  readonly capabilityParams?: Readonly<Record<string, unknown>>;
+  readonly maxRounds?: number;
+  readonly now?: () => Date;
+  /** F0 SSE seam: optional listener for REAL lifecycle events (never model reasoning/payloads). */
+  readonly onProgress?: ProgressListener;
+}
+
+/**
+ * Run the adaptive loop: model-proposed plan → engine executes capabilities round-by-round →
+ * evidence into the graph → model decides continue/complete with the updated context.
+ * The model NEVER calls capabilities directly — every execution goes through the registry.
+ */
+export async function runAdaptiveResearch(
+  objective: string,
+  researchRef: string,
+  options: AdaptiveLoopOptions,
+): Promise<AdaptiveLoopOutcome> {
+  const at = options.now ?? (() => new Date());
+  const systemOrigin: ProvenanceOrigin = { kind: "agent", detail: "adaptive research loop" };
+  const workspace = options.workspace;
+  const maxRounds = options.maxRounds ?? MAX_RESEARCH_ROUNDS;
+
+  // 1. Model proposes the plan (validated; invalid output = model failure, not execution).
+  let plan: ProposedResearchPlan;
+  try {
+    const planResponse = await options.provider.structured<string>({
+      schemaName: "research.plan",
+      schemaDescription: RESEARCH_PLAN_SCHEMA_DESC,
+      system: PLAN_SYSTEM,
+      prompt: planPrompt(objective, options.constraints ?? []),
+      preferJson: true,
+    });
+    plan = parseResearchPlan(planResponse.raw);
+    options.onProgress?.(progressEvent("research_plan_created", at(), `research plan created with ${plan.tasks.length} task(s)`, { tasks: plan.tasks.length }));
+  } catch (error) {
+    const failure = error instanceof ModelFailure ? error : new ModelFailure("INVALID_OUTPUT", `plan validation failed: ${error instanceof Error ? error.message : String(error)}`, false);
+    throw failure;
+  }
+
+  // 2. Rounds: execute → ingest evidence → decide with the updated context.
+  const allExecutions: RoundExecution[] = [];
+  const rounds: { round: number; executions: readonly RoundExecution[]; decision: AdaptiveDecision }[] = [];
+  // Both are assigned on every loop path (each iteration ends in break or the final round
+  // sets the budget-exhausted outcome); definite-assignment avoids a fabricated default.
+  let finalDecision!: AdaptiveDecision;
+  let stoppedBecause!: AdaptiveLoopOutcome["stoppedBecause"];
+  let modelFailure: ModelFailure | undefined;
+
+  for (let round = 1; round <= maxRounds; round += 1) {
+    // Determine this round's tasks: round 1 = the plan; later rounds = the decision's nextTasks.
+    const roundTasks = round === 1
+      ? plan.tasks.map((t) => ({ objective: t.objective, capabilities: t.capabilities, completion: t.completion }))
+      : (rounds[rounds.length - 1]?.decision.nextTasks ?? []);
+
+    const executions: RoundExecution[] = [];
+    for (const task of roundTasks) {
+      for (const capability of task.capabilities) {
+        // Capability-first execution: registry resolves providers; the engine owns execution.
+        options.onProgress?.(progressEvent("capability_started", at(), `capability ${capability} started`, { capability }));
+        const result = await options.registry.execute(
+          capability,
+          { ...(options.capabilityParams ?? {}) },
+          systemOrigin,
+          at(),
+        );
+        options.onProgress?.(progressEvent("capability_completed", at(), `capability ${capability} completed: ${result.failure.type === "NONE" ? result.completeness : `failed (${result.failure.type})`}`, { capability, ...(result.failure.type === "NONE" ? { completeness: result.completeness } : { failureType: result.failure.type }) }));
+        const evidenceIds: string[] = [];
+        if (result.failure.type === "NONE" && result.validation !== "INVALID") {
+          for (const output of result.normalizedOutput) {
+            try {
+              const evidence = evidenceFromToolResult(
+                result,
+                output,
+                { kind: "tool", toolRef: result.tool, invocation: result.invocation.params },
+                {},
+                at(),
+              );
+              workspace.ingestEvidence(evidence, researchRef);
+              evidenceIds.push(evidence.id);
+            } catch {
+              // UNAVAILABLE/ERROR outputs never become evidence (evidence.ts invariant).
+            }
+          }
+        }
+        const execution: RoundExecution = { round, capability, result, evidenceIds };
+        executions.push(execution);
+        allExecutions.push(execution);
+      }
+    }
+
+    // 3. Adaptive decision with the updated, validated context.
+    const context = buildResearchContext(workspace, {
+      researchRef,
+      executions: allExecutions.map((e) => ({ capability: e.capability, result: e.result })),
+    });
+    let decision: AdaptiveDecision;
+    try {
+      const decisionResponse = await options.provider.structured<string>({
+        schemaName: "research.adaptive_decision",
+        schemaDescription: ADAPTIVE_DECISION_SCHEMA_DESC,
+        system: ADAPTIVE_SYSTEM,
+        prompt: adaptivePrompt(context, round),
+        preferJson: true,
+      });
+      decision = parseAdaptiveDecision(decisionResponse.raw);
+    } catch (error) {
+      modelFailure = error instanceof ModelFailure
+        ? error
+        : new ModelFailure("INVALID_OUTPUT", `adaptive decision validation failed: ${error instanceof Error ? error.message : String(error)}`, false);
+      stoppedBecause = "MODEL_FAILURE";
+      finalDecision = {
+        decision: "INSUFFICIENT_EVIDENCE",
+        rationale: `loop ended on model failure: ${modelFailure.message} — no fabricated continuation`,
+        nextTasks: [],
+      };
+      rounds.push({ round, executions, decision: finalDecision });
+      // Persist before the early return (lock §14): a model failure must not erase the rounds
+      // already executed. Persistence failure propagates as a persistence failure.
+      await options.store.save(workspace.toSnapshot());
+      return {
+        research: mustResearch(workspace, researchRef),
+        plan,
+        rounds,
+        executions: allExecutions,
+        finalDecision,
+        evidence: allExecutions.flatMap((e) => e.evidenceIds).map((id) => workspace.getEvidence(id)).filter((e): e is Evidence => e !== undefined),
+        stoppedBecause,
+        ...(modelFailure !== undefined ? { modelFailure } : {}),
+        context,
+      };
+    }
+
+    options.onProgress?.(progressEvent("research_round_completed", at(), `research round ${round} completed: ${decision.decision}`, { round, decision: decision.decision }));
+    rounds.push({ round, executions, decision });
+
+    if (decision.decision === "COMPLETE") {
+      stoppedBecause = "EVIDENCE_SUFFICIENT";
+      finalDecision = decision;
+      break;
+    }
+    if (decision.decision === "INSUFFICIENT_EVIDENCE") {
+      stoppedBecause = "MODEL_INSUFFICIENT_EVIDENCE";
+      finalDecision = decision;
+      break;
+    }
+    if (round === maxRounds) {
+      stoppedBecause = "ROUND_BUDGET_EXHAUSTED";
+      finalDecision = {
+        decision: "INSUFFICIENT_EVIDENCE",
+        rationale: `round budget (${maxRounds}) exhausted; research state is preserved for later continuation`,
+        nextTasks: [],
+      };
+      options.onProgress?.(progressEvent("research_stopped", at(), `research stopped: ${stoppedBecause}`, { reason: stoppedBecause }));
+      break;
+    }
+  }
+
+  // Persist the completed loop (lock §14). A store failure propagates — never reported as success.
+  await options.store.save(workspace.toSnapshot());
+  return {
+    research: mustResearch(workspace, researchRef),
+    plan,
+    rounds,
+    executions: allExecutions,
+    finalDecision,
+    evidence: allExecutions.flatMap((e) => e.evidenceIds).map((id) => workspace.getEvidence(id)).filter((e): e is Evidence => e !== undefined),
+    stoppedBecause,
+    ...(modelFailure !== undefined ? { modelFailure } : {}),
+    context: buildResearchContext(workspace, {
+      researchRef,
+      executions: allExecutions.map((e) => ({ capability: e.capability, result: e.result })),
+    }),
+  };
+}
+
+function mustResearch(workspace: Workspace, researchRef: string): Research {
+  const research = workspace.getResearch(researchRef);
+  if (research === undefined) throw new Error(`Unknown research: ${researchRef}`);
+  return research;
+}
+
+/** Convenience for the LUI: convert a validated plan step into a capability request list. */
+export function capabilitiesOfStep(step: PlannedStep): readonly string[] {
+  return step.capabilities;
+}

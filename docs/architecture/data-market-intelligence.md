@@ -1,0 +1,1279 @@
+---
+title: "DATA & MARKET INTELLIGENCE LAYER"
+source: DATA & MARKET INTELLIGENCE LAYER.txt
+converted: 2026-09-12
+type: architecture-spec
+related: [tool-skill-orchestration.md, source-intelligence.md]
+---
+
+**Related documents:** `tool-skill-orchestration.md` · `source-intelligence.md`
+
+> Converted from `DATA & MARKET INTELLIGENCE LAYER.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+
+DATA & MARKET INTELLIGENCE LAYER
+
+## 1. Purpose
+
+The Data & Market Intelligence Layer defines the information domains the research workbench can investigate and the structure through which those domains contribute to research.
+
+It does not perform final reasoning.
+
+It provides structured access to relevant market information for:
+
+- Research
+- Analysis
+- Challenge
+- Thesis evaluation
+- Framework evaluation
+- Monitoring
+- Historical comparison
+- Falsification
+
+The core principle is:
+
+DATA DOMAIN
+→ OBSERVATION
+→ CONTEXT
+→ EVIDENCE
+→ CLAIM
+→ HYPOTHESIS / ANALYSIS
+→ JUDGMENT
+
+The system should investigate only the domains that can materially improve the current research objective.
+
+---
+
+# 2. Core Data Domains
+
+The initial information universe consists of:
+
+```text
+MARKET
+MACRO
+NEWS
+SENTIMENT
+ONCHAIN
+TECHNICAL
+DERIVATIVES
+ECOSYSTEM
+REGULATION
+HISTORICAL
+```
+
+These domains are extensible.
+
+New domains should be added through capability registration rather than requiring changes to the core research engine.
+
+---
+
+# 3. Domain Model
+
+```text id="8xw3mc"
+DATA_DOMAIN {
+  id
+  name
+  description
+  capabilities[]
+  data_types[]
+  supported_entities[]
+  supported_timeframes[]
+  freshness_profile
+  source_types[]
+  providers[]
+  reliability_profile
+  limitations[]
+  availability
+  provenance
+  version
+  status
+}
+```
+
+A domain represents an information category.
+
+It does not represent a single data provider.
+
+---
+
+# 4. Market Intelligence
+
+Market intelligence describes observable market conditions.
+
+It may include:
+
+```text id="a4f1qx"
+PRICE
+VOLUME
+VOLATILITY
+LIQUIDITY
+MARKET_CAP
+RETURNS
+PRICE_STRUCTURE
+MARKET_BREADTH
+CORRELATIONS
+RELATIVE_PERFORMANCE
+MARKET_STRUCTURE
+```
+
+Market data should preserve:
+
+* asset
+* venue/provider
+* timestamp
+* timeframe
+* measurement
+* unit
+* retrieval time
+* source
+* methodology where relevant
+
+Market observations are not automatically explanations.
+
+---
+
+# 5. Price Data
+
+Price observations may include:
+
+* open
+* high
+* low
+* close
+* last price
+* percentage change
+* absolute change
+* intraday movement
+* historical returns
+
+The system must preserve the timeframe.
+
+For example:
+
+```text
+1-minute
+5-minute
+1-hour
+4-hour
+daily
+weekly
+```
+
+A daily observation should not silently be treated as an intraday observation.
+
+---
+
+# 6. Volume
+
+Volume intelligence may include:
+
+* traded volume
+* volume change
+* relative volume
+* volume concentration
+* venue-level volume where available
+
+Volume should be interpreted in context.
+
+High volume may indicate:
+
+* increased participation
+* liquidation
+* accumulation
+* distribution
+* event-driven activity
+
+Volume alone does not establish the mechanism.
+
+---
+
+# 7. Liquidity
+
+Liquidity intelligence may include:
+
+* market depth
+* spreads
+* available liquidity
+* liquidity changes
+* slippage indicators
+* venue liquidity
+
+Liquidity conditions may help explain:
+
+* price impact
+* volatility
+* liquidation cascades
+* execution difficulty
+
+Liquidity measurements should preserve the source and observation timeframe.
+
+---
+
+# 8. Volatility
+
+Volatility intelligence may include:
+
+* realized volatility
+* implied volatility where available
+* volatility changes
+* volatility regime
+* intraday volatility
+* historical volatility
+
+Volatility should be distinguished from directional movement.
+
+A large price move does not by itself establish the underlying volatility regime.
+
+---
+
+# 9. Market Structure
+
+Market structure intelligence may include:
+
+* trend structure
+* breakout/breakdown behavior
+* support/resistance observations
+* range structure
+* market breadth
+* relative strength
+* price concentration
+* structural regime changes
+
+Market structure is analytical information and should retain the underlying market observations used to derive it.
+
+---
+
+# 10. Macro Intelligence
+
+Macro intelligence provides information about broader economic conditions.
+
+It may include:
+
+```text id="m7e8pw"
+INTEREST RATES
+INFLATION
+EMPLOYMENT
+GDP
+CENTRAL BANK POLICY
+LIQUIDITY
+CREDIT CONDITIONS
+CURRENCY CONDITIONS
+ECONOMIC CALENDAR
+GOVERNMENT DATA
+```
+
+Macro information should preserve:
+
+* release date
+* observation period
+* expected value where available
+* actual value
+* previous value
+* revision status
+* source
+* jurisdiction
+
+---
+
+# 11. Macro Expectations
+
+Where expectations are available, the system should distinguish:
+
+```text ACTUAL
+EXPECTED
+PREVIOUS
+REVISED
+```
+
+This distinction is important because market reaction may depend on the difference between expectations and actual results rather than the absolute value.
+
+The system must not invent expectations.
+
+---
+
+# 12. Central Bank Intelligence
+
+Central-bank information may include:
+
+* decisions
+* statements
+* meeting summaries
+* speeches
+* guidance
+* policy changes
+* balance-sheet information
+* liquidity measures
+
+Official statements should be preferred for direct factual claims.
+
+Interpretation remains separate from the original statement.
+
+---
+
+# 13. News Intelligence
+
+News intelligence may include:
+
+```text id="k0a7yp"
+BREAKING EVENTS
+COMPANY NEWS
+PROTOCOL NEWS
+REGULATORY EVENTS
+MACRO EVENTS
+SECURITY EVENTS
+PARTNERSHIPS
+PRODUCT RELEASES
+LEGAL DEVELOPMENTS
+MARKET EVENTS
+```
+
+News records should preserve:
+
+* event
+* source
+* publication time
+* update time
+* involved entities
+* claims
+* source relationships
+* event status
+
+---
+
+# 14. News Event vs News Article
+
+The system must distinguish:
+
+```text NEWS ARTICLE
+```
+
+from:
+
+```text UNDERLYING EVENT
+```
+
+Multiple articles may describe one event.
+
+The event should become the research object when appropriate, while articles remain source objects.
+
+---
+
+# 15. News Timeline
+
+Material events should be ordered chronologically.
+
+A timeline may include:
+
+```text EVENT
+→ FIRST REPORT
+→ OFFICIAL CONFIRMATION
+→ MARKET REACTION
+→ FOLLOW-UP
+→ CORRECTION / UPDATE
+```
+
+This helps causal analysis avoid incorrectly treating later information as an earlier cause.
+
+---
+
+# 16. Sentiment Intelligence
+
+Sentiment intelligence may include:
+
+* social sentiment
+* community sentiment
+* narrative strength
+* sentiment direction
+* sentiment changes
+* positioning signals
+* discussion volume
+* narrative concentration
+
+Sentiment is a signal, not automatically a factual observation about market direction.
+
+---
+
+# 17. Sentiment Limitations
+
+The system should consider:
+
+* bot activity
+* coordinated activity
+* sampling bias
+* platform bias
+* demographic bias
+* echo chambers
+* low-quality sources
+* sudden attention spikes
+
+Sentiment should not be treated as a representative sample of all market participants unless evidence supports that interpretation.
+
+---
+
+# 18. On-Chain Intelligence
+
+On-chain intelligence may include:
+
+```text id="s6d8hw"
+TRANSACTIONS
+ACTIVE ADDRESSES
+TOKEN FLOWS
+EXCHANGE FLOWS
+WALLET ACTIVITY
+HOLDER DISTRIBUTION
+CONTRACT ACTIVITY
+PROTOCOL ACTIVITY
+TVL
+BRIDGE ACTIVITY
+NETWORK USAGE
+```
+
+On-chain observations must preserve:
+
+* network
+* contract/token
+* block/time
+* metric definition
+* source
+* methodology
+* aggregation method
+
+---
+
+# 19. On-Chain Interpretation
+
+On-chain observations should not automatically be assigned a market interpretation.
+
+For example:
+
+```text
+Exchange inflows increased.
+```
+
+is an observation.
+
+It does not automatically mean:
+
+```text
+Selling will increase.
+```
+
+The latter is an interpretation or hypothesis requiring additional reasoning.
+
+---
+
+# 20. Technical Intelligence
+
+Technical intelligence may include:
+
+```text id="j5v0ap"
+TREND
+MOMENTUM
+MOVING AVERAGES
+RSI
+MACD
+VOLATILITY
+SUPPORT/RESISTANCE
+BREAKOUTS
+PATTERNS
+MARKET STRUCTURE
+```
+
+Technical outputs must preserve:
+
+* underlying asset
+* timeframe
+* indicator configuration
+* data window
+* calculation methodology
+* timestamp
+
+Indicators should not be treated as independent evidence when they derive from the same underlying price data.
+
+---
+
+# 21. Technical Indicator Independence
+
+The system must recognize that:
+
+```text
+RSI
++
+MACD
++
+Moving Average
+```
+
+may all derive from the same price series.
+
+They should not automatically be counted as three independent confirmations.
+
+This principle connects technical intelligence to Evidence Intelligence.
+
+---
+
+# 22. Derivatives Intelligence
+
+Derivatives intelligence may include:
+
+```text id="p6avwq"
+OPEN INTEREST
+FUNDING
+BASIS
+LIQUIDATIONS
+OPTIONS
+IMPLIED VOLATILITY
+PUT/CALL INFORMATION
+POSITIONING
+TERM STRUCTURE
+```
+
+Derivatives information may help investigate:
+
+* leverage
+* positioning
+* liquidation events
+* market stress
+* hedging
+* expectations
+
+Interpretation remains separate from observation.
+
+---
+
+# 23. Liquidation Intelligence
+
+Liquidation data may include:
+
+* liquidation volume
+* direction
+* timing
+* asset
+* venue
+* concentration
+* changes in liquidation intensity
+
+Liquidations may be evidence in causal analysis but should not automatically be treated as the cause of a market move.
+
+Temporal ordering and alternative explanations must be considered.
+
+---
+
+# 24. Ecosystem Intelligence
+
+Ecosystem intelligence covers developments surrounding an asset, protocol, or network.
+
+It may include:
+
+* protocol activity
+* developer activity
+* integrations
+* ecosystem growth
+* partnerships
+* product launches
+* governance
+* user activity
+* token utility
+* competitive developments
+
+The system should distinguish documented ecosystem facts from narrative interpretation.
+
+---
+
+# 25. Regulation Intelligence
+
+Regulatory intelligence may include:
+
+```text id="p3qj1x"
+REGULATORY ACTIONS
+LEGAL CASES
+POLICY CHANGES
+LICENSES
+ENFORCEMENT
+GOVERNMENT STATEMENTS
+JURISDICTIONAL DEVELOPMENTS
+```
+
+Regulatory information should preserve:
+
+* jurisdiction
+* authority
+* legal status
+* publication date
+* effective date
+* source
+* affected entities
+
+Draft proposals must not be treated as enacted rules.
+
+---
+
+# 26. Historical Intelligence
+
+Historical intelligence provides information for precedent analysis.
+
+It may include:
+
+* previous market events
+* previous macro environments
+* previous protocol events
+* previous regulatory events
+* previous price reactions
+* historical hypotheses
+* historical research
+* prior thesis evaluations
+
+Historical data must retain its original timeframe and context.
+
+---
+
+# 27. Historical Comparability
+
+The system should distinguish:
+
+```text SURFACE SIMILARITY
+```
+
+from:
+
+```text CAUSAL / STRUCTURAL SIMILARITY
+```
+
+A historical event that merely looks similar should not automatically receive high relevance.
+
+Historical comparisons should consider:
+
+* market regime
+* macro environment
+* liquidity
+* mechanism
+* participants
+* asset state
+* event magnitude
+* timeframe
+* structural conditions
+
+---
+
+# 28. Data Normalization
+
+Different data providers may use different:
+
+* units
+* timestamps
+* symbols
+* asset identifiers
+* timezones
+* aggregation methods
+* decimal precision
+* naming conventions
+
+The data layer should normalize these representations while preserving the original source representation.
+
+```text id="p3b6qa"
+RAW DATA
+→ NORMALIZED DATA
+→ SOURCE REFERENCE
+→ OBSERVATION
+```
+
+Normalization must not destroy provenance.
+
+---
+
+# 29. Entity Resolution
+
+The system must resolve references such as:
+
+```text BTC
+Bitcoin
+XBT
+Bitcoin USD
+BTC/USD
+BTCUSDT
+```
+
+to the correct underlying entity where appropriate.
+
+Ambiguous entities must not be silently resolved when the distinction materially changes the research.
+
+---
+
+# 30. Time Resolution
+
+Every time-sensitive observation should preserve:
+
+```text OBSERVATION_TIME
+PUBLICATION_TIME
+RETRIEVAL_TIME
+TIMEZONE
+TIMEFRAME
+```
+
+These timestamps have different meanings.
+
+The system must not substitute one for another.
+
+---
+
+# 31. Data Freshness
+
+Freshness requirements vary by domain.
+
+Examples:
+
+```text LIVE PRICE
+→ very high freshness
+
+BREAKING NEWS
+→ high freshness
+
+MACRO RELEASE
+→ release-dependent
+
+TECHNICAL INDICATOR
+→ dependent on underlying market data
+
+HISTORICAL EVENT
+→ stable
+
+PROTOCOL HISTORY
+→ relatively stable
+```
+
+Freshness should be evaluated relative to the research objective.
+
+---
+
+# 32. Data Quality
+
+Data quality dimensions include:
+
+* completeness
+* accuracy
+* consistency
+* timeliness
+* source reliability
+* methodology transparency
+* granularity
+* coverage
+* independence
+* reproducibility
+
+Low-quality data may remain useful if its limitations are explicit.
+
+---
+
+# 33. Missing Data
+
+Missing data should be represented explicitly.
+
+Possible states:
+
+```text id="p0x3ax"
+AVAILABLE
+PARTIALLY_AVAILABLE
+MISSING
+UNAVAILABLE
+UNKNOWN
+STALE
+INVALID
+```
+
+Missing data must not be filled with invented values.
+
+Where estimation is used, it must be explicitly classified as an estimate or model output.
+
+---
+
+# 34. Data Conflicts
+
+When providers disagree, the system should evaluate:
+
+* source quality
+* timestamp
+* methodology
+* coverage
+* aggregation
+* entity definition
+* measurement definition
+* update status
+
+It should not automatically select the most recent value.
+
+Material conflicts should remain visible in the evidence chain.
+
+---
+
+# 35. Cross-Domain Relationships
+
+The data layer should support relationships between domains.
+
+Examples:
+
+```text id="6h4k0f"
+MACRO EVENT
+→ NEWS COVERAGE
+→ MARKET REACTION
+
+ONCHAIN FLOW
+→ MARKET LIQUIDITY
+→ PRICE MOVEMENT
+
+DERIVATIVES POSITIONING
+→ LIQUIDATIONS
+→ MARKET VOLATILITY
+
+REGULATORY EVENT
+→ SENTIMENT CHANGE
+→ MARKET RESPONSE
+```
+
+These are relationships to investigate, not predetermined causal truths.
+
+---
+
+# 36. Data-to-Evidence Boundary
+
+The data layer produces observations.
+
+Evidence Intelligence determines whether an observation supports or contradicts a claim.
+
+Example:
+
+```text id="y3g4qd"
+DATA:
+BTC fell 8%.
+
+EVIDENCE QUESTION:
+Does this support the claim that a particular event caused the decline?
+
+```
+
+The data point alone does not answer the causal question.
+
+---
+
+# 37. Data-to-Hypothesis Boundary
+
+Hypotheses should be built from observations and claims.
+
+The data layer should not independently declare:
+
+> “This proves the market will rise.”
+
+Instead:
+
+```text id="7j9v6f"
+OBSERVATION
+→ CLAIM
+→ HYPOTHESIS
+→ TEST
+→ ANALYSIS
+→ JUDGMENT
+```
+
+---
+
+# 38. Domain Selection
+
+The orchestrator should select domains according to the research objective.
+
+Examples:
+
+### What happened?
+
+Likely:
+
+```text
+NEWS
+MARKET
+MACRO
+```
+
+### Why did it happen?
+
+Potentially:
+
+```text
+NEWS
+MARKET
+MACRO
+DERIVATIVES
+ONCHAIN
+SENTIMENT
+```
+
+depending on the event.
+
+### Does my thesis hold?
+
+Potentially:
+
+```text
+MARKET
+MACRO
+TECHNICAL
+ONCHAIN
+DERIVATIVES
+NEWS
+```
+
+depending on thesis structure.
+
+### What could affect it?
+
+The orchestrator should identify the relevant domains rather than automatically querying all domains.
+
+---
+
+# 39. Domain Expansion
+
+New domains may be activated when:
+
+* evidence reveals an unexplained factor
+* a hypothesis requires new information
+* a contradiction appears
+* the trader requests another domain
+* monitoring detects a relevant change
+* framework requirements require additional evidence
+
+Expansion should preserve the original research objective.
+
+---
+
+# 40. Domain Exclusion
+
+The trader may explicitly exclude domains.
+
+Example:
+
+```text
+"Ignore sentiment for this research."
+```
+
+The domain becomes excluded from the active scope unless the trader changes that state.
+
+If excluding the domain creates a material evidence limitation, the system should disclose the limitation.
+
+---
+
+# 41. Data Provider Abstraction
+
+The research engine should not directly depend on individual providers.
+
+Instead:
+
+```text id="2t3a8n"
+DATA DOMAIN
+```text
+      ↓
+CAPABILITY
+      ↓
+PROVIDER ADAPTER
+      ↓
+```
+DATA SOURCE
+```
+
+This allows providers to be replaced without redesigning the research engine.
+
+---
+
+# 42. Provider Adapter
+
+```text id="5f4z2k"
+PROVIDER_ADAPTER {
+  id
+  provider
+  domain_refs[]
+  capabilities[]
+  input_schema
+  output_schema
+  authentication
+  rate_limits
+  freshness
+  reliability
+  limitations
+  status
+}
+```
+
+Adapters normalize provider-specific interfaces into the internal data model.
+
+---
+
+# 43. Raw Data Preservation
+
+Where practical, the system should preserve references to the original provider response.
+
+This supports:
+
+* reproducibility
+* auditing
+* debugging
+* evidence verification
+* historical reconstruction
+
+The normalized observation remains the primary research representation.
+
+---
+
+# 44. Derived Data
+
+Derived metrics should preserve their derivation.
+
+Example:
+
+```text id="g5j2vk"
+RAW PRICE DATA
+→ CALCULATION
+→ VOLATILITY METRIC
+```
+
+The derived metric should record:
+
+* input data
+* calculation
+* parameters
+* execution time
+* provider/tool
+* methodology
+
+Derived data should not masquerade as raw observation.
+
+---
+
+# 45. Model-Generated Data
+
+Model-generated interpretations, estimates, classifications, or forecasts must be labeled separately from observed data.
+
+Possible type:
+
+```text MODEL_OUTPUT
+```
+
+Model output may contribute to analysis but should not be silently treated as externally verified evidence.
+
+---
+
+# 46. Quantitative Integrity
+
+Numerical observations should preserve:
+
+* units
+* scale
+* precision
+* timeframe
+* calculation method
+* denominator where relevant
+* source
+
+The system should avoid false precision.
+
+If a provider reports an approximate value, the internal representation should preserve that limitation.
+
+---
+
+# 47. Market Regime
+
+Where relevant, the system may characterize market regime using available observations.
+
+Possible descriptive states:
+
+```text id="xk1f5e"
+TRENDING
+RANGING
+HIGH_VOLATILITY
+LOW_VOLATILITY
+RISK_ON
+RISK_OFF
+LIQUIDITY_STRESSED
+TRANSITIONAL
+UNKNOWN
+```
+
+Regime labels are analytical interpretations.
+
+They should retain the observations and methodology supporting them.
+
+---
+
+# 48. Information Freshness Across Domains
+
+When combining domains, the system should consider whether timestamps are compatible.
+
+Example:
+
+```text NEWS: 10:02
+PRICE: 10:04
+MACRO: previous day
+ONCHAIN: 10:03
+```
+
+The analysis must not imply that all observations represent the same temporal state without checking.
+
+---
+
+# 49. Data Quality Escalation
+
+If a critical domain has poor data quality, the system may:
+
+```text id="z5p7lm"
+TRY ANOTHER PROVIDER
+→ TRY PRIMARY SOURCE
+→ USE ALTERNATIVE DATA
+→ REDUCE CLAIM CONFIDENCE
+→ IDENTIFY INFORMATION GAP
+→ ASK TRADER IF NECESSARY
+```
+
+The system must not compensate for missing data by inventing certainty.
+
+---
+
+# 50. Monitoring Integration
+
+Monitoring may subscribe to domain signals such as:
+
+* price changes
+* macro releases
+* news events
+* sentiment shifts
+* on-chain activity
+* derivatives changes
+* regulatory events
+
+MONITOR determines whether a signal is materially relevant.
+
+The data layer supplies the observation.
+
+---
+
+# 51. Research Memory Integration
+
+Historical domain observations may be stored as research memory when appropriate.
+
+Memory must preserve:
+
+* domain
+* source
+* observation time
+* research context
+* freshness
+* provenance
+
+Historical data should not silently become current evidence.
+
+---
+
+# 52. Framework Integration
+
+Framework evaluation may request specific domains.
+
+For example:
+
+```text id="c4o8vj"
+FRAMEWORK FACTOR:
+"Network activity must be increasing."
+
+EVIDENCE REQUIREMENT:
+ONCHAIN ACTIVITY
+
+→ ONCHAIN DOMAIN
+→ DATA RETRIEVAL
+→ EVIDENCE
+→ FACTOR EVALUATION
+```
+
+The framework's evidence requirement controls the research need.
+
+The data layer supplies the information.
+
+---
+
+# 53. Challenge Integration
+
+CHALLENGE may request specific data to test invalidation conditions.
+
+Example:
+
+```text id="a7y5xw"
+THESIS:
+BTC strength is sustainable.
+
+INVALIDATION CONDITION:
+Leverage becomes excessive while liquidity deteriorates.
+
+CHALLENGE
+→ DERIVATIVES
+→ LIQUIDITY
+→ MARKET DATA
+```
+
+---
+
+# 54. Data Domain Completion
+
+A domain investigation is complete when:
+
+* required observations are retrieved
+* source/provenance is preserved
+* freshness is appropriate
+* major data limitations are known
+* relevant conflicts are identified
+* required evidence has been handed to Evidence Intelligence
+* further retrieval has low expected information value
+
+---
+
+# 55. Global Data Loop
+
+```text id="c7b2q4"
+RESEARCH OBJECTIVE
+```text
+        ↓
+INFORMATION REQUIREMENT
+        ↓
+SELECT RELEVANT DATA DOMAINS
+        ↓
+IDENTIFY CAPABILITIES
+        ↓
+SELECT PROVIDERS
+        ↓
+RETRIEVE DATA
+        ↓
+NORMALIZE
+        ↓
+VALIDATE
+        ↓
+PRESERVE RAW REFERENCE
+        ↓
+CREATE OBSERVATIONS
+        ↓
+PRESERVE TIMING + PROVENANCE
+        ↓
+HAND OFF TO EVIDENCE INTELLIGENCE
+        ↓
+UPDATE CLAIMS / HYPOTHESES
+        ↓
+REASSESS DATA REQUIREMENTS
+        ↓
+```
+EXPAND / NARROW / STOP
+```
+
+# Global Principle
+
+The Data & Market Intelligence Layer exists to make the research engine aware of the relevant information environment.
+
+It does not decide what the information means.
+
+**Data provides observations.
+Evidence determines evidentiary value.
+Hypotheses explain possibilities.
+Analysis connects information.
+Judgment produces the current assessment.
+The trader makes the decision.**
+
+```
+```

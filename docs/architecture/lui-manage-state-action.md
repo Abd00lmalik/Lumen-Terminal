@@ -1,0 +1,212 @@
+---
+title: "MANAGE_STATE"
+source: MANAGE_STATE.txt
+converted: 2026-09-12
+type: architecture-spec
+related: [lui-universal-core.md, object-lifecycle-state-machine.md]
+---
+
+**Related documents:** `lui-universal-core.md` · `object-lifecycle-state-machine.md`
+
+> Converted from `MANAGE_STATE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+
+MANAGE_STATE
+
+Definition:
+Universal workspace-state management. It controls active research objects, their lifecycle, organization, relationships, priorities, constraints, and reversible changes. Flow-specific state operations can extend it when necessary.
+
+MANAGE_STATE {
+  operation {
+    type,
+    target,
+    requested_change,
+    resolution,
+    confidence
+  }
+
+  target {
+    object,
+    branch,
+    workspace,
+    relationship,
+    session,
+    snapshot
+  }
+
+  state_change {
+    current_state,
+    requested_state,
+    affected_objects,
+    propagated_changes
+  }
+
+  history {
+    prior_state,
+    provenance,
+    reversible,
+    checkpoint_refs,
+    snapshot_refs
+  }
+
+  persistence {
+    session_only,
+    persistent,
+    confirmation_required
+  }
+
+  dependencies {
+    object_dependencies,
+    execution_dependencies,
+    relationship_dependencies
+  }
+
+  constraints {
+    active_constraints,
+    changed_constraints,
+    hard_constraints,
+    preferences
+  }
+
+  lifecycle {
+    status,
+    priority,
+    ownership,
+    lock_state,
+    visibility,
+    archive_state
+  }
+}
+
+The supported state operations now include:
+
+Core mutation
+
+Change active target
+Change research objective/intent
+Change research mode
+Change scope
+Change depth
+Change timeframe
+Change constraints
+Change completion criteria
+Change assigned Skill
+Change research strategy/tool strategy
+Change confidence annotation
+Change evidence inclusion/prioritization
+
+Research control
+
+Pause/resume branches
+Cancel branches explicitly
+Reprioritize branches
+Set branch limits
+Adapt resource allocation
+Set deadlines/time limits
+Add/remove execution dependencies
+Take/release control of a branch
+
+Organization
+
+Rename/label
+Pin/unpin
+Hide/collapse
+Group
+Tag
+Sort when sorting affects research prioritization
+Set priority/importance
+Archive/restore
+Lock/unlock
+Add annotations
+Add trust/verification annotations
+
+Relationships
+
+Create/remove relationships
+Modify relationships
+Update relationship status
+Lock critical relationships
+Create/remove object dependencies
+Preserve provenance throughout
+
+Reversibility
+
+Undo specific unambiguous changes
+Redo specific reversible changes
+Automatic checkpoints
+Named trader snapshots
+Restore whole workspace
+Selective snapshot restoration
+Branch-level checkpoint reset
+Branch-baseline reset
+Reversible deletion
+Permanent deletion only with explicit confirmation
+
+Historical state
+
+Open previous sessions explicitly
+Import selected compatible historical information
+Preserve historical origin/provenance
+Revalidate historical information only after explicit trader request
+Detect and mark likely stale information
+Keep stale information as historical context rather than current evidence
+Behavioral rules
+
+The most important rule is:
+
+MANAGE_STATE changes the active workspace without destroying the research trail.
+
+Clear ordinary changes execute immediately. Ambiguous changes require clarification. Consequential or persistent changes require confirmation.
+
+State changes propagate when their relationships are clear. Tightly coupled changes are atomic by default. Bulk operations are allowed when the target set is unambiguous.
+
+The agent controls execution and prioritization by default, but natural language gives the trader override authority.
+
+The agent can infer relationships, priorities, dependencies, statuses, grouping, tags, and critical objects. Trader overrides remain explicit and traceable.
+
+Temporary state is the default. Persistence happens only when explicitly requested.
+
+Previous research is never silently converted into current evidence. Historical information must be refreshed/revalidated before receiving current-evidence treatment.
+
+The agent may automatically adapt branch allocation, depth, status, relationships, and other operational state as research evolves, but locked objects/relationships and explicit hard constraints cannot be silently overridden.
+
+LUI examples
+
+The important point is that these are natural-language state mutations, not rigid commands:
+
+“Pause the sentiment investigation.”
+
+→ Pause that branch, preserve it, continue unaffected research.
+
+“Actually, focus on the last 24 hours.”
+
+→ Replace the active timeframe and adapt the investigation.
+
+“Undo what you just changed.”
+
+→ Identify the most recent unambiguous relevant mutation and reverse it.
+
+“Bring back the version before we expanded the scope.”
+
+→ Restore the relevant checkpoint while preserving subsequent history.
+
+“Keep this evidence out of the current analysis.”
+
+→ Exclude/prioritize it differently without deleting or altering its provenance.
+
+“Make macro research the priority.”
+
+→ Raise that branch's priority and reallocate research effort.
+
+“Save this as my baseline.”
+
+→ Create/replace the branch baseline, subject to persistence rules.
+
+Architecture boundary
+
+MANAGE_STATE should not become another research engine.
+
+Its responsibility is:
+
+Interpret state instruction → resolve target → validate change → mutate active state → preserve provenance/history → propagate safely → report result.
+
+Research itself remains the responsibility of RESEARCH, ANALYZE, CHALLENGE, and the eight flow-specific extensions.Active state can change, but the previous state and provenance remain preserved unless the trader explicitly requests permanent deletion.

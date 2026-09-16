@@ -1,0 +1,29 @@
+{
+  "name": "trading-research-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI Trading Research Workbench — Bitget AI Hackathon Track 3. Research, not execution.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "api": "tsx src/api/main.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "@vitest/ui": "^3.2.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.1.0",
+    "fastify": "^5.12.4"
+  }
+}

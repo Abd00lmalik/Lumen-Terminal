@@ -1,0 +1,578 @@
+RESEARCH MEMORY / KNOWLEDGE PERSISTENCE
+
+PURPOSE
+
+Research Memory preserves useful knowledge across research sessions so the workbench can maintain continuity without confusing historical information with current evidence.
+
+Memory exists to support:
+
+- Research continuity
+- Thesis evolution
+- Framework reuse
+- Historical precedent
+- Trader preferences
+- Previous judgments
+- Previous hypotheses
+- Prior research context
+- Monitoring continuity
+- Reusable evidence and provenance
+
+CORE PRINCIPLE
+
+Memory should improve continuity without silently turning old information into current evidence.
+
+The system must distinguish:
+
+CURRENT
+HISTORICAL
+PERSISTENT PREFERENCE
+PERSISTENT FRAMEWORK
+PRIOR RESEARCH
+ARCHIVED
+STALE
+INVALID
+
+MEMORY CATEGORIES
+
+1. RESEARCH MEMORY
+
+Stores prior research objects and their relationships.
+
+Examples:
+
+- Previous Research
+- Branches
+- Claims
+- Evidence
+- Hypotheses
+- Analyses
+- Judgments
+
+Research memory preserves provenance and original context.
+
+2. THESIS MEMORY
+
+Stores the evolution of trader theses.
+
+Includes:
+
+- Thesis statement
+- Thesis versions
+- Supporting research
+- Supporting evidence
+- Contradicting evidence
+- Confidence history
+- Invalidation conditions
+- Previous states
+- Material changes
+
+The system can use thesis history to understand evolution but must not assume an old thesis remains current.
+
+3. FRAMEWORK MEMORY
+
+Stores persistent trader frameworks.
+
+Includes:
+
+- Framework definition
+- Factors
+- Conditions
+- Required evidence
+- Weights
+- Thresholds
+- Evaluation rules
+- Versions
+- History
+
+Framework memory is reusable across research.
+
+4. PREFERENCE MEMORY
+
+Stores durable trader preferences that improve future research behavior.
+
+Examples:
+
+- Preferred research depth
+- Preferred output style
+- Preferred domains
+- Preferred evidence standards
+- Preferred notification behavior
+- Preferred analytical orientation
+
+Persistent preferences require the existing confirmation boundary when explicitly saved or materially changed.
+
+5. HISTORICAL KNOWLEDGE
+
+Stores information useful for precedent and context.
+
+Historical knowledge may inform future research but must never automatically become current evidence.
+
+6. MONITOR MEMORY
+
+Stores:
+
+- Previous monitors
+- Conditions
+- Trigger rules
+- Alert history
+- Adaptations
+- Expiration
+- Pause/stop history
+- Provenance
+- Lineage
+
+Restoring a monitor requires revalidation.
+
+MEMORY ENTRY MODEL
+
+A persistent memory reference should contain:
+
+id
+type
+content
+source_object
+source_research
+created_at
+updated_at
+context
+provenance
+status
+freshness
+confidence
+relationships
+version/history
+usage_constraints
+
+The exact storage implementation is deferred.
+
+MEMORY VS CURRENT STATE
+
+Memory is not the same as active workspace state.
+
+Example:
+
+A previous judgment may exist in memory.
+
+That does not make it the current judgment.
+
+A historical thesis may exist in memory.
+
+That does not make it the active thesis.
+
+A previous piece of evidence may exist in memory.
+
+That does not make it current evidence.
+
+CURRENT STATE always takes precedence for the active investigation.
+
+MEMORY RETRIEVAL
+
+The agent should retrieve memory when it is materially relevant.
+
+Relevant signals include:
+
+- Same asset
+- Same event
+- Same thesis
+- Same framework
+- Same research question
+- Related historical precedent
+- Relevant prior conclusion
+- Relevant trader preference
+- Existing monitor
+- Previous unresolved question
+
+The agent should not retrieve large amounts of unrelated memory merely because they exist.
+
+MEMORY CONFIDENCE
+
+Memory entries may have confidence.
+
+However, memory confidence does not automatically determine the truth of current information.
+
+Example:
+
+A historical research conclusion can have high confidence historically while still being irrelevant to current market conditions.
+
+FRESHNESS
+
+Memory entries should carry freshness metadata where applicable.
+
+The agent should determine whether memory is:
+
+CURRENTLY RELEVANT
+HISTORICALLY RELEVANT
+STALE
+INVALID
+UNKNOWN
+
+Freshness should be evaluated against the research context.
+
+MEMORY REVALIDATION
+
+Historical or stale memory should be revalidated before being treated as current evidence.
+
+The agent should preserve the original memory even when revalidation changes its current usefulness.
+
+Example:
+
+Historical Evidence
+→ retrieved
+→ revalidated
+→ current relevance confirmed
+→ eligible for current research
+
+or:
+
+Historical Evidence
+→ retrieved
+→ revalidated
+→ outdated
+→ remains historical
+
+MEMORY AND EVIDENCE
+
+Evidence may be reusable across multiple research objects.
+
+However, reuse must preserve:
+
+- Original source
+- Original observation
+- Original timestamp
+- Original context
+- Current freshness
+- Research contexts in which it was used
+
+The same evidence can support different research objects without becoming duplicated evidence.
+
+MEMORY AND HYPOTHESES
+
+Previous hypotheses may be retrieved when investigating similar questions.
+
+Historical hypotheses should be clearly identified as historical.
+
+The agent may use them to generate candidate explanations or compare precedent.
+
+It must not automatically treat historical hypotheses as current hypotheses.
+
+MEMORY AND JUDGMENTS
+
+Previous judgments remain available for comparison.
+
+When a new judgment materially differs from a previous judgment, the system should preserve both.
+
+The agent should be able to explain:
+
+"What changed?"
+
+using:
+
+- New evidence
+- Changed evidence quality
+- Changed hypotheses
+- Changed assumptions
+- Changed market conditions
+- Changed thesis context
+
+MEMORY AND THESIS EVOLUTION
+
+The system should maintain thesis lineage.
+
+Example:
+
+```text
+Thesis v1
+   ↓
+new evidence
+   ↓
+Thesis weakened
+   ↓
+revised thesis
+   ↓
+Thesis v2
+````
+
+The original thesis remains historical.
+
+The current thesis remains clearly identifiable.
+
+The system must never silently rewrite the historical thesis.
+
+MEMORY AND FRAMEWORKS
+
+Frameworks are persistent reusable knowledge.
+
+When a framework changes:
+
+```text
+Framework v1
+→ Framework v2
+→ Framework v3
+```
+
+Previous versions remain available.
+
+Research evaluated under v1 should retain the fact that v1 was used.
+
+Changing the current framework must not retroactively rewrite historical evaluations.
+
+MEMORY AND MONITORING
+
+Monitoring can use persistent memory to restore context.
+
+When a monitor is restored:
+
+1. Retrieve original research.
+2. Retrieve linked thesis/judgment/hypotheses.
+3. Retrieve conditions.
+4. Check current context.
+5. Revalidate conditions.
+6. Determine whether the monitor remains relevant.
+7. Restore only if validation passes.
+
+MEMORY SEARCH
+
+Memory retrieval should be semantic and context-aware rather than simple keyword matching.
+
+The agent should prioritize:
+
+1. Directly relevant current context
+2. Same research/thesis/framework
+3. Strong historical relevance
+4. Relevant prior decisions
+5. Broader contextual knowledge
+
+The system should avoid flooding the workspace with retrieved memory.
+
+MEMORY INJECTION
+
+Retrieved memory should enter the research process as explicitly labelled context.
+
+Example:
+
+```text
+CURRENT EVIDENCE
+HISTORICAL CONTEXT
+TRADER PREFERENCE
+PRIOR JUDGMENT
+PRIOR HYPOTHESIS
+FRAMEWORK
+```
+
+The agent must preserve these distinctions.
+
+Memory must never silently masquerade as newly researched evidence.
+
+MEMORY CONFLICTS
+
+If memory conflicts with current evidence:
+
+Current validated evidence takes precedence for current research.
+
+Historical memory remains preserved.
+
+The conflict may itself be useful and should be surfaced when materially relevant.
+
+Example:
+
+Historical conclusion:
+Bullish
+
+Current evidence:
+Bearish
+
+Result:
+
+Historical conclusion remains available as historical context.
+
+Current judgment is based on current evidence.
+
+MEMORY PROMOTION
+
+Not every piece of research should automatically become persistent memory.
+
+The agent should distinguish:
+
+TEMPORARY RESEARCH STATE
+HISTORICAL RESEARCH
+REUSABLE KNOWLEDGE
+PERSISTENT MEMORY
+
+Materially useful information may be promoted to persistent memory when appropriate.
+
+Explicit SAVE can intentionally preserve reusable knowledge.
+
+MEMORY DECAY
+
+Memory should not disappear simply because it becomes old.
+
+Instead:
+
+OLD → HISTORICAL / STALE
+
+The system preserves the information but reduces its eligibility for current use.
+
+This protects research history.
+
+MEMORY INVALIDATION
+
+When memory is discovered to be invalid:
+
+* Mark it INVALID.
+* Preserve provenance.
+* Prevent current use.
+* Preserve historical context where appropriate.
+* Record why it became invalid.
+
+Invalid memory should not silently influence future research.
+
+MEMORY DELETION
+
+Normal deletion is reversible.
+
+Permanent deletion requires explicit trader confirmation.
+
+Deleting memory should not silently delete the original research object if the original still exists.
+
+Likewise, deleting an original object should not automatically erase every historical reference unless explicitly required by permanent deletion.
+
+MEMORY RESTORATION
+
+Restoring archived memory requires revalidation when the information could have changed.
+
+Restoration must preserve original provenance.
+
+MEMORY LEARNING
+
+The system may learn from repeated research behavior.
+
+Examples:
+
+* Repeatedly preferred research depth
+* Repeatedly preferred domains
+* Repeated framework usage
+* Repeated notification preferences
+
+However, persistent learning should be conservative.
+
+Repeated behavior should not automatically become a permanent preference when the consequence is material.
+
+Explicit trader confirmation should be used for consequential persistent learning.
+
+MEMORY FORGETTING
+
+The trader may remove persistent memory.
+
+The system should identify affected behaviors or objects where relevant.
+
+Removing a memory should stop future influence while preserving historical research unless the trader explicitly chooses to delete the underlying historical object.
+
+MEMORY GOVERNANCE
+
+The agent manages retrieval and organization.
+
+The trader controls consequential persistent memory changes.
+
+The agent may automatically use relevant historical context.
+
+The agent must not silently create consequential persistent preferences.
+
+The trader can override or remove memory influence.
+
+PROGRESSIVE DISCLOSURE
+
+Memory should normally remain invisible when it does not materially affect the answer.
+
+When memory materially affects research, the system should make the relevant context visible.
+
+Example:
+
+"Your previous thesis evaluation is relevant here."
+
+The trader can then request:
+
+"Show me what you used."
+
+The system exposes the relevant memory, provenance, and relationship path.
+
+MEMORY AND RESEARCH CONTINUITY
+
+The persistent research loop is:
+
+QUESTION
+→ RESEARCH
+→ JUDGMENT
+→ THESIS
+→ MONITOR
+→ NEW EVIDENCE
+→ REASSESSMENT
+→ MEMORY
+→ FUTURE RESEARCH
+
+Memory provides continuity across sessions without replacing fresh research.
+
+GLOBAL PRINCIPLE
+
+Memory exists to preserve useful knowledge and continuity, not to avoid doing current research.
+
+Historical knowledge informs.
+
+Current evidence decides.
+
+Trader preferences guide.
+
+Frameworks evaluate.
+
+Prior judgments provide context.
+
+The agent must always maintain these distinctions.
+
+````
+
+I would **save this as a text file** too:
+
+```text
+RESEARCH_MEMORY.txt
+````
+
+Later Codex can convert it to:
+
+```text
+RESEARCH_MEMORY.md
+```
+
+At this point, the major conceptual architecture is becoming quite complete:
+
+```text
+CORE
+LUI
+RESEARCH
+ANALYZE
+CHALLENGE
+MANAGE_STATE
+MONITOR
+SAVE
+
+FLOWS/
+  8 research flows
+
+OBJECTS/
+  Research
+  Branch
+  Claim
+  Evidence
+  Hypothesis
+  Analysis
+  Judgment
+  Thesis
+  Framework
+  Monitor
+  Source
+  Snapshot
+  Annotation
+  Saved Artifact
+
+ARCHITECTURE/
+  Object Lifecycle
+  Object Relationships
+  Research Memory

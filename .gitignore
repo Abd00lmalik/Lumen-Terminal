@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+coverage/
+
+# Environment & secrets — NEVER commit
+.env
+.env.*
+!.env.example
+
+# Local runtime state
+.data/
+*.log
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.local
+.idea/
+.vscode/

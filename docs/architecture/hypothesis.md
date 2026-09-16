@@ -1,0 +1,1423 @@
+---
+title: "HYPOTHESIS INTELLIGENCE"
+source: HYPOTHESIS INTELLIGENCE.txt
+converted: 2026-09-12
+type: architecture-spec
+related: [branch.md, analysis-synthesis.md, evidence-source.md, research-flows.md, thesis-monitor-reassessment.md, framework.md]
+---
+
+**Related documents:** `branch.md` · `analysis-synthesis.md` · `evidence-source.md` · `research-flows.md` · `thesis-monitor-reassessment.md` · `framework.md`
+
+> Converted from `HYPOTHESIS INTELLIGENCE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+
+HYPOTHESIS INTELLIGENCE
+
+Purpose
+-------
+
+Hypothesis Intelligence is the system responsible for creating, evaluating, ranking, testing, weakening, strengthening, replacing, and preserving competing explanations or interpretations during research.
+
+A hypothesis is not a fact.
+
+A hypothesis is a candidate explanation, interpretation, causal model, or conditional proposition that may explain the available evidence.
+
+The system must treat hypotheses as living research objects.
+
+Core principle:
+
+The system should not merely find evidence that supports the first plausible explanation.
+
+It should continuously compare competing explanations and allocate research toward evidence that can distinguish between them.
+
+
+1. HYPOTHESIS MODEL
+-------------------
+
+HYPOTHESIS {
+  id
+
+  statement
+  type
+
+  research_ref
+  branch_ref
+
+  conclusion
+  assumptions
+  dependencies
+  causal_links
+
+  supporting_claims[]
+  contradicting_claims[]
+  evidence_refs[]
+
+  alternative_refs[]
+
+  ranking
+  confidence
+
+  status
+
+  expected_observations[]
+  disconfirming_observations[]
+  invalidation_conditions[]
+
+  unresolved_questions[]
+
+  created_at
+  updated_at
+
+  provenance
+  history
+}
+
+
+2. HYPOTHESIS PURPOSE
+--------------------
+
+A hypothesis exists to provide a candidate explanation or interpretation that can be tested against evidence.
+
+Examples:
+
+- Why an asset moved.
+- Why sentiment changed.
+- Why a market pattern appeared.
+- Why an event produced a particular outcome.
+- Whether a trader's thesis is supported.
+- Whether two observed signals share a causal relationship.
+- Whether a historical pattern is relevant to the current situation.
+
+Hypotheses may also represent:
+
+- Alternative interpretations.
+- Competing causal explanations.
+- Conditional scenarios.
+- Explanations for unexpected evidence.
+
+
+3. HYPOTHESIS TYPES
+-------------------
+
+The system should support different hypothesis types.
+
+Examples:
+
+CAUSAL
+A candidate cause explains an observed outcome.
+
+INTERPRETIVE
+A candidate interpretation explains the meaning of available information.
+
+PREDICTIVE
+A candidate expectation describes what may happen under specified conditions.
+
+EXPLANATORY
+A broader explanation of an event or pattern.
+
+THESIS_COMPONENT
+A hypothesis concerning a component of a trader's thesis.
+
+ALTERNATIVE
+A competing explanation to the current leading hypothesis.
+
+FALSIFICATION
+A hypothesis specifically constructed to test whether an existing interpretation is wrong.
+
+HISTORICAL
+A hypothesis derived from historical precedent.
+
+FRAMEWORK
+A hypothesis concerning whether a framework factor or assumption explains an observed result.
+
+
+4. HYPOTHESIS CREATION
+----------------------
+
+The system may create a hypothesis when:
+
+- Evidence suggests a plausible explanation.
+- Multiple explanations could explain the same observation.
+- A causal relationship needs testing.
+- A contradiction requires explanation.
+- A trader challenges the current interpretation.
+- Research discovers an unexpected development.
+- Historical comparison suggests a potentially relevant mechanism.
+- Existing hypotheses fail to explain material evidence.
+
+The system must not create formal hypotheses for every observation.
+
+Formal hypothesis creation should occur when the candidate explanation materially affects research.
+
+
+5. HYPOTHESIS GENERATION
+------------------------
+
+Hypotheses may originate from:
+
+- Direct evidence.
+- Claims.
+- Contradictions.
+- Existing research.
+- Historical precedent.
+- Trader thesis.
+- Framework evaluation.
+- CHALLENGE.
+- MONITOR.
+- Unexpected findings.
+- Cross-domain relationships.
+
+Generated hypotheses must retain provenance indicating why they were created.
+
+
+6. HYPOTHESIS QUALITY
+--------------------
+
+A hypothesis should be evaluated based on:
+
+- Explanatory power.
+- Evidence support.
+- Evidence contradiction.
+- Causal coherence.
+- Consistency with known facts.
+- Specificity.
+- Ability to explain the observed outcome.
+- Alternative explanations.
+- Predictive or testable implications.
+- Assumption burden.
+- Dependence on unsupported claims.
+
+A hypothesis that explains more evidence with fewer unsupported assumptions should generally receive greater consideration.
+
+
+7. HYPOTHESIS STRUCTURE
+----------------------
+
+A complex hypothesis may be decomposed into:
+
+HYPOTHESIS
+```text
+├── CONCLUSION
+├── CLAIMS
+├── ASSUMPTIONS
+├── DEPENDENCIES
+├── CAUSAL LINKS
+├── EXPECTED OBSERVATIONS
+└── INVALIDATION CONDITIONS
+```
+
+This allows the system to test components independently.
+
+
+8. HYPOTHESIS ASSUMPTIONS
+-------------------------
+
+Hypotheses may depend on assumptions.
+
+Each material assumption should be identified.
+
+Examples:
+
+- A market participant behaved as expected.
+- A reported event actually occurred.
+- A relationship between two variables is causal.
+- A liquidity condition remained stable.
+- A regulatory interpretation is correct.
+
+Unsupported assumptions should reduce confidence where materially relevant.
+
+
+9. HYPOTHESIS DEPENDENCIES
+--------------------------
+
+A hypothesis may depend on:
+
+- Claims.
+- Evidence.
+- Other hypotheses.
+- External conditions.
+- Framework factors.
+- Historical assumptions.
+
+Dependencies should be represented in the object graph.
+
+If a critical dependency changes, the hypothesis must be reassessed.
+
+
+10. CAUSAL STRUCTURE
+-------------------
+
+For causal hypotheses, the system should represent:
+
+CAUSE
+→ MECHANISM
+→ INTERMEDIATE EFFECT
+→ OBSERVED OUTCOME
+
+The system should test the mechanism rather than simply observing that two events occurred together.
+
+Correlation alone should not automatically establish causality.
+
+
+11. EXPECTED OBSERVATIONS
+-------------------------
+
+A hypothesis should identify what evidence would be expected if it were correct.
+
+Expected observations may include:
+
+- Market behavior.
+- On-chain activity.
+- News developments.
+- Macro changes.
+- Sentiment changes.
+- Technical behavior.
+- Historical patterns.
+- Regulatory developments.
+
+Expected observations should be derived from the hypothesis.
+
+They must not be invented merely to make the hypothesis appear testable.
+
+
+12. DISCONFIRMING OBSERVATIONS
+-----------------------------
+
+The system should identify observations that would weaken or invalidate a hypothesis.
+
+Examples:
+
+- Expected mechanism does not occur.
+- A required condition fails.
+- Strong evidence supports an alternative explanation.
+- The observed outcome occurs without the hypothesized cause.
+- A critical assumption proves false.
+
+Disconfirming evidence is first-class research material.
+
+
+13. INVALIDATION CONDITIONS
+---------------------------
+
+A hypothesis may contain explicit invalidation conditions.
+
+A valid invalidation condition must be:
+
+- Relevant to the hypothesis.
+- Observable or testable.
+- Meaningful.
+- Based on the hypothesis structure.
+- Not an arbitrary threshold.
+
+If a condition is not objectively testable, it should be represented as uncertainty rather than false precision.
+
+
+14. COMPETING HYPOTHESES
+-----------------------
+
+When multiple explanations can plausibly explain the same evidence, the system should preserve them as competing hypotheses.
+
+Example:
+
+Observed event
+```text
+├── Hypothesis A
+├── Hypothesis B
+├── Hypothesis C
+└── Unknown / insufficient evidence
+```
+
+The system should avoid prematurely collapsing these into one explanation.
+
+
+15. HYPOTHESIS DIVERSITY
+-----------------------
+
+The system should maintain sufficient explanatory diversity when uncertainty is material.
+
+It should avoid:
+
+- Generating dozens of trivial alternatives.
+- Keeping obviously implausible explanations alive indefinitely.
+- Collapsing genuinely distinct explanations too early.
+
+The number of active hypotheses should be proportional to:
+
+- Uncertainty.
+- Complexity.
+- Evidence conflict.
+- Research importance.
+
+
+16. ALTERNATIVE EXPLANATIONS
+----------------------------
+
+An alternative explanation should be actively considered when it could:
+
+- Explain the same observed outcome.
+- Explain it with fewer assumptions.
+- Challenge the leading hypothesis.
+- Produce the same expected result through a different mechanism.
+- Change the final judgment.
+
+Alternative explanations are especially important in:
+
+- WHY DID IT HAPPEN?
+- DOES MY THESIS HOLD?
+- WHAT COULD PROVE ME WRONG?
+- WHAT DOES ALL THE INFORMATION SAY?
+
+
+17. ALTERNATIVE EXPLANATION SEARCH
+----------------------------------
+
+The system should search for alternatives when:
+
+- The leading hypothesis has significant uncertainty.
+- Evidence is observational rather than causal.
+- Multiple mechanisms are plausible.
+- Contradictory evidence exists.
+- The conclusion has high decision relevance.
+- CHALLENGE is explicitly invoked.
+
+The system should not manufacture alternatives solely for symmetry.
+
+
+18. HYPOTHESIS RANKING
+---------------------
+
+Hypotheses should be ranked according to:
+
+- Evidence support.
+- Evidence contradiction.
+- Evidence quality.
+- Explanatory power.
+- Causal coherence.
+- Alternative strength.
+- Assumption burden.
+- Current relevance.
+- Testability.
+- Remaining uncertainty.
+
+Ranking is comparative.
+
+A hypothesis may have strong evidence and still rank below another hypothesis if the alternative explains the evidence better.
+
+
+19. HYPOTHESIS CONFIDENCE
+------------------------
+
+Confidence describes how strongly the current evidence supports the hypothesis.
+
+Default levels:
+
+HIGH
+MODERATE
+LOW
+
+Confidence should consider:
+
+- Supporting evidence.
+- Contradicting evidence.
+- Evidence quality.
+- Alternative explanations.
+- Missing evidence.
+- Dependency stability.
+- Causal strength.
+- Currentness.
+
+Confidence is distinct from ranking.
+
+A hypothesis may have moderate confidence while still ranking first because alternatives are weaker.
+
+
+20. RANKING VS CONFIDENCE
+------------------------
+
+The system must distinguish:
+
+RANKING
+
+Which hypothesis currently has the strongest overall explanatory position.
+
+CONFIDENCE
+
+How strongly the available evidence supports that hypothesis.
+
+Example:
+
+Hypothesis A:
+Rank #1
+Confidence: Moderate
+
+Hypothesis B:
+Rank #2
+Confidence: Low
+
+This means A is currently preferred, not proven.
+
+
+21. HYPOTHESIS STATUS
+--------------------
+
+Possible states include:
+
+CANDIDATE
+Newly created but not substantially tested.
+
+UNDER_INVESTIGATION
+Active research is testing it.
+
+LEADING
+Currently strongest candidate.
+
+SUPPORTED
+Evidence strongly supports it.
+
+WEAKENED
+Material evidence has reduced confidence.
+
+REJECTED
+Evidence materially contradicts it.
+
+INCONCLUSIVE
+Available evidence cannot determine its status.
+
+HISTORICAL
+No longer active but preserved for provenance and learning.
+
+
+22. STATUS TRANSITIONS
+---------------------
+
+Typical lifecycle:
+
+CANDIDATE
+→ UNDER_INVESTIGATION
+→ LEADING
+→ SUPPORTED
+
+or:
+
+LEADING
+→ WEAKENED
+→ INCONCLUSIVE
+
+or:
+
+LEADING
+→ REJECTED
+
+or:
+
+SUPPORTED
+→ WEAKENED
+
+or:
+
+SUPPORTED
+→ HISTORICAL
+
+The lifecycle is not strictly linear.
+
+New evidence may reactivate a previously weakened or historical hypothesis when context warrants it.
+
+
+23. HYPOTHESIS TESTING
+---------------------
+
+Testing should ask:
+
+"What evidence would distinguish this hypothesis from its alternatives?"
+
+Testing may involve:
+
+- Source research.
+- Market data.
+- Historical comparison.
+- Technical analysis.
+- Macro analysis.
+- Sentiment.
+- On-chain data.
+- Regulatory information.
+- Cross-domain relationships.
+
+The execution engine determines the appropriate tools and Skills.
+
+
+24. DISCRIMINATING EVIDENCE
+---------------------------
+
+The highest-value evidence is often evidence that distinguishes competing hypotheses.
+
+Example:
+
+Hypothesis A predicts X.
+
+Hypothesis B predicts Y.
+
+Evidence that cannot distinguish A from B has limited discriminatory value.
+
+Evidence showing X while Y fails may materially increase A's ranking.
+
+The scheduler should prioritize such evidence when decision-relevant.
+
+
+25. INFORMATION VALUE OF HYPOTHESIS TESTING
+--------------------------------------------
+
+Expected information value should consider:
+
+- Probability the evidence changes ranking.
+- Magnitude of possible judgment change.
+- Importance of the affected claim.
+- Cost of obtaining evidence.
+- Current uncertainty.
+
+Research should prioritize tests capable of materially distinguishing hypotheses.
+
+
+26. HYPOTHESIS AND EVIDENCE UPDATES
+-----------------------------------
+
+When new evidence arrives:
+
+1. Identify affected hypotheses.
+2. Determine relationship.
+3. Assess evidence quality.
+4. Update support/contradiction.
+5. Recalculate relative ranking.
+6. Update confidence when warranted.
+7. Check invalidation conditions.
+8. Reassess dependent claims.
+9. Reassess analysis.
+10. Reassess judgment when material.
+11. Preserve previous state.
+
+New evidence must not silently erase prior reasoning.
+
+
+27. HYPOTHESIS CONTRADICTION
+----------------------------
+
+Contradictory evidence should not automatically reject a hypothesis.
+
+First determine:
+
+- Is the evidence reliable?
+- Does it address the same claim?
+- Is the timeframe compatible?
+- Is the evidence independent?
+- Does it actually contradict the mechanism?
+- Could the hypothesis accommodate the evidence?
+- Does the evidence indicate a missing condition?
+
+Possible outcomes:
+
+- No meaningful contradiction.
+- Hypothesis weakened.
+- Hypothesis conditionally modified.
+- Alternative explanation strengthened.
+- Hypothesis rejected.
+
+
+28. HYPOTHESIS MODIFICATION
+---------------------------
+
+A hypothesis may be refined when new evidence reveals:
+
+- Missing condition.
+- Incorrect assumption.
+- Incorrect causal link.
+- Incorrect scope.
+- Different timeframe.
+- Additional mechanism.
+
+Modification must preserve the previous hypothesis version.
+
+A materially changed hypothesis should become a new version or successor rather than silently rewriting history.
+
+
+29. HYPOTHESIS REPLACEMENT
+--------------------------
+
+When a hypothesis is no longer defensible:
+
+- Mark it REJECTED or HISTORICAL as appropriate.
+- Preserve evidence and reasoning.
+- Identify the reason for rejection.
+- Promote the strongest alternative if justified.
+- Continue research if uncertainty remains.
+
+Replacement must preserve lineage.
+
+
+30. HYPOTHESIS REACTIVATION
+---------------------------
+
+A historical or weakened hypothesis may become relevant again when:
+
+- New evidence supports it.
+- Current conditions resemble its original context.
+- An alternative hypothesis weakens.
+- Previously invalid assumptions become valid.
+- A monitor detects a relevant development.
+
+Reactivation requires current-context validation.
+
+
+31. HYPOTHESIS BRANCHING
+------------------------
+
+When an investigation diverges materially:
+
+CURRENT HYPOTHESIS
+├── Variant A
+├── Variant B
+└── Alternative explanation
+
+Branches should preserve:
+
+- Parent hypothesis.
+- Reason for branching.
+- Shared evidence.
+- Divergent assumptions.
+- Separate research tasks.
+- Result lineage.
+
+Branching should occur when explanations become materially distinct.
+
+
+32. HYPOTHESIS MERGING
+----------------------
+
+The system should not automatically merge hypotheses merely because they overlap.
+
+If two hypotheses are materially distinct, preserve them.
+
+Potential merging may occur only when:
+
+- Their explanatory mechanisms are substantially equivalent.
+- Differences are not decision-relevant.
+- Provenance can be preserved.
+
+The system should prefer preserving distinctions over premature simplification.
+
+
+33. HYPOTHESIS DEPENDENCIES
+---------------------------
+
+A hypothesis may depend on another hypothesis.
+
+Example:
+
+H1:
+Macro conditions caused liquidity contraction.
+
+H2:
+Liquidity contraction amplified the asset's price decline.
+
+H2 depends partly on H1.
+
+If H1 weakens, H2 must be reassessed.
+
+Dependency propagation should follow the existing graph rules.
+
+
+34. HYPOTHESIS RELATIONSHIPS
+----------------------------
+
+Supported relationship types include:
+
+- SUPPORTS
+- CONTRADICTS
+- ALTERNATIVE_TO
+- DEPENDS_ON
+- TESTS
+- CHALLENGES
+- DERIVED_FROM
+- BRANCHED_FROM
+- SUPERSEDES
+- RELATED_TO
+- INFORMS
+
+Relationships must preserve provenance and confidence where relevant.
+
+
+35. HYPOTHESIS GRAPH
+-------------------
+
+A complex research object may appear as:
+
+RESEARCH
+```text
+├── CLAIM A
+│   ├── Evidence 1
+│   └── Evidence 2
+│
+├── HYPOTHESIS A
+│   ├── Claim A
+│   ├── Evidence 1
+│   └── Expected observation X
+│
+├── HYPOTHESIS B
+│   ├── Claim A
+│   ├── Evidence 3
+│   └── Expected observation Y
+│
+└── JUDGMENT
+    ├── HYPOTHESIS A
+    └── HYPOTHESIS B
+```
+
+This graph enables traceability and adaptive reasoning.
+
+
+36. HYPOTHESIS AND CLAIMS
+-------------------------
+
+Claims describe propositions that may be established, weakened, or evaluated.
+
+Hypotheses explain or interpret relationships among claims and evidence.
+
+Therefore:
+
+Evidence
+→ Claim
+→ Hypothesis
+
+must remain conceptually distinct.
+
+A claim can be true without explaining why it is true.
+
+A hypothesis attempts to explain or interpret.
+
+
+37. HYPOTHESIS AND ANALYSIS
+---------------------------
+
+ANALYZE may consume multiple hypotheses.
+
+Analysis should compare:
+
+- Evidence.
+- Assumptions.
+- Mechanisms.
+- Contradictions.
+- Implications.
+- Confidence.
+
+Analysis may conclude:
+
+- One hypothesis dominates.
+- Several remain plausible.
+- Evidence is insufficient.
+- A new hypothesis is required.
+
+
+38. HYPOTHESIS AND JUDGMENT
+---------------------------
+
+The current judgment should reflect the strongest supported hypothesis set.
+
+A judgment may state:
+
+- Leading explanation.
+- Strength of support.
+- Important alternatives.
+- Major uncertainty.
+- Conditions that could change the conclusion.
+
+The judgment must not claim certainty simply because one hypothesis ranks first.
+
+
+39. HYPOTHESIS AND THESIS
+------------------------
+
+A trader's thesis may contain or depend on hypotheses.
+
+Evidence can strengthen or weaken those hypotheses.
+
+However:
+
+Hypothesis update
+≠
+automatic thesis modification.
+
+The system may report:
+
+"The causal assumption supporting your thesis has weakened."
+
+It may recommend thesis reassessment.
+
+The trader decides whether to change the thesis.
+
+
+40. HYPOTHESIS AND CHALLENGE
+----------------------------
+
+CHALLENGE explicitly stresses the current interpretation.
+
+When CHALLENGE is invoked:
+
+1. Resolve the target.
+2. Decompose its hypothesis structure.
+3. Identify assumptions.
+4. Search for contradictory evidence.
+5. Generate relevant alternatives.
+6. Test the alternatives.
+7. Identify invalidation conditions.
+8. Determine whether the hypothesis survives.
+9. Produce a direct verdict.
+10. Recommend next action if material uncertainty remains.
+
+Challenge should not become an automatic argument against everything.
+
+
+41. CHALLENGE VERDICTS
+---------------------
+
+For a challenged hypothesis or thesis:
+
+SURVIVES
+The core hypothesis remains well supported.
+
+PARTIALLY_WEAKENED
+Some assumptions or components weakened.
+
+MATERIALLY_WEAKENED
+Important support has been undermined.
+
+FAILS
+The hypothesis no longer provides a defensible explanation.
+
+INCONCLUSIVE
+Evidence remains insufficient to determine the outcome.
+
+
+42. HYPOTHESIS AND MONITOR
+--------------------------
+
+A MONITOR may track conditions associated with a hypothesis.
+
+Monitor conditions may include:
+
+- Expected observations.
+- Invalidation conditions.
+- Alternative explanations.
+- Relevant signals.
+- Evidence thresholds.
+
+When monitoring produces new evidence:
+
+- Update hypothesis state.
+- Reassess ranking.
+- Reassess confidence.
+- Reassess judgment when material.
+
+Monitoring remains connected to its originating research context.
+
+
+43. HYPOTHESIS AND HISTORICAL RESEARCH
+--------------------------------------
+
+Historical research may produce hypotheses about:
+
+- Recurring mechanisms.
+- Failure patterns.
+- Conditions under which a pattern held.
+- Conditions under which it failed.
+
+Historical precedent should inform current hypotheses but never establish them automatically.
+
+"Historically observed" does not mean "currently true."
+
+
+44. HYPOTHESIS AND FRAMEWORK
+----------------------------
+
+A trader's framework may indirectly generate hypotheses.
+
+For example:
+
+Framework factor
+→ expected condition
+→ observed evidence
+→ hypothesis about why the condition changed.
+
+The framework itself should remain separate from the hypothesis.
+
+Framework evaluation determines whether the framework's rules are satisfied.
+
+Hypothesis Intelligence determines explanatory relationships.
+
+
+45. HYPOTHESIS CONFIDENCE UPDATES
+---------------------------------
+
+Confidence may:
+
+- Increase.
+- Decrease.
+- Remain unchanged.
+
+Confidence should change only when evidence materially warrants it.
+
+Minor evidence fluctuations should not cause constant confidence oscillation.
+
+Material confidence changes should preserve prior confidence when relevant to the research history.
+
+
+46. CONFIDENCE INCREASE
+-----------------------
+
+Confidence should increase when:
+
+- Strong independent evidence supports the hypothesis.
+- A critical alternative is weakened.
+- A key assumption is validated.
+- Expected observations occur.
+- Causal mechanism receives direct support.
+
+Confidence should not increase merely because more low-quality sources repeat the same information.
+
+
+47. CONFIDENCE DECREASE
+-----------------------
+
+Confidence should decrease when:
+
+- Strong contradictory evidence appears.
+- Critical assumptions fail.
+- Alternative explanations strengthen.
+- Expected observations fail.
+- Source quality is downgraded.
+- Key dependencies become unstable.
+
+Material confidence decreases should be visible to the trader.
+
+
+48. HYPOTHESIS UNCERTAINTY
+-------------------------
+
+Uncertainty may remain even when one hypothesis leads.
+
+Examples:
+
+- Multiple explanations remain plausible.
+- Important evidence is missing.
+- Causal mechanism is indirect.
+- Conditions are changing.
+- Historical precedent is weak.
+
+The system should preserve uncertainty instead of forcing a binary answer.
+
+
+49. HYPOTHESIS CONVERGENCE
+-------------------------
+
+Hypothesis space may narrow when:
+
+- Evidence eliminates alternatives.
+- Critical assumptions are validated.
+- Contradictions are resolved.
+- One mechanism clearly explains the available evidence.
+
+Convergence should be evidence-driven.
+
+
+50. HYPOTHESIS DIVERGENCE
+-------------------------
+
+Hypothesis space may expand when:
+
+- New evidence cannot be explained by existing hypotheses.
+- A contradiction reveals a new mechanism.
+- The leading hypothesis fails.
+- A new domain introduces a materially different explanation.
+
+New hypotheses should be created only when they materially improve the investigation.
+
+
+51. EXPLORATION VS CONFIRMATION
+------------------------------
+
+The system must balance:
+
+EXPLORATION
+Searching for alternative explanations and new hypotheses.
+
+CONFIRMATION
+Testing and strengthening the strongest existing hypotheses.
+
+When uncertainty is high:
+increase exploration.
+
+When one hypothesis dominates but has not been adequately tested:
+increase falsification and confirmation testing.
+
+When evidence is converging strongly:
+reduce unnecessary exploration.
+
+
+52. ANTI-ANCHORING RULE
+-----------------------
+
+The first plausible hypothesis must never receive privileged status merely because it was created first.
+
+The system should evaluate hypotheses based on current evidence.
+
+If the initial hypothesis weakens:
+
+- Preserve it.
+- Reduce ranking.
+- Promote alternatives where justified.
+- Reallocate research resources.
+
+
+53. ANTI-CONFIRMATION-BIAS RULE
+------------------------------
+
+Research should actively seek evidence that could weaken the leading hypothesis when:
+
+- Stakes are material.
+- Confidence is high.
+- Evidence is incomplete.
+- Alternative explanations are plausible.
+- CHALLENGE is invoked.
+
+The system must not intentionally seek only supportive evidence.
+
+
+54. HYPOTHESIS RESEARCH PRIORITY
+--------------------------------
+
+Research priority should increase when a hypothesis:
+
+- Has high decision impact.
+- Has high uncertainty.
+- Is central to the current judgment.
+- Has strong competing alternatives.
+- Has weak evidence.
+- Has important unresolved assumptions.
+- Could materially change the conclusion.
+
+Low-impact hypotheses should not consume excessive resources.
+
+
+55. HYPOTHESIS RESOURCE ALLOCATION
+----------------------------------
+
+The scheduler may allocate resources among hypotheses.
+
+Example:
+
+H1 = leading but weakly tested
+H2 = strong alternative
+H3 = low-probability explanation
+
+Resource allocation may prioritize:
+
+H1 falsification
++
+H2 discrimination
+
+while limiting H3 exploration.
+
+Allocation must remain adaptive.
+
+
+56. HYPOTHESIS STOPPING RULE
+----------------------------
+
+Testing a hypothesis should stop when:
+
+- Evidence is sufficient.
+- It is clearly rejected.
+- It is clearly supported relative to alternatives.
+- Further research has low expected information value.
+- The research objective is satisfied.
+
+A hypothesis may remain INCONCLUSIVE when evidence is insufficient.
+
+The system must not force resolution merely to finish the task.
+
+
+57. HYPOTHESIS FAILURE
+---------------------
+
+If a hypothesis fails:
+
+- Preserve it.
+- Record why it failed.
+- Preserve supporting and contradictory evidence.
+- Identify the failed assumptions or mechanism.
+- Reassess alternatives.
+- Replan research if needed.
+
+Failure is valuable research information.
+
+
+58. HYPOTHESIS SURPRISE
+----------------------
+
+When evidence strongly contradicts all existing hypotheses:
+
+1. Preserve current hypotheses.
+2. Mark the contradiction.
+3. Identify the unexplained evidence.
+4. Search for a new mechanism.
+5. Create a new hypothesis if justified.
+6. Reprioritize research.
+7. Reassess the judgment.
+
+The system must not force surprising evidence into an existing explanation merely for consistency.
+
+
+59. HYPOTHESIS PROVENANCE
+------------------------
+
+Every hypothesis must preserve:
+
+- Why it was created.
+- Which evidence prompted it.
+- Which claims support it.
+- Which research task created it.
+- Which alternative it replaced or challenged.
+- Which trader instruction caused its creation, if applicable.
+
+This enables full research traceability.
+
+
+60. HYPOTHESIS HISTORY
+---------------------
+
+Material changes should preserve:
+
+- Previous statement.
+- Previous assumptions.
+- Previous dependencies.
+- Previous confidence.
+- Previous ranking.
+- Previous status.
+- Reason for change.
+- Evidence causing change.
+- Timestamp.
+
+The latest state is the active state.
+
+Previous states remain available as history.
+
+
+61. HYPOTHESIS MEMORY
+--------------------
+
+Useful historical hypotheses may be stored in Research Memory.
+
+Memory must distinguish:
+
+CURRENT HYPOTHESIS
+from
+HISTORICAL HYPOTHESIS
+from
+PRIOR REJECTED HYPOTHESIS.
+
+Historical hypotheses may inform new research.
+
+They must not silently become current conclusions.
+
+
+62. HYPOTHESIS REUSE
+--------------------
+
+A previous hypothesis may be reused when:
+
+- Current context is materially similar.
+- Historical conditions are relevant.
+- The mechanism remains plausible.
+- Current evidence supports reconsideration.
+
+Before reuse, the system should reassess:
+
+- Current evidence.
+- Current context.
+- Changed assumptions.
+- Changed dependencies.
+- Historical validity.
+
+
+63. HYPOTHESIS AND EVIDENCE FRESHNESS
+--------------------------------------
+
+A hypothesis can remain conceptually valid while its supporting evidence becomes stale.
+
+Therefore:
+
+Evidence freshness
+≠
+Hypothesis freshness.
+
+The system must reassess current support when old evidence is used for a current judgment.
+
+
+64. HYPOTHESIS QUALITY FAILURE
+-----------------------------
+
+If hypothesis quality cannot be established:
+
+- Lower confidence.
+- Preserve uncertainty.
+- Identify missing evidence.
+- Search for alternatives.
+- Avoid presenting the hypothesis as established.
+
+The system should prefer:
+
+"Current evidence favors X, but Y remains plausible."
+
+over:
+
+"X is definitely the cause."
+
+when the evidence does not justify certainty.
+
+
+65. HYPOTHESIS OUTPUT
+--------------------
+
+Default user-facing output should be progressive.
+
+Primary display:
+
+- Leading hypothesis.
+- Confidence.
+- Strongest supporting evidence.
+- Strongest opposing evidence.
+- Key alternative.
+- What would change the assessment.
+
+On demand:
+
+- Full hypothesis tree.
+- Assumptions.
+- Dependencies.
+- Evidence graph.
+- Ranking rationale.
+- Historical versions.
+- Research tasks.
+- Alternative testing.
+
+
+66. HYPOTHESIS EXPLANATION
+--------------------------
+
+When the trader asks:
+
+"Why is this the leading explanation?"
+
+The system should explain:
+
+1. Why it fits the evidence.
+2. What evidence distinguishes it from alternatives.
+3. What assumptions it depends on.
+4. What contradicts it.
+5. Which alternatives remain plausible.
+6. Current confidence.
+7. What evidence could change the ranking.
+
+
+67. HYPOTHESIS VERDICT
+---------------------
+
+A hypothesis verdict should answer:
+
+"What is the current status of this explanation?"
+
+Possible response:
+
+LEADING
+with moderate confidence.
+
+SUPPORTED
+with strong evidence.
+
+WEAKENED
+because critical evidence changed.
+
+REJECTED
+because key assumptions failed.
+
+INCONCLUSIVE
+because evidence cannot distinguish alternatives.
+
+
+68. HYPOTHESIS INTEGRITY RULES
+------------------------------
+
+The system must obey:
+
+1. Never treat a hypothesis as a fact.
+2. Never create hypotheses solely for artificial balance.
+3. Never ignore relevant alternatives.
+4. Never privilege the first hypothesis.
+5. Never silently rewrite a hypothesis.
+6. Never delete failed hypotheses from research history.
+7. Never confuse ranking with confidence.
+8. Never confuse correlation with causation.
+9. Never use historical precedent as automatic proof.
+10. Never allow source quantity to substitute for evidence quality.
+11. Never automatically modify a trader's thesis because a hypothesis changed.
+12. Never hide contradictory evidence.
+13. Never manufacture invalidation thresholds.
+14. Never force resolution when evidence remains inconclusive.
+15. Preserve hypothesis provenance and lineage.
+
+
+69. HYPOTHESIS INTELLIGENCE EXECUTION LOOP
+------------------------------------------
+
+OBSERVATION / CLAIM
+→ IDENTIFY POSSIBLE EXPLANATIONS
+→ CREATE RELEVANT HYPOTHESES
+→ DECOMPOSE ASSUMPTIONS
+→ IDENTIFY DEPENDENCIES
+→ DEFINE EXPECTED OBSERVATIONS
+→ DEFINE DISCONFIRMING CONDITIONS
+→ IDENTIFY ALTERNATIVES
+→ RANK HYPOTHESES
+→ PRIORITIZE DISCRIMINATING EVIDENCE
+→ TEST
+→ UPDATE SUPPORT / CONTRADICTION
+→ UPDATE RANKING
+→ UPDATE CONFIDENCE
+→ REASSESS ANALYSIS
+→ REASSESS JUDGMENT
+→ PRESERVE HISTORY
+→ CONTINUE / COMPLETE / BRANCH
+
+
+70. GLOBAL HYPOTHESIS PRINCIPLE
+-------------------------------
+
+The system should not ask:
+
+"Can I find evidence supporting this explanation?"
+
+It should ask:
+
+"Which explanation best accounts for the available evidence, what competing explanations remain plausible, and what evidence would distinguish them?"
+
+Hypothesis Intelligence exists to prevent research from becoming a collection of disconnected facts.
+
+Evidence tells the system what is observed.
+
+Claims define what must be established.
+
+Hypotheses explain what may account for those observations.
+
+Analysis compares the competing explanations.
+
+Judgment identifies the strongest defensible interpretation.
+
+New evidence can change the ranking.
+
+Therefore the system must remain adaptive, falsifiable, traceable, and willing to change direction when the evidence warrants it.

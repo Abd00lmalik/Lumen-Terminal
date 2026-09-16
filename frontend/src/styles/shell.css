@@ -1,0 +1,33 @@
+/* burger visible only below the sidebar breakpoint; rail-toggle only below the rail breakpoint */
+.nav-burger { display: none; }
+.rail-toggle { display: none; position: fixed; right: 10px; top: 64px; z-index: 45; }
+
+@media (max-width: 900px) {
+  .nav-burger { display: inline-flex; }
+}
+@media (max-width: 1100px) {
+  .rail-toggle { display: inline-flex; }
+}
+
+/* context rail sections */
+.rail-section { padding: var(--gap-3) 0; border-top: 1px solid var(--line); }
+.rail-section:first-child { border-top: none; padding-top: 0; }
+.rail-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; color: var(--text-3); text-transform: uppercase; margin-bottom: 8px; }
+
+/* landing hero art */
+.candle-col { display: flex; flex-direction: column-reverse; gap: 3px; align-items: center; }
+.candle { width: 5px; border-radius: 1px; }
+.candle.up { background: var(--up); box-shadow: 0 0 8px rgba(31, 208, 122, 0.35); }
+.candle.down { background: var(--down); box-shadow: 0 0 8px rgba(246, 70, 93, 0.3); }
+.constellation-node {
+  position: absolute; width: 7px; height: 7px; border-radius: 50%;
+  box-shadow: 0 0 10px 1px currentColor; background: currentColor; opacity: 0.85;
+}
+.constellation-edge { position: absolute; height: 1px; background: linear-gradient(90deg, rgba(1,212,200,.0), rgba(1,212,200,.45)); transform-origin: 0 0; }
+.hero-orbit {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 1px solid rgba(1, 212, 200, 0.12);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-orbit { animation: none !important; }
+}

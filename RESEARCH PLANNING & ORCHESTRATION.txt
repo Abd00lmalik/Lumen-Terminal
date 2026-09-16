@@ -1,0 +1,993 @@
+RESEARCH PLANNING & ORCHESTRATION
+
+PURPOSE
+
+The Research Planning & Orchestration layer converts a resolved research objective into an executable, adaptive plan.
+
+It determines:
+
+- What needs to be investigated
+- Which subproblems exist
+- Which branches should be created
+- What evidence each task requires
+- Which Skills and tools are appropriate
+- Which tasks can run in parallel
+- Which tasks depend on others
+- How much research effort each task deserves
+- When a task is complete
+- When the plan should adapt
+- When research should stop
+
+The planning layer does not perform the research itself.
+
+It creates and continuously updates the execution structure used by the Research Execution Engine.
+
+CORE PRINCIPLE
+
+A research plan is a living execution model, not a static checklist.
+
+Initial plan:
+
+RESEARCH OBJECTIVE
+→ SUBQUESTIONS
+→ TASKS
+→ BRANCHES
+→ DEPENDENCIES
+→ REQUIRED CAPABILITIES
+→ EXECUTION STRATEGY
+→ COMPLETION CRITERIA
+
+During execution:
+
+NEW EVIDENCE
+→ PLAN UPDATE
+→ TASK/BRANCH CHANGE
+→ RESOURCE REALLOCATION
+→ NEW INVESTIGATION
+→ UPDATED JUDGMENT
+
+The plan must preserve completed work when it changes.
+
+1. PLAN OWNERSHIP
+
+The RESEARCH object owns the overall research objective and research state.
+
+The RESEARCH PLAN controls how that objective is investigated.
+
+Branches and tasks are execution structures inside the research.
+
+Conceptually:
+
+WORKSPACE
+└── RESEARCH
+    ├── RESEARCH PLAN
+    │   ├── TASKS
+    │   ├── DEPENDENCIES
+    │   ├── EXECUTION STRATEGY
+    │   └── COMPLETION CRITERIA
+    │
+    ├── BRANCHES
+    ├── EVIDENCE
+    ├── CLAIMS
+    ├── HYPOTHESES
+    ├── ANALYSES
+    └── JUDGMENTS
+
+The plan may change without changing the original research objective.
+
+2. RESEARCH PLAN OBJECT
+
+A RESEARCH PLAN contains:
+
+plan {
+  id
+  research_ref
+  objective
+  success_criteria
+
+  scope {
+    included
+    excluded
+    boundaries
+  }
+
+  depth {
+    requested
+    resolved
+    minimum
+    maximum
+    adaptive
+  }
+
+  tasks[]
+  branches[]
+  dependencies[]
+
+  capabilities {
+    required_skills
+    optional_skills
+    required_tools
+    optional_tools
+    required_data_domains
+  }
+
+  execution {
+    strategy
+    parallelism
+    sequencing
+    resource_allocation
+    priority
+  }
+
+  evidence_requirements[]
+  completion_criteria[]
+
+  constraints {
+    hard_constraints
+    preferences
+    time_limits
+  }
+
+  adaptation_policy
+
+  status
+  progress
+
+  created_at
+  updated_at
+
+  provenance
+  history
+}
+
+3. PLAN OBJECTIVE
+
+The plan must remain connected to the original research objective.
+
+The objective contains:
+
+- Original trader question
+- Structured research intent
+- Success criteria
+- Relevant flow
+- Target
+- Timeframe
+- Constraints
+
+The plan must never silently replace the original objective.
+
+If the trader changes the fundamental intent, the active plan is replaced and the previous plan is preserved in history.
+
+4. TASK MODEL
+
+A TASK represents a concrete unit of research work.
+
+A task should be specific enough to execute independently or as part of a dependency chain.
+
+TASK {
+
+  id
+
+  research_ref
+  branch_ref
+
+  objective
+
+  task_type
+
+  target
+
+  required_evidence[]
+
+  expected_output
+
+  dependencies[]
+
+  dependent_tasks[]
+
+  required_skills[]
+  preferred_skills[]
+
+  required_tools[]
+  preferred_tools[]
+
+  scope
+
+  depth
+
+  priority
+
+  resource_budget
+
+  completion_criteria[]
+
+  status
+
+  result_refs[]
+
+  provenance
+
+  history
+}
+
+5. TASK TYPES
+
+The engine may use task types such as:
+
+- FACT_FINDING
+- EVENT_RECONSTRUCTION
+- CAUSAL_INVESTIGATION
+- IMPACT_ANALYSIS
+- THESIS_TEST
+- HISTORICAL_COMPARISON
+- SIGNAL_DETECTION
+- EVIDENCE_VALIDATION
+- SOURCE_CROSS_CHECK
+- SENTIMENT_ANALYSIS
+- MACRO_ANALYSIS
+- TECHNICAL_ANALYSIS
+- MARKET_STRUCTURE_ANALYSIS
+- SYNTHESIS
+- CONTRADICTION_CHECK
+- ALTERNATIVE_EXPLANATION
+- FALSIFICATION
+- FRAMEWORK_EVALUATION
+
+Task types are internal execution concepts.
+
+The trader does not need to use them explicitly.
+
+6. TASK CREATION
+
+The agent creates tasks based on:
+
+- Research flow
+- Research objective
+- Complexity
+- Scope
+- Required evidence
+- Candidate hypotheses
+- Relevant domains
+- Dependencies
+- Trader constraints
+- Available Skills and tools
+
+Simple research may require only a few tasks.
+
+Complex research may create multiple branches containing many tasks.
+
+The agent should avoid unnecessary decomposition.
+
+Over-decomposition creates execution overhead and makes the research harder to manage.
+
+7. TASK GRANULARITY
+
+Tasks should be large enough to produce meaningful research progress but small enough to:
+
+- Run independently where possible
+- Be prioritized
+- Be paused
+- Be reassessed
+- Be replaced
+- Be retried
+- Be assigned to an appropriate Skill or tool
+
+The agent should dynamically choose task granularity based on research complexity.
+
+8. BRANCH CREATION
+
+A branch represents a coherent line of investigation.
+
+Branches may be created for:
+
+- Competing hypotheses
+- Different causal explanations
+- Different research domains
+- Independent evidence paths
+- Historical comparisons
+- Alternative interpretations
+- Materially different research questions
+
+Branches should not be created merely to make the plan look detailed.
+
+A branch must have a meaningful investigative purpose.
+
+9. BRANCH AND TASK RELATIONSHIP
+
+A branch may contain multiple tasks.
+
+Example:
+
+BRANCH: "Macro explanation"
+
+→ Task: investigate rate expectations
+→ Task: investigate inflation data
+→ Task: investigate dollar movement
+→ Task: determine relationship to current asset move
+
+Another branch may investigate:
+
+BRANCH: "Crypto-specific explanation"
+
+→ Task: investigate liquidation data
+→ Task: investigate exchange flows
+→ Task: investigate protocol-specific events
+
+The branches may eventually converge into one synthesis task.
+
+10. DEPENDENCY MODEL
+
+Tasks may depend on:
+
+- Previous tasks
+- Evidence
+- Claims
+- Hypotheses
+- External data
+- Research state
+- Other branches
+
+Dependencies determine execution ordering.
+
+Example:
+
+TASK A:
+Identify major event.
+
+TASK B:
+Determine market reaction.
+
+TASK C:
+Evaluate whether the event plausibly caused the reaction.
+
+TASK C depends on A and B.
+
+Independent tasks may execute simultaneously.
+
+11. DEPENDENCY TYPES
+
+Execution dependencies include:
+
+- REQUIRED_BEFORE
+- REQUIRED_EVIDENCE
+- REQUIRED_CONTEXT
+- CONDITIONAL
+- OPTIONAL
+- SYNTHESIS_INPUT
+
+A dependency does not automatically mean ownership.
+
+It only defines what execution requires.
+
+12. PARALLEL EXECUTION
+
+The engine should run independent tasks in parallel when appropriate.
+
+Parallel execution is preferred when:
+
+- Tasks do not depend on one another
+- They investigate independent evidence paths
+- Parallelism improves speed
+- Resource availability allows it
+
+Example:
+
+Macro analysis
++
+News analysis
++
+Sentiment analysis
++
+Technical analysis
+
+may run concurrently.
+
+The results are later synthesized.
+
+13. SEQUENTIAL EXECUTION
+
+Sequential execution is required when:
+
+- One task depends on another
+- A later task requires a resolved target
+- A hypothesis must be established before testing it
+- Evidence from one task determines the next investigation
+- A synthesis task requires completed inputs
+
+The engine should not force parallelism where dependencies make it unreliable.
+
+14. CONDITIONAL EXECUTION
+
+Some tasks should execute only if specific conditions are met.
+
+Example:
+
+IF evidence suggests a regulatory event materially affected the asset
+
+→ create regulatory investigation.
+
+IF the leading causal explanation remains weak
+
+→ investigate alternative explanations.
+
+IF historical similarity is high
+
+→ deepen historical comparison.
+
+Conditional tasks prevent unnecessary research.
+
+15. FULL ADAPTIVE ORCHESTRATION
+
+The engine uses FULL ADAPTIVE ORCHESTRATION.
+
+The agent dynamically chooses:
+
+- Skills
+- Tools
+- Sources
+- Task sequence
+- Parallelization
+- Research depth
+- Branch allocation
+- Cross-validation strategy
+
+Flow specifications define the research objective and minimum requirements.
+
+They do not rigidly prescribe every execution step.
+
+The agent may introduce additional capabilities when research warrants them.
+
+16. SKILL SELECTION
+
+Skill selection is based on:
+
+- Research objective
+- Task type
+- Domain
+- Required evidence
+- Available information
+- Current hypotheses
+- Research flow
+
+Bitget Skills may include:
+
+- macro-analyst
+- market-intel
+- news-briefing
+- sentiment-analyst
+- technical-analysis
+
+Multiple Skills may be used for one research task.
+
+A Skill should only be used when it contributes materially to the task.
+
+17. TOOL SELECTION
+
+The agent selects tools according to task requirements.
+
+Selection considers:
+
+- Data availability
+- Reliability
+- Freshness
+- Query capability
+- Domain relevance
+- Cost/efficiency
+- Need for cross-validation
+
+The agent should prefer the most appropriate available source rather than using every available source.
+
+18. SOURCE STRATEGY
+
+The plan may specify:
+
+- Primary sources
+- Secondary sources
+- Independent verification sources
+- Market data
+- News
+- On-chain data
+- Social/sentiment data
+- Macro data
+- Technical data
+- Derivatives data
+
+Source selection remains adaptive.
+
+The plan should not assume a source is reliable merely because it is available.
+
+19. CROSS-VALIDATION
+
+The engine should seek independent corroboration when:
+
+- A claim is important
+- Evidence is weak
+- Sources conflict
+- The information is consequential
+- A single source is insufficient
+- The source has potential bias
+
+Cross-validation should be proportional to importance.
+
+Not every minor fact requires multiple independent sources.
+
+20. RESOURCE ALLOCATION
+
+Research resources should be allocated according to:
+
+- Task importance
+- Expected information value
+- Uncertainty
+- Potential impact on final judgment
+- Current evidence strength
+- Branch priority
+- Trader constraints
+
+High-value uncertain branches receive more research effort.
+
+Low-value branches may be deprioritized.
+
+21. BRANCH PRIORITY
+
+Branch priority may depend on:
+
+- Relevance to objective
+- Evidence strength
+- Potential to change judgment
+- Materiality
+- Uncertainty
+- Trader preference
+- Research cost
+
+The agent may dynamically reprioritize branches.
+
+The trader may override priority through natural language.
+
+22. INFORMATION VALUE
+
+Research effort should be directed toward information that could materially change the conclusion.
+
+A branch should receive additional effort when:
+
+- Current evidence is weak
+- Competing explanations remain plausible
+- The branch could invalidate the leading hypothesis
+- The branch addresses a major unresolved uncertainty
+- The result would materially change the judgment
+
+Research should not spend excessive effort confirming an already well-supported minor point.
+
+23. DEPTH ALLOCATION
+
+Depth may differ between branches.
+
+Example:
+
+Macro branch:
+DEEP
+
+Sentiment branch:
+STANDARD
+
+Minor historical branch:
+QUICK
+
+The overall research depth does not require every branch to receive identical effort.
+
+The agent may increase depth for a branch when evidence warrants it.
+
+24. COMPLETION CRITERIA
+
+Every meaningful task should have completion criteria.
+
+Examples:
+
+- Required evidence found
+- Claim sufficiently tested
+- Hypothesis sufficiently investigated
+- Relevant sources cross-checked
+- Major alternatives evaluated
+- Requested depth reached
+- Additional research unlikely to materially change result
+
+Completion is not equivalent to certainty.
+
+25. BRANCH COMPLETION
+
+A branch is complete when:
+
+- Its objective is sufficiently answered
+- Required evidence is gathered
+- Relevant alternatives have been considered
+- Additional research has low expected value
+- Its result has been passed into the appropriate research objects
+
+A completed branch remains available for provenance and historical review.
+
+26. PLAN COMPLETION
+
+The entire research plan is complete when:
+
+- The research objective has been sufficiently addressed
+- Required branches are complete
+- Material uncertainties are understood
+- Major competing explanations have been considered
+- Completion criteria are satisfied
+- Further research is unlikely to materially change the judgment
+
+The plan may complete with unresolved uncertainty.
+
+27. ADAPTIVE REPLANNING
+
+The plan is updated when new evidence materially changes:
+
+- Research direction
+- Hypothesis ranking
+- Branch priority
+- Scope
+- Required tools
+- Required Skills
+- Depth
+- Completion criteria
+- Dependencies
+
+Replanning should be localized where possible.
+
+Unchanged branches should continue.
+
+Completed work should not be discarded.
+
+28. PLAN CHANGE TYPES
+
+Plan changes may include:
+
+- ADD_TASK
+- REMOVE_TASK
+- PAUSE_TASK
+- RESUME_TASK
+- PRIORITIZE_TASK
+- DEPRIORITIZE_TASK
+- ADD_BRANCH
+- PAUSE_BRANCH
+- RESUME_BRANCH
+- REPRIORITIZE_BRANCH
+- CHANGE_SCOPE
+- CHANGE_DEPTH
+- CHANGE_CONSTRAINT
+- CHANGE_TOOL
+- CHANGE_SKILL
+- CHANGE_DEPENDENCY
+- CHANGE_COMPLETION_CRITERIA
+- REPLACE_PLAN
+
+Material changes should be recorded in history.
+
+29. TRADER-INITIATED PLAN CHANGES
+
+The trader may modify the plan through natural language.
+
+Examples:
+
+"Go deeper on the macro side."
+
+"Drop the sentiment research."
+
+"Compare this with the 2022 crash."
+
+"Only use the last 30 days."
+
+"Focus on Ethereum instead."
+
+"Stop investigating that explanation."
+
+The engine resolves the instruction into the appropriate plan changes.
+
+Clear ordinary research changes execute immediately.
+
+Consequential persistent changes follow the existing confirmation boundaries.
+
+30. INTENT CHANGE
+
+A fundamental change in research intent replaces the active plan.
+
+Example:
+
+Current:
+"Why did BTC fall?"
+
+Trader:
+"Actually, forget the cause. I want to know whether this creates a buying opportunity."
+
+The old plan becomes historical research context.
+
+A new plan is created for the new objective.
+
+Relevant previous research may be reused rather than discarded.
+
+31. SCOPE CHANGE
+
+Explicit scope replacement replaces the active scope.
+
+Example:
+
+"Analyze the whole crypto market."
+
+→ later:
+
+"Only analyze BTC and ETH."
+
+The new scope becomes active.
+
+Previous research remains available as historical context.
+
+The engine should reuse compatible completed work where possible.
+
+32. DEPTH CHANGE
+
+Depth may be changed without rebuilding the entire plan.
+
+Example:
+
+"Give me a quick answer."
+
+→ later:
+
+"Actually, go deep."
+
+The engine expands research where additional work can materially improve the result.
+
+Likewise:
+
+"Stop going so deep on this branch."
+
+may reduce effort without destroying completed research.
+
+33. CONSTRAINT CHANGE
+
+Constraints may change:
+
+- Timeframe
+- Source restrictions
+- Domains
+- Geographic scope
+- Tool restrictions
+- Research depth
+- Time budget
+- Evidence requirements
+
+Hard constraints override ordinary preferences.
+
+34. PLAN INTERRUPTIONS
+
+When the trader interrupts:
+
+1. Resolve the requested change.
+2. Identify affected tasks/branches.
+3. Pause or replace only what is affected.
+4. Preserve completed and unrelated work.
+5. Update dependencies if required.
+6. Resume with the modified plan.
+
+The system should avoid restarting unaffected research.
+
+35. TASK FAILURE
+
+If a task fails:
+
+- Record the failure
+- Determine whether retrying is useful
+- Try an appropriate alternative tool or Skill
+- Create an alternative task when needed
+- Reduce confidence if the missing result is material
+- Continue unrelated research
+
+A task failure should not automatically fail the entire research plan.
+
+36. TOOL FAILURE
+
+If a tool fails:
+
+- Retry when appropriate
+- Use another suitable tool
+- Cross-check through another source
+- Mark the limitation
+- Reallocate research effort if necessary
+
+The agent must never fabricate tool output.
+
+37. DATA GAP
+
+When required data cannot be obtained:
+
+The plan should distinguish:
+
+- Data available
+- Data unavailable
+- Data indirectly inferable
+- Data that could materially change the result
+
+The engine may continue using available evidence while clearly representing the limitation.
+
+38. BRANCH FAILURE
+
+If a branch becomes impossible or unproductive:
+
+- Mark it appropriately
+- Preserve its history
+- Reallocate resources
+- Continue other branches
+- Create an alternative branch if warranted
+
+Branch failure does not imply research failure.
+
+39. HYPOTHESIS-DRIVEN REPLANNING
+
+When a new hypothesis materially changes the investigation:
+
+NEW HYPOTHESIS
+→ ASSESS RELEVANCE
+→ CREATE / MODIFY BRANCH
+→ IDENTIFY REQUIRED EVIDENCE
+→ SELECT TOOLS/SKILLS
+→ SET PRIORITY
+→ EXECUTE
+→ UPDATE HYPOTHESIS RANKING
+
+The engine should not create formal hypotheses for every minor possibility.
+
+40. EVIDENCE-DRIVEN REPLANNING
+
+When evidence contradicts a major assumption:
+
+EVIDENCE
+→ IDENTIFY AFFECTED CLAIM
+→ IDENTIFY AFFECTED HYPOTHESIS
+→ IDENTIFY DEPENDENT TASKS
+→ REASSESS PLAN
+→ MODIFY AFFECTED BRANCHES
+→ CONTINUE
+→ UPDATE JUDGMENT
+
+Previous research remains preserved.
+
+41. PLAN HISTORY
+
+Material plan changes should preserve:
+
+- Previous plan state
+- Change
+- Cause
+- Actor
+- Timestamp
+- Affected tasks
+- Affected branches
+- Resulting state
+
+Minor internal execution changes do not need full visible history.
+
+42. PROVENANCE
+
+Every material plan decision should be traceable to:
+
+- Trader request
+- Research objective
+- Evidence
+- Hypothesis
+- System inference
+- Tool/Skill limitation
+- Previous plan state
+
+The system should be able to explain why a major branch or task exists.
+
+43. PLAN VISIBILITY
+
+The plan should be visible progressively.
+
+Default:
+
+- Current objective
+- Major research areas
+- Current progress
+- Important active branches
+- Major blockers
+
+On request:
+
+- Full task tree
+- Dependencies
+- Skill/tool assignments
+- Branch priorities
+- Evidence requirements
+- Completion criteria
+- Plan history
+- Replanning reasons
+
+The trader should not be forced to inspect internal execution details.
+
+44. PLAN STATUS
+
+Possible plan states:
+
+DRAFT
+ACTIVE
+PAUSED
+COMPLETED
+SUPERSEDED
+STALE
+INVALID
+STOPPED
+ARCHIVED
+
+These follow the broader object lifecycle principles.
+
+A plan should normally remain aligned with the lifecycle of its parent research object.
+
+45. EXECUTION LOOP
+
+The planning engine operates continuously:
+
+RESOLVE OBJECTIVE
+→ DECOMPOSE
+→ CREATE TASKS
+→ CREATE BRANCHES
+→ IDENTIFY DEPENDENCIES
+→ SELECT CAPABILITIES
+→ PRIORITIZE
+→ EXECUTE
+→ OBSERVE RESULTS
+→ REASSESS
+→ REPLAN IF NEEDED
+→ CONTINUE
+→ COMPLETE
+
+46. GLOBAL PLANNING PRINCIPLES
+
+1. A plan is a living model, not a static checklist.
+
+2. The RESEARCH object owns the objective; the plan owns execution structure.
+
+3. The agent owns planning and orchestration.
+
+4. Natural language remains the trader's control surface.
+
+5. Full adaptive orchestration is the default.
+
+6. The agent chooses Skills, tools, sources, sequencing, parallelization, and depth dynamically.
+
+7. Flow specifications define research objectives and minimum requirements, not rigid execution sequences.
+
+8. Tasks should be meaningful execution units.
+
+9. Branches represent coherent investigative directions.
+
+10. Dependencies determine execution order where necessary.
+
+11. Independent work should run in parallel when useful.
+
+12. Dependent work should execute sequentially.
+
+13. Conditional tasks should only execute when their conditions are met.
+
+14. Research resources should follow expected information value and materiality.
+
+15. New evidence may change the plan.
+
+16. Replanning should preserve completed and unaffected work.
+
+17. Trader interruptions should affect only the relevant research where possible.
+
+18. Fundamental intent changes replace the active plan while preserving previous research.
+
+19. Scope changes replace active scope while preserving compatible historical work.
+
+20. Research depth may differ between branches.
+
+21. Completion means sufficient research, not certainty.
+
+22. Tool or data failure must never produce fabricated results.
+
+23. Material plan changes require provenance and history.
+
+24. Progressive disclosure keeps the default workspace understandable.
+
+25. The planning layer exists to make research adaptive, efficient, traceable, and evidence-driven.

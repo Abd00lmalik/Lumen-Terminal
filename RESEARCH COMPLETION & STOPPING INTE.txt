@@ -1,0 +1,1187 @@
+RESEARCH COMPLETION & STOPPING INTELLIGENCE
+
+## 1. Purpose
+
+Research Completion & Stopping Intelligence determines:
+
+- whether the research objective has been satisfied
+- whether additional research could materially improve the judgment
+- whether remaining uncertainty is acceptable
+- whether additional research has diminishing information value
+- whether research should continue
+- whether research should pause
+- whether research should complete
+- whether the result must be marked insufficient
+
+The system must distinguish:
+
+TASK COMPLETION
+from
+RESEARCH COMPLETION.
+```
+
+## 2. Completion Model
+
+```text id="k8v3mq"
+COMPLETION_STATE {
+  research_ref
+  objective_status
+  coverage_status
+  evidence_status
+  contradiction_status
+  hypothesis_status
+  judgment_status
+  quality_status
+  freshness_status
+  unresolved_gaps[]
+  remaining_uncertainties[]
+  candidate_next_tasks[]
+  stopping_reason
+  completion_confidence
+  completion_eligibility
+  timestamp
+  provenance
+  history
+}
+```
+
+## 3. Objective Satisfaction
+
+The first question is:
+
+```text
+Has the original research question been answered?
+```
+
+Possible states:
+
+```text id="q5n7xc"
+NOT_STARTED
+IN_PROGRESS
+PARTIALLY_ADDRESSED
+SUBSTANTIALLY_ADDRESSED
+SATISFIED
+UNANSWERABLE_WITH_AVAILABLE_EVIDENCE
+```
+
+## 4. Task Completion Is Not Enough
+
+Example:
+
+```text Task A: collect news       → complete
+Task B: collect market data   → complete
+Task C: analyze sentiment     → complete
+```
+
+This does not automatically mean the research is complete.
+
+The system must still determine whether these tasks collectively answer the research objective.
+
+## 5. Completion Criteria
+
+Every research plan should contain completion criteria.
+
+```text id="m4x8qp"
+COMPLETION_CRITERIA {
+  objective
+  required_findings[]
+  required_evidence[]
+  required_domains[]
+  required_quality_level
+  required_confidence
+  contradiction_requirements
+  freshness_requirements
+  unresolved_gap_tolerance
+  explicit_constraints
+}
+```
+
+## 6. Criteria Types
+
+Completion criteria can be:
+
+```text id="r7c3vn"
+OBJECTIVE_BASED
+EVIDENCE_BASED
+QUALITY_BASED
+TIME_BASED
+RESOURCE_BASED
+USER_DEFINED
+SYSTEM_REQUIRED
+```
+
+## 7. Objective-Based Completion
+
+Example:
+
+```text "Why did BTC move today?"
+```
+
+Completion requires a sufficiently supported explanation.
+
+It does not require researching every possible factor.
+
+## 8. Evidence-Based Completion
+
+Some research requires specific evidence.
+
+Example:
+
+```text Determine whether event X caused outcome Y.
+```
+
+If causal evidence is unavailable, the system cannot claim causal completion merely because secondary evidence exists.
+
+## 9. Quality-Based Completion
+
+Research may require:
+
+```text minimum quality = ADEQUATE
+```
+
+or:
+
+```text minimum quality = STRONG
+```
+
+If the threshold is not met, the system continues where possible.
+
+## 10. User-Defined Completion
+
+The trader can explicitly constrain research.
+
+Examples:
+
+```text id="c6v9mp"
+"Give me the answer using only the available data."
+
+"Stop after checking three primary sources."
+
+"Keep this under five minutes."
+```
+
+These become research constraints.
+
+## 11. Hard Limits
+
+Research may have:
+
+```text id="x3m8qv"
+time_limit
+resource_limit
+tool_limit
+source_limit
+depth_limit
+task_limit
+```
+
+Hard limits cannot be silently exceeded.
+
+## 12. Adaptive Stopping
+
+The system should continuously estimate:
+
+```text id="p5n7cx"
+Could additional research materially change the judgment?
+```
+
+If yes:
+
+```text continue
+```
+
+If no:
+
+```text consider stopping
+```
+
+## 13. Information Value
+
+Every candidate research task should have estimated information value.
+
+```text id="v8q4mk"
+INFORMATION_VALUE {
+  task_ref
+  expected_uncertainty_reduction
+  expected_judgment_impact
+  evidence_gap
+  contradiction_relevance
+  cost
+  urgency
+  freshness
+}
+```
+
+## 14. Marginal Information Value
+
+The scheduler should prioritize marginal information value.
+
+If repeated searches produce essentially the same evidence:
+
+```text marginal information value ↓
+```
+
+Research should approach stopping.
+
+## 15. Diminishing Returns
+
+The system should detect:
+
+```text same sources
+same claims
+same observations
+same conclusion
+no material new evidence
+```
+
+Repeated retrieval should not continue indefinitely.
+
+## 16. Convergence
+
+Research approaches convergence when:
+
+* major evidence has been covered
+* major contradictions have been investigated
+* leading hypotheses stabilize
+* new evidence rarely changes the judgment
+* remaining gaps have low expected impact
+
+## 17. Convergence Does Not Mean Certainty
+
+A research project may converge on:
+
+```text "Evidence remains inconclusive."
+```
+
+That is still a valid research outcome.
+
+## 18. Stopping Decision
+
+```text id="n6q3vx"
+STOPPING_ASSESSMENT {
+  objective_satisfied
+  quality_sufficient
+  evidence_sufficient
+  material_gaps
+  material_contradictions
+  expected_information_value
+  additional_research_cost
+  convergence
+  freshness
+  stopping_recommendation
+  confidence
+}
+```
+
+## 19. Stopping Recommendations
+
+```text id="w5m8kc"
+CONTINUE
+CONTINUE_WITH_NEW_BRANCH
+REFRESH
+VALIDATE
+PAUSE
+COMPLETE
+COMPLETE_WITH_LIMITATIONS
+INSUFFICIENT_EVIDENCE
+```
+
+## 20. Continue
+
+Continue when:
+
+```text additional research has meaningful expected value
+```
+
+especially when it could materially change the judgment.
+
+## 21. New Branch
+
+Create a new branch when the remaining uncertainty requires a distinct investigation.
+
+Example:
+
+```text Main explanation weakened.
+        ↓
+Alternative explanation requires separate research.
+        ↓
+New branch.
+```
+
+## 22. Refresh
+
+Refresh when existing research is useful but too stale.
+
+Example:
+
+```text historical research remains valid
+but current market conditions changed.
+```
+
+The system should refresh only the stale components where possible.
+
+## 23. Validate
+
+Validate when the main weakness is evidence quality rather than coverage.
+
+Example:
+
+```text Important claim relies on one secondary source.
+```
+
+The system searches for stronger or independent evidence.
+
+## 24. Pause
+
+Pause when:
+
+* required resources are temporarily unavailable
+* a dependency is unresolved
+* the trader explicitly pauses
+* continuation is possible but not currently useful
+* a consequential clarification is required
+
+Research state remains intact.
+
+## 25. Complete
+
+Complete when:
+
+```text objective satisfied
++
+quality sufficient
++
+material issues handled
++
+remaining uncertainty acceptable
+```
+
+## 26. Complete With Limitations
+
+Use when:
+
+```text objective substantially answered
++
+material limitations remain
++
+additional research has low feasibility or low expected value
+```
+
+The limitations must be visible.
+
+## 27. Insufficient Evidence
+
+Use when:
+
+```text objective cannot currently be supported
+```
+
+This is not a system failure.
+
+It is a legitimate research conclusion.
+
+## 28. Material Gap
+
+A gap is material when resolving it could plausibly change:
+
+* primary judgment
+* major claim
+* leading hypothesis
+* thesis assessment
+* decision-relevant implication
+
+## 29. Non-Material Gap
+
+A gap is non-material when resolving it is unlikely to affect the research conclusion.
+
+The system may mention it but should not necessarily continue researching it.
+
+## 30. Gap Assessment
+
+```text id="q4m8vx"
+GAP_ASSESSMENT {
+  gap
+  affected_objects[]
+  materiality
+  expected_judgment_impact
+  resolution_method
+  resolution_cost
+  expected_information_value
+  stopping_impact
+}
+```
+
+## 31. Uncertainty Budget
+
+Each research project maintains an explicit representation of unresolved uncertainty.
+
+```text id="z7c5mp"
+UNCERTAINTY_STATE {
+  known_unknowns[]
+  unresolved_claims[]
+  unresolved_hypotheses[]
+  missing_data[]
+  contradictory_evidence[]
+  stale_evidence[]
+  uncertainty_impact
+}
+```
+
+## 32. Acceptable Uncertainty
+
+The system may complete research with uncertainty when:
+
+```text uncertainty is explicitly represented
++
+remaining uncertainty is understood
++
+judgment is proportional to it
+```
+
+## 33. Unacceptable Uncertainty
+
+Research should continue when:
+
+```text critical unknown
++
+high potential judgment impact
++
+reasonable resolution path
+```
+
+exists.
+
+## 34. Stopping Under Explicit Time Limit
+
+If the trader says:
+
+```text "Give me the best answer in two minutes."
+```
+
+the system should optimize information value within the constraint.
+
+At the deadline:
+
+```text complete with limitations
+```
+
+rather than silently continuing.
+
+## 35. Stopping Under Resource Limit
+
+If tool usage or resource limits are reached:
+
+```text research_status = constrained
+```
+
+The system must explain the limitation.
+
+## 36. Trader "Stop"
+
+Explicit:
+
+```text "Stop researching."
+```
+
+means:
+
+```text pause/stop active research
+```
+
+depending on context.
+
+All completed work remains available.
+
+## 37. Trader "That's Enough"
+
+This should normally mean:
+
+```text complete current research
+```
+
+if the context clearly refers to the active research.
+
+No deletion occurs.
+
+## 38. Trader "Use What You Have"
+
+This means:
+
+```text stop additional evidence gathering
++
+synthesize available evidence
++
+expose limitations
+```
+
+The system must not imply that the research is exhaustive.
+
+## 39. Trader "Keep Going"
+
+This explicitly overrides a previous stopping recommendation.
+
+The system continues if technically possible.
+
+## 40. Trader "Go Deeper"
+
+Increase research depth.
+
+The system should identify where additional depth is most valuable rather than expanding every branch equally.
+
+## 41. Trader "Be Exhaustive"
+
+Resolve depth toward the highest permitted level.
+
+The system still requires:
+
+```text resource limits
+time constraints
+tool availability
+```
+
+and cannot guarantee literal exhaustiveness across an unbounded information universe.
+
+## 42. Automatic Stopping
+
+The system may stop automatically when:
+
+```text objective satisfied
++
+quality sufficient
++
+convergence reached
++
+no material unresolved gap
+```
+
+## 43. Automatic Stopping Safety
+
+The system should never stop merely because:
+
+* a fixed task count was reached
+* a response looks long
+* one source agrees
+* the first plausible explanation was found
+* a preferred thesis was supported
+* the model feels confident
+
+## 44. Early Synthesis
+
+The system may synthesize before all planned tasks finish.
+
+Purpose:
+
+```text identify what is actually missing
+```
+
+This can prevent unnecessary research.
+
+## 45. Synthesis-Driven Stopping
+
+After early synthesis:
+
+```text If remaining tasks cannot materially improve the answer:
+    stop them.
+```
+
+This is a core efficiency mechanism.
+
+## 46. Branch-Level Stopping
+
+Individual branches can stop independently.
+
+A branch may become:
+
+```text COMPLETED
+REJECTED
+INCONCLUSIVE
+LOW_VALUE
+```
+
+without stopping the entire research.
+
+## 47. Hypothesis-Level Stopping
+
+A hypothesis may stop being investigated when:
+
+```text sufficiently weakened
++
+unlikely to become leading
++
+remaining evidence has low information value
+```
+
+Its history remains preserved.
+
+## 48. Evidence Search Stopping
+
+A search branch should stop when:
+
+```text source diversity sufficient
++
+claim adequately supported
++
+new searches produce duplicate evidence
++
+contradiction search completed
+```
+
+## 49. Contradiction Search Stopping
+
+Stop contradiction research when:
+
+```text material opposing evidence searched
++
+remaining candidate contradictions have low expected impact
+```
+
+Not merely when no contradiction was found quickly.
+
+## 50. Alternative Explanation Stopping
+
+For major conclusions:
+
+```text search alternatives
+→ test strongest alternatives
+→ stop when remaining alternatives are low plausibility or low impact
+```
+
+The system must not claim that every conceivable explanation was eliminated.
+
+## 51. Historical Search Stopping
+
+Historical precedent research can stop when:
+
+```text strongest relevant precedents identified
++
+counterexamples searched
++
+current-vs-historical applicability assessed
+```
+
+## 52. Impact Research Stopping
+
+For "what could affect it?" research:
+
+```text broad candidate discovery
+→ relevance filtering
+→ material factor analysis
+→ conditional impact assessment
+```
+
+Stop when additional factors are unlikely to be decision-relevant.
+
+## 53. Thesis Validation Stopping
+
+Stop when:
+
+```text core thesis claims tested
++
+key assumptions tested
++
+material dependencies examined
++
+alternatives considered
++
+major invalidation conditions assessed
+```
+
+## 54. Falsification Stopping
+
+For "what could prove me wrong?":
+
+```text identify meaningful invalidation conditions
+→ search for evidence
+→ identify early warnings
+→ assess monitoring value
+```
+
+Stop when remaining possible failure modes are unlikely to materially improve the trader's understanding.
+
+## 55. Framework Evaluation Stopping
+
+Completion requires every applicable framework factor to be evaluated according to the framework definition.
+
+No factor may be silently skipped because it is inconvenient.
+
+## 56. Comprehensive Synthesis Stopping
+
+For "what does all the information say?":
+
+The system should stop when the relevant domains have been sufficiently covered according to materiality.
+
+"All information" means all materially relevant information discovered within the resolved research scope, not literally every piece of information in existence.
+
+## 57. Quality Dependency
+
+Stopping cannot bypass mandatory QC.
+
+```text STOPPING_ELIGIBLE
+requires
+QUALITY_SUFFICIENT
+```
+
+unless the trader explicitly forces completion with limitations.
+
+## 58. Freshness Dependency
+
+For time-sensitive research:
+
+```text FRESHNESS_REQUIRED
+must be satisfied
+```
+
+before completion.
+
+If not possible:
+
+```text COMPLETE_WITH_LIMITATIONS
+```
+
+or:
+
+```text INSUFFICIENT_EVIDENCE
+```
+
+depending on materiality.
+
+## 59. Provenance Dependency
+
+A conclusion with broken provenance cannot be treated as fully supported.
+
+The system should attempt repair before completion.
+
+## 60. Contradiction Dependency
+
+Material unresolved contradictions prevent strong completion unless:
+
+* they are explicitly incorporated into the judgment
+* their impact is understood
+* the final judgment reflects the uncertainty
+
+## 61. Completion State Machine
+
+```text
+DRAFT
+  ↓
+ACTIVE
+  ↓
+ASSESS_COMPLETION
+  ↓
+├── CONTINUE
+│      ↓
+│   RESEARCH
+│      ↓
+│   ASSESS_COMPLETION
+│
+├── BRANCH
+│      ↓
+│   INVESTIGATE
+│      ↓
+│   ASSESS_COMPLETION
+│
+├── REFRESH
+│      ↓
+│   REVALIDATE
+│      ↓
+│   ASSESS_COMPLETION
+│
+├── PAUSE
+│
+├── COMPLETE
+│
+├── COMPLETE_WITH_LIMITATIONS
+│
+└── INSUFFICIENT_EVIDENCE
+```
+
+## 62. Completion Transition Rules
+
+Every transition must record:
+
+```text id="c7m4vx"
+previous_state
+new_state
+trigger
+reason
+affected_objects[]
+quality_state
+timestamp
+actor
+provenance
+```
+
+## 63. Completion History
+
+A completed research project can later reopen if:
+
+* new material evidence appears
+* the context changes
+* the trader asks for an update
+* freshness expires
+* a previous conclusion is challenged
+
+Completion is not permanent truth.
+
+## 64. Reopening Research
+
+```text COMPLETED
+    ↓
+NEW MATERIAL EVIDENCE
+    ↓
+REOPEN
+    ↓
+REASSESS
+```
+
+Previous completion state remains in history.
+
+## 65. Research Expiration
+
+Research should not automatically become false because it is old.
+
+Instead:
+
+```text current
+→ stale
+```
+
+based on freshness requirements.
+
+Restoration triggers revalidation.
+
+## 66. Completed Research vs Saved Research
+
+Completion changes research lifecycle.
+
+SAVE creates reusable persistence.
+
+They are independent operations.
+
+A completed research project does not automatically become a saved reusable artifact.
+
+## 67. Completion and Monitoring
+
+A completed research project may optionally transition into monitoring.
+
+```text RESEARCH COMPLETE
+       ↓
+MATERIAL FUTURE UNCERTAINTY
+       ↓
+MONITOR RECOMMENDATION
+       ↓
+TRADER CONFIRMATION
+       ↓
+MONITOR ACTIVE
+```
+
+Monitoring is not automatic unless existing rules explicitly permit it.
+
+## 68. Completion and Thesis
+
+A completed research project may:
+
+```text inform thesis
+challenge thesis
+weaken thesis
+support thesis
+```
+
+It does not automatically modify the trader's thesis.
+
+## 69. Completion and Decision Boundary
+
+Completion means:
+
+```text research objective satisfied
+```
+
+It does not mean:
+
+```text trading decision made
+```
+
+## 70. Stopping Explanation
+
+When the system stops, it should be able to answer:
+
+```text Why did you stop?
+```
+
+Default explanation:
+
+```text Research stopped because:
+- the objective is sufficiently addressed
+- major evidence has been covered
+- material contradictions were assessed
+- remaining gaps are unlikely to materially change the judgment
+```
+
+Only claims supported by actual state should be shown.
+
+## 71. Continuation Explanation
+
+When continuing:
+
+```text Research is continuing because:
+- one material causal question remains unresolved
+- resolving it could change the current judgment
+- a feasible research path exists
+```
+
+## 72. Insufficient-Evidence Explanation
+
+```text The research cannot currently support a strong conclusion because:
+- critical evidence is unavailable
+- the remaining uncertainty could materially change the judgment
+```
+
+## 73. Completion Report
+
+```text id="m9x4qp"
+COMPLETION_REPORT {
+  research_ref
+  original_question
+  objective_status
+  final_judgment
+  quality_state
+  evidence_sufficiency
+  material_contradictions
+  unresolved_gaps
+  remaining_uncertainty
+  stopping_reason
+  research_limits
+  freshness
+  confidence
+  recommended_follow_up[]
+  monitor_recommendation
+  provenance
+}
+```
+
+## 74. Stopping Policy
+
+The default stopping policy should optimize:
+
+```text ANSWER QUALITY
++
+INFORMATION VALUE
++
+RESEARCH EFFICIENCY
+```
+
+rather than:
+
+```text MAXIMUM AMOUNT OF DATA
+```
+
+## 75. Research Budget Allocation
+
+As research progresses:
+
+```text high-value unresolved branch
+→ receive more resources
+
+low-value converged branch
+→ receive fewer resources
+
+resolved branch
+→ stop
+```
+
+## 76. Resource Reallocation
+
+Stopped branches release resources.
+
+The scheduler may reallocate them to unresolved high-value branches.
+
+## 77. Parallel Completion
+
+Parallel branches may complete at different times.
+
+The system should not wait for low-value branches merely because they were originally planned.
+
+## 78. Completion Under Partial Failure
+
+Research can complete despite failures when:
+
+```text objective remains adequately addressed
++
+failed components are non-material
++
+limitations are disclosed
+```
+
+Otherwise:
+
+```text continue / insufficient evidence
+```
+
+## 79. Completion Under Tool Failure
+
+A failed tool does not automatically mean research cannot complete.
+
+The system evaluates:
+
+```text alternative capability
++
+remaining evidence
++
+materiality
+```
+
+## 80. Completion Under Source Failure
+
+If a primary source is inaccessible:
+
+```text attempt reliable alternatives
+```
+
+If no adequate alternative exists:
+
+```text disclose source limitation
+```
+
+and assess whether it prevents completion.
+
+## 81. Completion Under Ambiguity
+
+Material unresolved ambiguity about:
+
+* target
+* objective
+* timeframe
+* scope
+* framework
+* thesis
+
+should normally block automatic completion.
+
+Clarification is preferred.
+
+## 82. Completion Under Trader Override
+
+The trader may explicitly say:
+
+```text "Stop and give me what you have."
+```
+
+The system may complete with limitations.
+
+It must not present the result as fully researched if it is not.
+
+## 83. Completion Integrity
+
+The system must never claim:
+
+```text exhaustive
+fully validated
+all sources checked
+no contradictions exist
+```
+
+unless the actual research state supports those statements.
+
+## 84. Quality + Stopping Integration
+
+```text id="x7m3cq"
+RESEARCH EXECUTION
+       ↓
+QUALITY CONTROL
+       ↓
+COMPLETION ASSESSMENT
+       ↓
+┌───────────────────────────┐
+│ Can more research matter? │
+└───────────────────────────┘
+       ↓              ↓
+      YES             NO
+       ↓              ↓
+   CONTINUE        COMPLETE
+       ↓              ↓
+  RESEARCH       WITH LIMITATIONS
+       ↓              ↓
+       └──────→ REASSESS
+```
+
+## 85. Completion Criteria
+
+Research Completion & Stopping Intelligence is complete when:
+
+* objective satisfaction is explicit
+* task completion is distinct from research completion
+* completion criteria are structured
+* hard limits are respected
+* information value drives continuation
+* diminishing returns are detected
+* convergence is measurable
+* material gaps are identified
+* uncertainty is explicit
+* branches can stop independently
+* evidence searches can stop intelligently
+* contradiction searches can stop
+* alternative explanations can stop
+* historical searches can stop
+* thesis validation can stop
+* framework evaluation can stop only after applicable factors are evaluated
+* trader stop/continue/deeper/exhaustive instructions work
+* research can complete with limitations
+* insufficient evidence is a valid result
+* completed research can reopen
+* stale research can be refreshed
+* completion is separate from decision-making
+* monitoring remains a separate lifecycle
+* stopping reasons are explainable
+* no false claims of exhaustiveness are made
+* quality control gates completion
+
+## 86. Global Completion Loop
+
+```text
+QUESTION
+   ↓
+OBJECTIVE
+   ↓
+RESEARCH PLAN
+   ↓
+EXECUTION
+   ↓
+EVIDENCE
+   ↓
+ANALYSIS
+   ↓
+JUDGMENT
+   ↓
+QUALITY CONTROL
+   ↓
+COMPLETION ASSESSMENT
+   ↓
+┌──────────────────────────────┐
+│ Material uncertainty remains?│
+└──────────────────────────────┘
+       ↓                 ↓
+      YES                NO
+       ↓                 ↓
+ Information value    Objective
+ sufficiently high?   sufficiently met?
+       ↓                 ↓
+   YES → CONTINUE       YES → COMPLETE
+   NO  → LIMITATIONS
+             ↓
+      INSUFFICIENT /
+      COMPLETE WITH
+      LIMITATIONS
+```
+
+## Core Principle
+
+```text
+THE SYSTEM SHOULD NOT STOP WHEN IT HAS
+NOTHING LEFT TO DO.
+
+IT SHOULD STOP WHEN THERE IS NO
+MATERIALLY VALUABLE RESEARCH LEFT TO DO.
+
+AND WHEN IT CANNOT REACH A STRONG ANSWER,
+IT MUST BE ABLE TO SAY SO.
+```

@@ -1,0 +1,1118 @@
+---
+title: "JUDGMENT & CONFIDENCE INTELLIGENCE"
+source: JUDGMENT & CONFIDENCE INTELLIGENCE.txt
+converted: 2026-09-12
+type: architecture-spec
+related: [analysis-synthesis.md, hypothesis.md, research-flows.md]
+---
+
+**Related documents:** `analysis-synthesis.md` · `hypothesis.md` · `research-flows.md`
+
+> Converted from `JUDGMENT & CONFIDENCE INTELLIGENCE.txt` on 2026-09-12. Formatting only — architectural content, schemas, and decisions are unchanged.
+
+JUDGMENT & CONFIDENCE INTELLIGENCE
+
+PURPOSE
+
+Judgment & Confidence Intelligence is the layer responsible for converting analytical findings into the current best-supported assessment of a research question.
+
+It answers:
+
+“Given everything we currently know, what is the strongest defensible judgment right now?”
+
+Core relationship:
+
+EVIDENCE
+→ CLAIMS
+→ HYPOTHESES
+→ ANALYSIS
+→ JUDGMENT
+→ THESIS / MONITOR / REASSESSMENT
+
+Judgment is the decision-oriented synthesis of the research.
+
+It is not a prediction engine, automatic trading decision, or trader instruction.
+
+The trader remains the final decision-maker.
+
+
+1. JUDGMENT OBJECT
+
+```text
+JUDGMENT {
+  id
+
+  research_ref
+
+  statement
+
+  objective
+
+  target
+
+  basis {
+    supporting_evidence[]
+    opposing_evidence[]
+    key_claims[]
+    hypotheses[]
+    analyses[]
+    assumptions[]
+    alternatives[]
+  }
+
+  conclusion {
+    primary
+    qualified
+    conditions
+  }
+
+  implications[]
+
+  unresolved_questions[]
+
+  uncertainty {
+    level
+    sources[]
+    materiality
+  }
+
+  confidence {
+    level
+    basis[]
+    drivers[]
+  }
+
+  status
+
+  previous_judgment_ref
+
+  created_at
+  updated_at
+
+  provenance
+
+  history
+}
+```
+
+2. CORE DEFINITION
+
+A Judgment is:
+
+“The current best-supported assessment produced from the available research and analysis.”
+
+It must represent the strongest defensible conclusion at the current point in time.
+
+It must not represent:
+
+* absolute truth
+* guaranteed prediction
+* trader intent
+* an automatic trading decision
+* the trader's thesis unless explicitly adopted by the trader
+* unsupported speculation
+
+3. ONE CURRENT JUDGMENT
+
+Each research object should have one authoritative current judgment.
+
+Historical judgments remain available.
+
+When a material change occurs:
+
+CURRENT JUDGMENT
+→ NEW JUDGMENT
+
+The previous judgment becomes:
+
+SUPERSEDED
+
+but remains preserved for historical comparison.
+
+4. JUDGMENT FORMATION
+
+Judgment formation should consider:
+
+* strongest supporting evidence
+* strongest opposing evidence
+* claim status
+* hypothesis ranking
+* analytical findings
+* alternative explanations
+* unresolved contradictions
+* important assumptions
+* evidence quality
+* evidence sufficiency
+* uncertainty
+* research objective
+* timeframe
+* relevant trader context
+
+The system should not simply count supporting versus opposing evidence.
+
+Evidence quality and relevance matter more than raw quantity.
+
+5. JUDGMENT PRIORITY
+
+The judgment should prioritize:
+
+1. Material evidence
+2. High-quality evidence
+3. Direct evidence
+4. Strongly corroborated evidence
+5. Relevant analytical findings
+6. Strong explanatory hypotheses
+7. Important opposing evidence
+8. Remaining uncertainty
+
+Low-quality or irrelevant information should not materially distort the judgment.
+
+6. CLAIM STATUS
+
+Claims contributing to a judgment should have explicit states.
+
+Possible states:
+
+SUPPORTED
+PARTIALLY_SUPPORTED
+UNRESOLVED
+CONTRADICTED
+INSUFFICIENT_EVIDENCE
+
+The system should not force every claim into a binary true/false state.
+
+A research conclusion may remain valid even when some peripheral claims remain unresolved.
+
+7. HYPOTHESIS CONTRIBUTION
+
+Competing hypotheses influence judgment according to:
+
+* supporting evidence
+* contradicting evidence
+* explanatory power
+* causal coherence
+* assumption burden
+* observed outcome fit
+* alternative explanations
+* confidence
+* testability
+
+The strongest hypothesis is not automatically the correct explanation.
+
+A hypothesis may remain:
+
+LEADING
+
+without becoming:
+
+PROVEN.
+
+8. COMPETING HYPOTHESES
+
+When multiple hypotheses remain viable, the judgment should preserve that uncertainty.
+
+Example structure:
+
+PRIMARY INTERPRETATION
+→ strongest current explanation
+
+KEY ALTERNATIVE
+→ competing explanation
+
+WHY PRIMARY LEADS
+→ strongest differentiating evidence
+
+WHAT WOULD CHANGE THE ASSESSMENT
+→ discriminating evidence or condition
+
+The system should not collapse meaningful uncertainty simply to produce a cleaner answer.
+
+9. SUPPORTING EVIDENCE
+
+The judgment should identify the strongest evidence supporting the conclusion.
+
+Supporting evidence should be:
+
+* relevant
+* sufficiently reliable
+* appropriately recent
+* sufficiently direct
+* properly contextualized
+
+The system should prefer a small number of decisive pieces of evidence over a long list of weak supporting points.
+
+10. OPPOSING EVIDENCE
+
+The judgment must consider meaningful evidence against the conclusion.
+
+Opposing evidence should be evaluated rather than merely listed.
+
+For each material contradiction, determine whether it:
+
+* invalidates the conclusion
+* weakens the conclusion
+* qualifies the conclusion
+* applies under different conditions
+* is outweighed by stronger evidence
+* remains unresolved
+
+Material opposing evidence must influence confidence.
+
+11. CONDITIONAL JUDGMENTS
+
+A judgment may be conditional when the evidence supports different conclusions under different conditions.
+
+Structure:
+
+IF condition A
+→ assessment X
+
+IF condition B
+→ assessment Y
+
+This is preferable to forcing a single unconditional conclusion when the underlying evidence is conditional.
+
+Conditions should be evidence-derived rather than invented.
+
+12. TIMEFRAME
+
+Every judgment must respect the relevant timeframe.
+
+A judgment may be:
+
+* short-term
+* medium-term
+* long-term
+* event-specific
+* historical
+* current
+
+A conclusion valid for one timeframe must not silently be generalized to another.
+
+When the timeframe materially changes the conclusion, the judgment should explicitly distinguish the cases.
+
+13. UNCERTAINTY
+
+Uncertainty describes what remains unresolved.
+
+It is separate from confidence.
+
+Examples:
+
+HIGH CONFIDENCE + LOW UNCERTAINTY
+
+The evidence is strong and relatively coherent.
+
+MODERATE CONFIDENCE + MODERATE UNCERTAINTY
+
+The conclusion leads but important questions remain.
+
+LOW CONFIDENCE + HIGH UNCERTAINTY
+
+Evidence is weak, conflicting, incomplete, or highly conditional.
+
+Uncertainty should explain:
+
+* what is unknown
+* why it matters
+* what evidence could reduce it
+* whether it affects the primary conclusion
+
+14. CONFIDENCE
+
+Confidence represents how strongly the available evidence supports the judgment.
+
+Default levels:
+
+HIGH
+MODERATE
+LOW
+
+Confidence is qualitative by default.
+
+The system should not fabricate numerical probabilities unless the research context provides a defensible quantitative basis.
+
+15. CONFIDENCE DRIVERS
+
+Confidence should consider:
+
+* evidence quality
+* evidence directness
+* corroboration
+* source independence
+* evidence completeness
+* claim resolution
+* hypothesis strength
+* alternative explanations
+* contradiction level
+* assumption burden
+* causal strength
+* temporal stability
+* source freshness
+* analytical consistency
+
+Confidence should decrease when material uncertainty increases.
+
+Confidence should increase when meaningful uncertainty is resolved by strong evidence.
+
+16. CONFIDENCE ≠ CERTAINTY
+
+The system must never treat:
+
+HIGH CONFIDENCE
+
+as:
+
+CERTAINTY.
+
+Even a high-confidence judgment remains conditional on the available evidence and relevant assumptions.
+
+The wording should reflect this distinction.
+
+17. CONFIDENCE CHANGES
+
+Confidence should change when material evidence changes.
+
+Possible transitions:
+
+LOW
+→ MODERATE
+→ HIGH
+
+or:
+
+HIGH
+→ MODERATE
+→ LOW
+
+The system should avoid changing confidence for insignificant evidence.
+
+Material confidence changes should be recorded in judgment history.
+
+18. CONFIDENCE CHANGE EXPLANATION
+
+When confidence materially changes, preserve:
+
+* previous confidence
+* new confidence
+* triggering evidence
+* affected claims
+* affected hypotheses
+* reason for change
+* timestamp
+
+Example structure:
+
+PREVIOUS:
+Moderate
+
+NEW:
+Low
+
+REASON:
+A newly verified source contradicts the central assumption supporting the leading hypothesis.
+
+19. JUDGMENT REVISION
+
+A judgment must be revisable.
+
+When material new evidence arrives:
+
+1. evaluate evidence
+2. identify affected claims
+3. identify affected hypotheses
+4. reassess analytical findings
+5. reassess supporting/opposing evidence
+6. reassess uncertainty
+7. reassess confidence
+8. determine whether the judgment changes
+
+If the conclusion materially changes:
+
+→ create new judgment
+→ supersede previous judgment
+→ preserve previous judgment
+→ record reason for revision
+
+20. MINOR EVIDENCE
+
+Minor evidence should not automatically create a new judgment.
+
+If new evidence:
+
+* confirms existing judgment
+* does not materially change confidence
+* does not change key claims
+* does not alter important hypotheses
+
+the system may update the current judgment context without creating unnecessary version churn.
+
+21. JUDGMENT STABILITY
+
+The system should avoid oscillating between conclusions because of small evidence changes.
+
+Judgment changes should be driven by materiality.
+
+Materiality depends on:
+
+* importance of affected claim
+* evidence quality
+* magnitude of contradiction
+* effect on hypothesis ranking
+* effect on conclusion
+* effect on confidence
+* relevance to the research objective
+
+22. JUDGMENT REVISION BOUNDARY
+
+A new judgment should be created when:
+
+* primary conclusion changes
+* important qualification changes
+* confidence materially changes
+* major hypothesis changes
+* key assumption fails
+* important evidence becomes invalid
+* research scope materially changes
+* timeframe materially changes
+* new evidence changes the decision-relevant implication
+
+Minor internal updates do not necessarily require a new judgment version.
+
+23. RESEARCH COMPLETION
+
+Research may be considered complete when the judgment is sufficiently stable and:
+
+* the research objective has been answered
+* major claims have been assessed
+* important alternatives have been considered
+* material contradictions have been addressed
+* remaining uncertainty is understood
+* additional research has low expected information value
+
+Completion does not require:
+
+* certainty
+* zero contradictions
+* every claim resolved
+* every source exhausted
+
+24. INSUFFICIENT EVIDENCE
+
+Sometimes the correct judgment is:
+
+INSUFFICIENT EVIDENCE.
+
+This is a valid judgment state.
+
+The system should use it when:
+
+* critical evidence is missing
+* available evidence is too weak
+* competing explanations cannot be distinguished
+* source reliability is inadequate
+* the research question cannot currently be answered defensibly
+
+The system should explain what evidence would be required to improve the judgment.
+
+25. NO-CONCLUSION STATE
+
+The system should be allowed to conclude:
+
+“No defensible conclusion can currently be established.”
+
+This is preferable to manufacturing a conclusion.
+
+The research should preserve:
+
+* available evidence
+* unresolved questions
+* competing hypotheses
+* evidence gaps
+* confidence level
+
+26. JUDGMENT VS PREDICTION
+
+A judgment may contain forward-looking implications.
+
+However:
+
+JUDGMENT ≠ PREDICTION.
+
+The system should distinguish:
+
+“What the evidence currently supports”
+
+from:
+
+“What may happen next.”
+
+If a forward-looking assessment is requested, the assumptions and uncertainty must remain visible.
+
+27. JUDGMENT VS THESIS
+
+Judgment:
+
+The system's current evidence-based assessment.
+
+Thesis:
+
+The trader's persistent belief or proposition.
+
+The system may determine:
+
+* thesis supported
+* thesis partially supported
+* thesis weakened
+* thesis contradicted
+* insufficient evidence
+
+But it must not automatically modify the thesis.
+
+28. THESIS INTERACTION
+
+When a relevant thesis exists:
+
+JUDGMENT
+→ evaluates current evidence
+→ compares against thesis
+→ identifies alignment/divergence
+→ explains why
+→ preserves trader's thesis
+
+Possible result:
+
+THESIS:
+Bullish on asset because X.
+
+JUDGMENT:
+Current evidence supports X but weakens Y.
+
+Therefore:
+
+THESIS STATUS:
+Partially supported.
+
+The trader decides whether to modify the thesis.
+
+29. JUDGMENT VS FRAMEWORK
+
+A framework may evaluate a judgment.
+
+For example:
+
+Framework
+→ requires five factors.
+
+Judgment
+→ provides the current evidence-based assessment.
+
+Framework Intelligence determines whether the judgment satisfies the framework's rules.
+
+Judgment itself does not silently change the framework.
+
+30. JUDGMENT VS CHALLENGE
+
+A judgment can trigger CHALLENGE when:
+
+* confidence is high but contradictory evidence exists
+* the conclusion depends on fragile assumptions
+* an alternative explanation is strong
+* consequences of being wrong are material
+* unresolved uncertainty is important
+
+CHALLENGE tests the judgment/thesis more aggressively.
+
+The judgment remains the current assessment unless new evidence changes it.
+
+31. JUDGMENT VS MONITOR
+
+A judgment may identify conditions that could change it.
+
+These conditions can become MONITOR candidates.
+
+Examples:
+
+* a key macro event
+* regulatory decision
+* liquidity change
+* invalidation condition
+* hypothesis-discriminating signal
+* important technical threshold
+
+The system may recommend monitoring.
+
+Monitor activation remains subject to explicit confirmation.
+
+32. JUDGMENT IMPLICATIONS
+
+The judgment may contain implications.
+
+Implications should answer:
+
+“If this judgment is correct, what follows?”
+
+Possible implications:
+
+* thesis relevance
+* risk considerations
+* important dependencies
+* information that should be watched
+* conditions that would change the conclusion
+
+Implications are not automatic trading instructions.
+
+33. DECISION BOUNDARY
+
+The system must stop before making the trader's final decision.
+
+It may provide:
+
+* judgment
+* evidence
+* confidence
+* uncertainty
+* implications
+* alternatives
+* invalidation conditions
+
+It should not silently convert these into:
+
+“BUY”
+
+“SELL”
+
+“DO THIS”
+
+unless the user explicitly requests an evaluation or recommendation and the relevant system boundaries permit it.
+
+The trader remains responsible for the final decision.
+
+34. PRIMARY JUDGMENT PRESENTATION
+
+Default output:
+
+PRIMARY JUDGMENT
+
+The strongest current assessment.
+
+WHY
+
+The most important supporting evidence.
+
+WHAT WEAKENS IT
+
+The strongest opposing evidence or unresolved weakness.
+
+CONFIDENCE
+
+High / Moderate / Low.
+
+UNCERTAINTY
+
+What remains unresolved.
+
+WHAT WOULD CHANGE IT
+
+Important evidence or conditions that could materially alter the assessment.
+
+The detailed evidence graph remains available through progressive disclosure.
+
+35. PROGRESSIVE DISCLOSURE
+
+Default judgment should be concise.
+
+The trader can request:
+
+“Why?”
+
+“Show evidence.”
+
+“What contradicts this?”
+
+“What would change your mind?”
+
+“Show the hypotheses.”
+
+“Show the previous judgment.”
+
+“Why is confidence only moderate?”
+
+The system should then expose the relevant analytical trail without dumping the entire research graph.
+
+36. TRACEABILITY
+
+Every material judgment must be traceable through:
+
+JUDGMENT
+→ ANALYSIS
+→ CLAIMS
+→ HYPOTHESES
+→ EVIDENCE
+→ SOURCES
+
+Where appropriate:
+
+JUDGMENT
+→ THESIS
+→ THESIS CLAIMS
+→ SUPPORTING / CONTRADICTING EVIDENCE
+
+The provenance chain must remain intact.
+
+37. JUDGMENT HISTORY
+
+The system must preserve material judgment history.
+
+For each material revision:
+
+* previous judgment
+* new judgment
+* triggering evidence
+* affected claims
+* affected hypotheses
+* confidence change
+* uncertainty change
+* reason
+* timestamp
+
+The trader can explicitly request historical comparison.
+
+38. HISTORICAL JUDGMENT USE
+
+Previous judgments may be used for:
+
+* context
+* thesis evolution
+* identifying changing conditions
+* understanding prior decisions
+* historical precedent
+
+Previous judgments must not silently become current evidence.
+
+The current validated evidence determines the current judgment.
+
+39. JUDGMENT STALENESS
+
+A judgment may become stale when:
+
+* its evidence becomes old
+* market conditions materially change
+* key assumptions change
+* source information is corrected
+* relevant external conditions change
+
+A stale judgment remains historical.
+
+The system should not present it as current without revalidation.
+
+40. JUDGMENT INVALIDATION
+
+A judgment may become invalid when:
+
+* critical evidence is proven false
+* central assumptions fail
+* source provenance is materially compromised
+* research scope is discovered to be incorrect
+* a key causal relationship is disproven
+
+Invalidation should:
+
+→ preserve the historical judgment
+→ identify affected objects
+→ reassess the research
+→ create a new judgment if possible
+
+41. DEPENDENCY PROPAGATION
+
+When an important input changes, the system should determine:
+
+* which claims are affected
+* which hypotheses are affected
+* which analyses are affected
+* whether the judgment is affected
+* whether confidence changes
+* whether downstream thesis/monitor context is affected
+
+Only materially dependent objects should be propagated.
+
+Unrelated research remains untouched.
+
+42. JUDGMENT CONFLICT
+
+If two analyses produce conflicting conclusions:
+
+1. identify the conflict
+2. inspect input evidence
+3. identify differing assumptions
+4. compare evidence quality
+5. compare analytical scope
+6. compare timeframe
+7. determine whether both are conditionally valid
+8. resolve if possible
+9. otherwise preserve conflict
+10. reduce confidence if material
+
+The system should never hide a material analytical disagreement merely to produce one clean answer.
+
+43. CONDITIONAL CONVERGENCE
+
+Conflicting analyses may converge when they operate under different conditions.
+
+Example:
+
+Analysis A:
+Bullish under high liquidity.
+
+Analysis B:
+Bearish under tightening liquidity.
+
+The judgment may become:
+
+“Direction depends materially on liquidity conditions.”
+
+This is preferable to selecting one analysis without preserving the condition.
+
+44. CONFIDENCE AGGREGATION
+
+Confidence should not be calculated by averaging the confidence scores of individual analyses.
+
+Instead, the system evaluates the underlying factors:
+
+* evidence quality
+* consistency
+* independence
+* claim resolution
+* hypothesis strength
+* contradictions
+* alternatives
+* assumptions
+* uncertainty
+
+Confidence is an overall assessment of support for the judgment.
+
+45. CONFIDENCE CALIBRATION
+
+The system should maintain conservative confidence behavior.
+
+Rules:
+
+Strong evidence does not automatically mean certainty.
+
+Many weak sources do not equal strong evidence.
+
+Detailed reasoning does not equal high confidence.
+
+Agreement between dependent sources does not equal independent corroboration.
+
+Historical repetition does not guarantee recurrence.
+
+A confident tone must not substitute for evidence.
+
+46. JUDGMENT QUALITY
+
+A high-quality judgment should be:
+
+* evidence-grounded
+* relevant
+* internally coherent
+* transparent about uncertainty
+* resistant to contradictory evidence
+* appropriately scoped
+* time-aware
+* traceable
+* revisable
+* decision-relevant
+
+A judgment is not high quality merely because it is detailed.
+
+47. AUTOMATIC REASSESSMENT
+
+When new material evidence enters the workspace:
+
+NEW EVIDENCE
+→ AFFECTED CLAIMS
+→ AFFECTED HYPOTHESES
+→ AFFECTED ANALYSES
+→ JUDGMENT REASSESSMENT
+
+If the judgment remains valid:
+
+→ preserve current judgment
+→ update evidence context
+→ update confidence if necessary.
+
+If it materially changes:
+
+→ create new judgment
+→ supersede previous judgment
+→ preserve history
+→ notify trader when material.
+
+48. MONITORING REASSESSMENT
+
+When MONITOR produces material new evidence:
+
+MONITOR
+→ EVIDENCE
+→ ANALYSIS
+→ JUDGMENT REASSESSMENT
+
+The monitor does not independently create a separate worldview.
+
+It feeds new evidence into the original research context.
+
+49. MEMORY INTERACTION
+
+Judgments may be stored in research memory.
+
+Memory must distinguish:
+
+CURRENT JUDGMENT
+PRIOR JUDGMENT
+HISTORICAL JUDGMENT
+
+A historical judgment may inform context but cannot override current validated evidence.
+
+50. SAVE INTERACTION
+
+Judgments are automatically preserved as research state.
+
+Explicit SAVE may preserve a judgment as a reusable artifact.
+
+Saving a judgment must preserve:
+
+* evidence basis
+* confidence
+* uncertainty
+* provenance
+* timestamp
+* relevant thesis/framework context
+* version history
+
+51. MANAGE_STATE INTERACTION
+
+MANAGE_STATE controls:
+
+* activation
+* archival
+* restoration
+* version selection
+* annotations
+* relationships
+* snapshots
+* history
+
+Judgment Intelligence controls:
+
+* judgment content
+* confidence
+* uncertainty
+* evidence basis
+* analytical interpretation
+
+The two responsibilities must remain separate.
+
+52. ERROR HANDLING
+
+If judgment formation fails because of insufficient evidence:
+
+→ return insufficient evidence.
+
+If evidence conflicts:
+
+→ resolve where possible
+→ otherwise preserve conflict and reduce confidence.
+
+If analysis is incomplete:
+
+→ continue research when useful.
+
+If target is ambiguous:
+
+→ clarify.
+
+If critical evidence becomes invalid:
+
+→ trigger reassessment.
+
+If confidence cannot be responsibly assigned:
+
+→ use LOW confidence or explicitly unresolved rather than fabricating precision.
+
+53. INTEGRITY RULES
+
+The system must never:
+
+* present a judgment as certainty
+* hide material contradictory evidence
+* silently modify the trader's thesis
+* treat historical judgment as current evidence
+* manufacture numerical probabilities
+* use source quantity as a substitute for source quality
+* average confidence blindly
+* convert judgment into automatic trading action
+* suppress unresolved conflicts
+* create unnecessary judgment revisions
+* retain invalid evidence as current support
+* allow minor noise to destabilize the judgment
+* manufacture a conclusion when evidence is insufficient
+
+54. JUDGMENT LOOP
+
+The complete loop is:
+
+COLLECT ANALYTICAL FINDINGS
+→ IDENTIFY CURRENT CLAIM STATES
+→ EVALUATE HYPOTHESES
+→ EVALUATE SUPPORTING EVIDENCE
+→ EVALUATE OPPOSING EVIDENCE
+→ RESOLVE MATERIAL CONFLICTS
+→ IDENTIFY ALTERNATIVES
+→ EVALUATE ASSUMPTIONS
+→ ASSESS UNCERTAINTY
+→ ASSESS CONFIDENCE
+→ FORM PRIMARY JUDGMENT
+→ IDENTIFY IMPLICATIONS
+→ IDENTIFY WHAT WOULD CHANGE THE JUDGMENT
+→ UPDATE JUDGMENT OBJECT
+→ PRESERVE HISTORY
+→ PROPAGATE MATERIAL DEPENDENCIES
+→ DETERMINE COMPLETION
+→ HAND OFF TO THESIS / MONITOR / CHALLENGE
+→ REMAIN OPEN TO NEW EVIDENCE
+
+55. GLOBAL PRINCIPLE
+
+Judgment & Confidence Intelligence exists to answer:
+
+“What is the strongest conclusion we can responsibly make right now?”
+
+The system should prefer:
+
+A qualified correct judgment
+
+over:
+
+An impressive but overconfident conclusion.
+
+The final judgment should always make clear:
+
+WHAT WE CURRENTLY BELIEVE
+
+WHY WE BELIEVE IT
+
+WHAT WEAKENS IT
+
+HOW CONFIDENT WE ARE
+
+WHAT REMAINS UNCERTAIN
+
+WHAT COULD CHANGE THE ASSESSMENT
+
+The trader remains the final decision-maker.
+
+```
+
+With this locked, the next major layer is **Thesis Intelligence**. That is where we define how the trader's persistent thesis lives separately from individual research, how research updates its status, how thesis evolution works, and how the system prevents itself from silently rewriting the trader's beliefs.
+```
