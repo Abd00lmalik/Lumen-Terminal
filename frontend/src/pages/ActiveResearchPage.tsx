@@ -165,7 +165,8 @@ function ResultView({ result, onInspectEvidence }: { result: ResearchResponseDto
       {result.limitations.length > 0 && (
         <Panel kicker="limitations" title="What this run could not do">
           <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {result.limitations.map((l, i) => <UnavailableNote key={i} note={l} />)}
+            {/* Defensive dedupe, matching the workspace rendering. */}
+            {[...new Set(result.limitations)].map((l, i) => <UnavailableNote key={i} note={l} />)}
           </div>
         </Panel>
       )}

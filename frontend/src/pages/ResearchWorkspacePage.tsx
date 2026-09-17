@@ -35,6 +35,33 @@ interface Turn {
   readonly run: ResearchResponseDto;
 }
 
+/**
+ * Transport-error → DTO-outcome mapping. Only a genuine interpretation failure maps to
+ * MODEL_FAILURE; every other typed failure keeps its own vocabulary so the UI can never
+ * mislabel a persistence/transport fault as a model fault (and PANEL_TITLES below renders
+ * outcomes it knows explicitly rather than defaulting unknowns to a wrong caption).
+ */
+function errorTurnOutcome(code: string): ResearchResponseDto["outcome"] {
+  switch (code) {
+    case "AWAITING_CONFIRMATION": return "AWAITING_CONFIRMATION";
+    case "INVALID_REQUEST":
+    case "NOT_FOUND":
+      return "REJECTED";
+    case "MODEL_FAILURE":
+    case "PROVIDER_UNAVAILABLE":
+      return "MODEL_FAILURE";
+    default:
+      return "COMPLETED"; // honest catch-all: renders the message inside a failure panel, not as a verdict
+  }
+}
+
+const PANEL_TITLES: Record<string, string> = {
+  COMPLETED: "Research result",
+  AWAITING_CONFIRMATION: "Confirmation required",
+  REJECTED: "Request rejected",
+  MODEL_FAILURE: "Interpretation failed",
+};
+
 export function ResearchWorkspacePage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -59,15 +86,17 @@ export function ResearchWorkspacePage() {
 
   useEffect(() => {
     if (stream.errorId > 0) {
+      const code = stream.error!.code;
+      const outcome = errorTurnOutcome(code);
       setRuns((prev) => [...prev, {
         question: stream.question,
         run: {
           requestId: crypto.randomUUID(),
           action: "RESEARCH",
-          outcome: stream.error!.code === "AWAITING_CONFIRMATION" ? "AWAITING_CONFIRMATION" : stream.error!.code === "INVALID_REQUEST" ? "REJECTED" : "MODEL_FAILURE",
-          ...(stream.error!.code !== "AWAITING_CONFIRMATION" && stream.error!.code !== "INVALID_REQUEST"
-            ? { modelFailure: { type: stream.error!.code, message: stream.error!.message } }
-            : {}),
+          outcome,
+          // Only a model-class failure carries the modelFailure field; other typed
+          // failures speak through the answer message without being relabeled.
+          ...(outcome === "MODEL_FAILURE" ? { modelFailure: { type: code, message: stream.error!.message } } : {}),
           answer: {
             answer: stream.error!.message,
             supportingReasons: [],
@@ -271,7 +300,7 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
       ) : (
         <Panel
           kicker={`${run.outcome.toLowerCase()} · ${run.action.toLowerCase()}`}
-          title={run.outcome === "AWAITING_CONFIRMATION" ? "Confirmation required" : run.outcome === "REJECTED" ? "Request rejected" : "Interpretation failed"}
+          title={PANEL_TITLES[run.outcome] ?? "Run could not complete"}
         >
           <div className="panel-body" style={{ padding: 14 }}>
             <p style={{ margin: 0, fontSize: 14, lineHeight: 1.65 }}>{run.answer.answer}</p>
@@ -317,7 +346,9 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
       {run.limitations.length > 0 && (
         <Panel kicker="honest limitations" title="What this run could not do">
           <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {run.limitations.map((l, i) => <UnavailableNote key={i} note={l} />)}
+            {/* Dedupe defensively: DTOs produced before server-side dedupe (or relayed
+                payloads) could repeat a limitation; rendering each distinct one once. */}
+            {[...new Set(run.limitations)].map((l, i) => <UnavailableNote key={i} note={l} />)}
           </div>
         </Panel>
       )}

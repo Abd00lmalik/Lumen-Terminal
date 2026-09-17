@@ -150,6 +150,26 @@ export async function streamResearch(
     return;
   }
 
+  // Terminal-once semantics: after a `final` result has been delivered, later error or
+  // connection-lost signals (e.g. a reset during connection teardown) must never
+  // overwrite or follow the delivered result with a phantom failure turn.
+  let delivered = false;
+  const guarded: StreamHandlers = {
+    ...handlers,
+    onFinal: (result) => {
+      delivered = true;
+      handlers.onFinal(result);
+    },
+    onError: (error) => {
+      if (!delivered) handlers.onError(error);
+    },
+    onConnectionLost: handlers.onConnectionLost
+      ? () => {
+          if (!delivered) handlers.onConnectionLost!();
+        }
+      : undefined,
+  };
+
   // Parse the event-stream manually: `event:` lines name the event, `data:` lines carry JSON.
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -158,16 +178,24 @@ export async function streamResearch(
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+      // An intermediary may normalize SSE line endings to CRLF; normalize back so the
+      // blank-line event separator is always exactly "\n\n" regardless of transport.
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
       let sep: number;
       while ((sep = buffer.indexOf("\n\n")) !== -1) {
         const chunk = buffer.slice(0, sep);
         buffer = buffer.slice(sep + 2);
-        handleSseChunk(chunk, handlers);
+        handleSseChunk(chunk, guarded);
       }
     }
+    // The stream can end without a trailing blank line (proxy truncation, early close)
+    // and the decoder can hold buffered multi-byte bytes: flush both and drain any
+    // complete residual event so a terminal `final`/`error` is never dropped after the
+    // last read (a dropped final looked like an eternal "Researching…").
+    buffer += decoder.decode();
+    if (buffer.trim().length > 0) handleSseChunk(buffer, guarded);
   } catch {
-    handlers.onConnectionLost?.();
+    guarded.onConnectionLost?.();
   }
 }
 
@@ -184,15 +212,30 @@ function handleSseChunk(chunk: string, handlers: StreamHandlers): void {
   try {
     payload = JSON.parse(dataLines.join("\n"));
   } catch {
-    return; // malformed event; never render garbage
+    // Malformed PROGRESS events are skippable garbage; a malformed TERMINAL event must
+    // never fail silently, because silence leaves the UI "researching" forever.
+    if (eventName === "final" || eventName === "error") {
+      handlers.onError(new ApiError("INTERNAL_ERROR", "The backend sent a malformed terminal event; no result can be rendered.", 0));
+    }
+    return;
   }
   if (eventName === "progress" && isProgressPayload(payload)) {
     handlers.onProgress({ stage: payload.stage, summary: payload.summary, data: payload.data });
   } else if (eventName === "final") {
-    handlers.onFinal(payload);
-  } else if (eventName === "error" && isErrorPayload(payload)) {
-    handlers.onError(new ApiError(payload.error.code, payload.error.message, 0, payload.error.confirmation));
+    if (isResponsePayload(payload)) handlers.onFinal(payload);
+    else handlers.onError(new ApiError("INTERNAL_ERROR", "The backend's final result was malformed; no result can be rendered.", 0));
+  } else if (eventName === "error") {
+    if (isErrorPayload(payload)) handlers.onError(new ApiError(payload.error.code, payload.error.message, 0, payload.error.confirmation));
+    else handlers.onError(new ApiError("INTERNAL_ERROR", "The backend reported a run failure without a typed error payload.", 0));
   }
+}
+
+/** Minimal transport-level shape check; rendering itself trusts the backend's typed DTO. */
+function isResponsePayload(v: unknown): v is { outcome: string; answer: { answer: string } } {
+  if (typeof v !== "object" || v === null) return false;
+  const record = v as Record<string, unknown>;
+  const answer = record.answer;
+  return typeof record.outcome === "string" && typeof answer === "object" && answer !== null && typeof (answer as Record<string, unknown>).answer === "string";
 }
 
 function isProgressPayload(v: unknown): v is { stage: string; summary: string; data?: Record<string, string | number | boolean> } {
