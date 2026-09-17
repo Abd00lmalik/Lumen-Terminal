@@ -1,11 +1,11 @@
 # Bitget Capability Research; Findings Report
 
-> **Status:** Research phase deliverable. No application implementation has been done.
+> **Status:** Upstream capability research retained for engineering provenance (historical; the product is Lumen Terminal, an independent research workbench that consumes Bitget as one provider among several).
 > **Research date:** 2026-09-12. **Researcher:** Buffy (coding agent), via official sources only.
 > **Classification labels:** CONFIRMED (verified against official Bitget sources) · INFERRED (reasonable conclusion from official sources, not stated verbatim) · UNKNOWN (not documented in accessible sources) · GAP (capability Bitget does not provide).
 >
 > **Sources used (all official):**
-> 1. Bitget AI Base Camp Hackathon docs (official GitBook): `bitget-ai.gitbook.io/hackathon`
+> 1. Bitget AI program docs (official GitBook): `bitget-ai.gitbook.io`
 > 2. `Bitget-AI/agent_hub` (official ecosystem entry point, GitHub)
 > 3. `Bitget-AI/agent-skill` (official trading-skill repo, GitHub)
 > 4. `Bitget-AI/bitget-signal` (official market-analysis skills repo, GitHub): README, `llms.txt`, `CHANGELOG.md`, `VERSION` (v1.2.0), and the five per-skill `SKILL.md` files
@@ -94,7 +94,7 @@ Installation mechanism (for our runtime agent's host environment): `npx @bitget-
 
 ### 2.6 Ecosystem extras
 - **Planned Bitget-exclusive signals** (announced in official README + CHANGELOG roadmap; **not shipped at research date; status: announced future capability**): `top-trader-flow` (aggregated copy-trading leader positioning), `derivatives-structure` (perp basis, term structure, funding-rate curve from Bitget orderbook), `large-flow-detect` (whale-sized order detection on Bitget pairs). These map directly onto our DERIVATIVES data domain and Falsification/Monitoring needs; track and adopt when released.
-- **Trading stack** (`bgc` CLI + trading skill + SDK): 89 UTA v3 ops, paper trading (`--paper-trading`), `--read-only` mode, demo API keys. Relevant to us only for potential future account/position context and for the hackathon's demo expectations; **the research workbench itself must not execute trades** (architecture: Safety & Decision Boundary).
+- **Trading stack** (`bgc` CLI + trading skill + SDK): 89 UTA v3 ops, paper trading (`--paper-trading`), `--read-only` mode, demo API keys. Relevant to us only for potential future account/position context and for the program's demo expectations; **the research workbench itself must not execute trades** (architecture: Safety & Decision Boundary).
 
 ## 3. Architecture assumptions: confirmed / invalidated / unknown
 
@@ -148,7 +148,7 @@ Only genuine, verified gaps are listed. Bitget stays primary; externals are fall
 |---|---|---|---|---|
 | G1 | Deep historical datasets (multi-year OHLCV, historical funding/OI, past liquidation cascades) | Skill history windows are shallow (14d / ~24 points / 200 klines default) | Historical market-data provider (candidates exist; selection deferred) | RECOMMENDED; required by Flow 5 and serious Flow 2/7 work |
 | G2 | Primary-source retrieval / general web search (on-chain forensics, regulatory filings, original articles, postmortems) | Skills aggregate RSS only; no open web retrieval | Web search + page-fetch capability | RECOMMENDED; required by Flow 2 branching and source-verification duties (SOURCE DISCOVERY & RETRIEVAL) |
-| G3 | True on-chain intelligence (whale wallets, exchange reserves, unlocks, ETF flow figures) | Explicitly NOT available in market-intel (documented); only proxies | On-chain analytics provider (e.g., candidates in the skills ecosystem; selection deferred) | RECOMMENDED for ONCHAIN domain fidelity; or consciously accept proxy-level ONCHAIN evidence for the hackathon MVP and document the limitation |
+| G3 | True on-chain intelligence (whale wallets, exchange reserves, unlocks, ETF flow figures) | Explicitly NOT available in market-intel (documented); only proxies | On-chain analytics provider (e.g., candidates in the skills ecosystem; selection deferred) | RECOMMENDED for ONCHAIN domain fidelity; or consciously accept proxy-level ONCHAIN evidence for the MVP and document the limitation |
 | G4 | Regulation-specific structured information | News covers regulation narratively; no structured regulatory data | None for MVP; treat REGULATION as news-derived domain | RECOMMENDED to defer (not required to satisfy the architecture's domain at MVP depth) |
 | G5 | Long-horizon monitoring/scheduling infrastructure | No verified scheduling capability in the ecosystem (agent-host dependent) | Runtime-host scheduling (cron/host-native), not an external SaaS | RECOMMENDED to implement in the runtime host, not an external provider |
 | G6 | Persistent storage for research objects | Not a Bitget concern at all | Local/DB storage; implementation decision (UNRESOLVED question) | Implementation-layer, not a "provider" |
@@ -170,7 +170,7 @@ Only genuine, verified gaps are listed. Bitget stays primary; externals are fall
 
 1. Runtime agent host needs: Node ≥ 20 (installer/MCP), Python + pandas/numpy (technical-analysis), network access to the public MCP endpoint and `api.bitget.com`.
 2. Install path: `npx @bitget-ai/bitget-signal --target all` for skill+MCP deployment in the agent host; but for a product runtime we more likely call the same MCP tools directly from our own orchestrator rather than depending on a specific AI host's skill directories. Both routes are open; decision belongs to the implementation phase.
-3. No API keys are needed for the research layer. If account/position context is ever added (hackathon demo), that requires Bitget API keys via env vars only (never committed); plus `--read-only`/paper-trading safeguards.
+3. No API keys are needed for the research layer. If account/position context is ever added, that requires Bitget API keys via env vars only (never committed); plus `--read-only`/paper-trading safeguards.
 4. Rate-limit handling (client-side throttling) must be built before parallel skill fan-out is used in production research runs.
 5. Evidence-provenance implementation must capture: skill name, MCP tool + action + parameters, raw response reference, retrieval timestamp; regardless of the skills' user-facing vendor-masking.
 
@@ -189,7 +189,7 @@ Only genuine, verified gaps are listed. Bitget stays primary; externals are fall
 2. **Historical-data provider selection** (G1); vendor choice deferred to implementation phase. UNRESOLVED.
 3. **Web-retrieval provider selection** (G2); same. UNRESOLVED.
 4. **Persistence/storage technology** for research objects. UNRESOLVED (pre-existing).
-5. **Model/provider choice** for the runtime agent (hackathon provides Qwen credits via a Bitget proxy base URL for registered teams; alternatively any provider). UNRESOLVED; note the model layer must remain replaceable per the architecture/handoff.
+5. **Model/provider choice** for the runtime agent (the upstream program offered Qwen credits via a Bitget proxy base URL; any provider works). UNRESOLVED; note the model layer must remain replaceable per the architecture/handoff.
 6. **Invocation route:** install skills into the coding-agent host vs call the public MCP tools directly from our own orchestrator. UNRESOLVED.
 7. **LUI 5-action vs 6-action (SAVE) contradiction**; ~~needs human decision~~ **RESOLVED 2026-09-12 by human architecture lock:** the universal LUI action set is 6 actions (RESEARCH, ANALYZE, CHALLENGE, MANAGE_STATE, MONITOR, SAVE; SAVE first-class). Locked model defined in `docs/architecture/lui-universal-core.md` + `lui-save-action.md`; `lui-flow-extensions.md` amended. M3 therefore implements the 6-action model.
 
@@ -207,7 +207,7 @@ Only genuine, verified gaps are listed. Bitget stays primary; externals are fall
 
 ## Verification appendix
 
-- Everything labeled CONFIRMED above cites: official GitBook hackathon docs; official GitHub repos `Bitget-AI/agent_hub`, `Bitget-AI/agent-skill`, `Bitget-AI/bitget-signal` (README, `llms.txt`, `CHANGELOG.md` v1.2.0 2026-05-29, `VERSION`, five `skills/*/SKILL.md` files); retrieved 2026-09-12.
+- Everything labeled CONFIRMED above cites: official Bitget AI program docs; official GitHub repos `Bitget-AI/agent_hub`, `Bitget-AI/agent-skill`, `Bitget-AI/bitget-signal` (README, `llms.txt`, `CHANGELOG.md` v1.2.0 2026-05-29, `VERSION`, five `skills/*/SKILL.md` files); retrieved 2026-09-12.
 - Items labeled UNKNOWN could not be verified from official documentation accessible at research time (rate limits, historical archive depth, backend SLA, concurrent-call behavior).
 - Items labeled INFERRED are conclusions drawn from official material without verbatim statements (e.g., "skills are composable" is explicit; "one shared transport" is inferred from the shared MCP endpoint documented across all five skill files).
 - No capability was assumed from our architecture files; where architecture assumptions conflicted with verified reality, they are listed in §3 as needing modification.

@@ -51,7 +51,7 @@
   height: var(--topbar-h); flex: 0 0 var(--topbar-h);
   border-bottom: 1px solid var(--line);
   display: flex; align-items: center; gap: var(--gap-4);
-  padding: 0 var(--gap-5); background: rgba(11, 13, 15, 0.7);
+  padding: 0 var(--gap-5); background: color-mix(in srgb, var(--bg) 72%, transparent);
 }
 .crumb { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-3); letter-spacing: 0.04em; }
 .crumb b { color: var(--text-2); font-weight: 500; }

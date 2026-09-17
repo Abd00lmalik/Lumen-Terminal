@@ -61,6 +61,54 @@
   --topbar-h: 52px;
 }
 
+/* ================================================================
+   LIGHT MODE (mandate §14): high-end analytical software, not a
+   generic white SaaS dashboard. Warm off-white canvas, soft gray
+   surfaces, restrained borders, dark text, same teal accent.
+   Dark remains the default (no data-theme attribute needed).
+   ================================================================ */
+[data-theme="light"] {
+  /* ----- 60% surfaces: warm neutral off-whites ----- */
+  --bg: #f7f6f3;            /* warm paper canvas */
+  --panel: #ffffff;         /* raised panel */
+  --panel-2: #f1efea;       /* nested panel / header strip */
+  --panel-3: #e9e6df;       /* hover / active fill */
+
+  /* ----- 30% structure ----- */
+  --line: #dedbd2;          /* hairline border */
+  --line-strong: #c9c5ba;
+  --text: #1c2530;          /* primary text */
+  --text-2: #5a6472;        /* secondary text */
+  --text-3: #8b93a0;        /* tertiary / labels */
+
+  /* ----- 10% accents: same hues, light-mode-tuned steps (AA on light bg) ----- */
+  --accent: #0a8f86;        /* teal; darkened for 4.5:1 on paper */
+  --accent-dim: rgba(10, 143, 134, 0.1);
+  --up: #128a55;            /* market green */
+  --down: #c93652;          /* market red */
+  --info: #2e63c4;          /* blue */
+  --warn: #a8701f;          /* amber */
+  --spec: #9042a8;          /* magenta */
+
+  /* epistemic class colors */
+  --cls-observation: #0a8f86;
+  --cls-derived: #2e63c4;
+  --cls-interpretation: #6d4dc4;
+  --cls-proxy: #a8701f;
+  --cls-speculation: #9042a8;
+  --cls-unavailable: #8b93a0;
+
+  /* memory / freshness */
+  --fresh: #128a55;
+  --stale: #a8701f;
+  --historical: #8b93a0;
+
+  /* elevation reads as soft shadow, not black glow */
+  --shadow-1: 0 1px 2px rgba(28, 37, 48, 0.06);
+  --shadow-2: 0 10px 28px rgba(28, 37, 48, 0.1);
+  --glow-accent: 0 0 0 1px rgba(10, 143, 134, 0.3), 0 2px 12px rgba(10, 143, 134, 0.08);
+}
+
 html, body, #root { height: 100%; }
 
 body {
@@ -92,9 +140,9 @@ body {
 
 ::selection { background: rgba(1, 212, 200, 0.25); }
 
-/* scrollbars — quiet, terminal-flavored */
+/* scrollbars — quiet, terminal-flavored (theme-aware) */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #1c2126; border-radius: 5px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 5px; border: 2px solid var(--bg); }
 ::-webkit-scrollbar-track { background: transparent; }
 
 a { color: var(--accent); text-decoration: none; }

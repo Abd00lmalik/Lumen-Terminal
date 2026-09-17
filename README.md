@@ -4,7 +4,7 @@
 
 > **This is not a trading terminal.** Lumen Terminal performs research only. There are no orders, no execution, no position management, and no buy/sell signals anywhere in the system; by architecture, not by policy. *Research can inform a decision; research does not become the decision.*
 
-Built for the Bitget AI Hackathon (Track 3).
+Lumen Terminal is an independent research product: a workbench that turns natural-language questions into evidence-backed investigations. It integrates exchange and public data providers (Bitget as a primary market-data source among fallbacks) behind a provider-neutral capability registry.
 
 ---
 

@@ -141,7 +141,7 @@ export function LandingPage() {
           {/* left: content */}
           <div className="hero-content">
             <div className="hero-eyebrow">
-              Bitget AI Hackathon · Track 3 · Research, Not Execution
+              AI research workbench · Research, not execution
             </div>
 
             <h1 className="hero-headline">
@@ -198,32 +198,32 @@ export function LandingPage() {
 
           {/* right: 3D scene */}
           <div className="hero-3d">
-            <Suspense fallback={null}>
+            <Suspense fallback={<div className="hero-3d-static" aria-hidden><div className="hero-3d-static-core" /></div>}>
               <ResearchCoreScene />
             </Suspense>
-            {/* floating data cards */}
+            {/* floating capability labels; describe the pipeline honestly, no fake live state */}
             <div className="floating-card fc-1">
-              <div className="floating-card-label">Market Data</div>
+              <div className="floating-card-label">Market data</div>
               <div className="floating-card-value">
-                <span className="floating-card-dot" /> connected
+                <span className="floating-card-dot" /> technical · historical
               </div>
             </div>
             <div className="floating-card fc-2">
-              <div className="floating-card-label">News &amp; Sentiment</div>
+              <div className="floating-card-label">News &amp; sentiment</div>
               <div className="floating-card-value">
-                <span className="floating-card-dot blue" /> analyzing
+                <span className="floating-card-dot blue" /> classified sources
               </div>
             </div>
             <div className="floating-card fc-3">
               <div className="floating-card-label">Macro</div>
               <div className="floating-card-value">
-                <span className="floating-card-dot amber" /> 1,095 observations
+                <span className="floating-card-dot amber" /> cross-asset context
               </div>
             </div>
             <div className="floating-card fc-4">
-              <div className="floating-card-label">Historical</div>
+              <div className="floating-card-label">Every claim</div>
               <div className="floating-card-value">
-                <span className="floating-card-dot violet" /> synchronized
+                <span className="floating-card-dot violet" /> provenance attached
               </div>
             </div>
           </div>
@@ -403,8 +403,8 @@ export function LandingPage() {
         <div className="footer-brand">
           <div className="footer-brand-name">Lumen Terminal</div>
           <div className="footer-brand-desc">
-            AI research workbench. Built for the Bitget AI Hackathon Track 3
-            prototype. Research content comes from your own workspace via the
+            AI research workbench. Natural-language questions in; evidence-backed
+            investigations out. Research content comes from your own workspace via the
             workbench backend.
           </div>
         </div>
@@ -418,7 +418,7 @@ export function LandingPage() {
           <div className="footer-legal-text">
             Research workstation; not an exchange interface.
             <br />
-            Not affiliated with Bitget.
+            Not affiliated with any exchange or data provider shown in sources.
           </div>
           <div className="footer-legal-text">
             Research only.

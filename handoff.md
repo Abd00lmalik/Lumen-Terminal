@@ -8,7 +8,7 @@
 ## 1. Project Overview
 
 - **What:** AI Trading Research Workbench; a natural-language research environment for crypto traders. Trader asks in plain language; the system plans research, maintains evidence/hypotheses/judgments, and returns a decision-ready judgment with provenance.
-- **Context:** Bitget AI Hackathon, Track 3. Bitget Skills are the primary tool ecosystem.
+- **Context:** Independent research product (Lumen Terminal). Bitget research skills are a primary tool ecosystem among provider fallbacks.
 - **NOT:** not an autonomous trading bot, not a chatbot wrapper, not an execution engine. The trader always makes the final decision.
 
 ## 2. Current Repository State

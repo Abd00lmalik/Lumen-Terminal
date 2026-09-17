@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { AppShell } from "../components/AppShell.js";
 import { Panel, Toggle, Note, KV, StatusBadge } from "../components/ui.js";
 import { BackendDownNote } from "../components/BackendDownNote.js";
+import { useTheme } from "../hooks/useTheme.js";
 import { http } from "../api/index.js";
 
 interface HealthResponse {
@@ -65,6 +66,7 @@ export function SettingsPage() {
 
   const [density, setDensity] = useState("Medium");
   const [motion, setMotion] = useState(true);
+  const { preference: theme, setPreference: setTheme } = useTheme();
   const [autoClassify, setAutoClassify] = useState(true);
   const [contradictionBias, setContradictionBias] = useState(true);
   const [disclosure, setDisclosure] = useState("L1 · why");
@@ -107,8 +109,13 @@ export function SettingsPage() {
             <Row title="Motion" hint="Subtle progress and pulse animations">
               <Toggle on={motion} onChange={setMotion} label="Motion" />
             </Row>
-            <Row title="Theme" hint="Dark is the native surface for this terminal">
-              <span className="badge gray">Dark only</span>
+            <Row title="Theme" hint="Dark is the native surface; light is a full token set. System follows your OS">
+              <Segmented
+                options={["Dark", "Light", "System"]}
+                value={theme === "system" ? "System" : theme === "light" ? "Light" : "Dark"}
+                onChange={(v) => setTheme(v.toLowerCase() as "dark" | "light" | "system")}
+                label="Theme"
+              />
             </Row>
           </div>
         </Panel>
@@ -172,7 +179,7 @@ export function SettingsPage() {
           <div className="panel-body" style={{ paddingTop: 4 }}>
             <KV k="research scope" v="research only; no execution, ever" />
             <KV k="telemetry" v="none" />
-            <KV k="build" v="Lumen Terminal · hackathon prototype" />
+            <KV k="build" v="Lumen Terminal" />
             <KV k="data status" v="live research data from your workspace" />
           </div>
         </Panel>

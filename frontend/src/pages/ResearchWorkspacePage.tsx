@@ -299,7 +299,7 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
         </section>
       ) : (
         <Panel
-          kicker={`${run.outcome.toLowerCase()} · ${run.action.toLowerCase()}`}
+          kicker={`${run.outcome === "MODEL_FAILURE" ? "model unavailable" : run.outcome.toLowerCase().replace(/_/g, " ")} · ${run.action.toLowerCase()}`}
           title={PANEL_TITLES[run.outcome] ?? "Run could not complete"}
         >
           <div className="panel-body" style={{ padding: 14 }}>
@@ -324,7 +324,7 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
 
       {run.modelFailure !== undefined && (
         <Note tone="warn">
-          <b>Model failure ({run.modelFailure.type}).</b> {run.modelFailure.message}; no evidence was fabricated to cover it.
+          <b>Model unavailable.</b> Lumen could not interpret this research request because its model service is temporarily unavailable ({run.modelFailure.type}). No research result was fabricated; try again shortly.
         </Note>
       )}
 

@@ -1,303 +1,242 @@
 /**
- * ResearchCore; Interactive 3D hero visualization.
- * A translucent crystalline research core with orbital rings, floating particles,
- * and data nodes. Built with React Three Fiber + drei + postprocessing.
+ * EvidenceGraph; the Lumen hero visualization.
+ *
+ * Concept (mandate §11): "many pieces of evidence becoming one research judgment."
+ * A dark, dimensional research structure: a central geometric core (the judgment)
+ * surrounded by small evidence/source nodes connected to it by thin paths (the
+ * investigation), with a few layered translucent planes for depth. NOT a floating
+ * monitor; NOT a decorative tech demo.
+ *
+ * Performance laws (mandate §12):
+ * - No postprocessing, no transmission materials, no Environment HDRI, no shadows.
+ * - Low-poly geometry only; ~26 meshes total; no per-frame allocation.
+ * - Animation is a slow rotation + gentle node drift (throttled by frame delta).
+ * - dpr capped at 1.5; canvas is lazy-loaded by the landing page; a CSS/HTML
+ *   fallback (same composition, no WebGL) renders when 3D is unavailable and as
+ *   the Suspense fallback so the hero is never blank.
+ * - The palette reads `data-theme` so light mode gets a light composition.
  */
 import { useRef, useMemo, Suspense } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Float, MeshTransmissionMaterial, Environment } from "@react-three/drei";
-import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import * as THREE from "three";
 
-/* ---------- outer beveled cube ---------- */
-function OuterCore() {
-  const ref = useRef<THREE.Mesh>(null!);
-  useFrame((_, delta) => {
-    ref.current.rotation.y += delta * 0.08;
-    ref.current.rotation.x += delta * 0.03;
-  });
+const ACCENT = "#14b8a6"; // teal; consistent in both themes
+
+interface NodeSpec {
+  readonly position: [number, number, number];
+  readonly size: number;
+  readonly opacity: number;
+}
+
+/** Deterministic pseudo-random layout (stable across renders/HMR; no Math.random flicker). */
+function layoutNodes(count: number): NodeSpec[] {
+  const nodes: NodeSpec[] = [];
+  let seed = 7;
+  const rand = () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+  for (let i = 0; i < count; i++) {
+    const radius = 1.9 + rand() * 1.9;
+    const theta = rand() * Math.PI * 2;
+    const y = (rand() - 0.5) * 3.2;
+    nodes.push({
+      position: [Math.cos(theta) * radius, y, Math.sin(theta) * radius * 0.8 - 0.4],
+      size: 0.035 + rand() * 0.045,
+      opacity: 0.35 + rand() * 0.45,
+    });
+  }
+  return nodes;
+}
+
+const EVIDENCE_NODES = layoutNodes(22);
+
+/** Thin path from an evidence node toward the core (the act of synthesis). */
+function ConnectionLine({ to, opacity }: { to: NodeSpec["position"]; opacity: number }) {
+  const geometry = useMemo(() => {
+    const from = new THREE.Vector3(...to);
+    const target = from.clone().multiplyScalar(0.22); // stop short of the core surface
+    const points = [from, from.clone().lerp(target, 0.5), target];
+    return new THREE.BufferGeometry().setFromPoints(points);
+  }, [to]);
   return (
-    <mesh ref={ref} scale={2.0}>
-      <boxGeometry args={[1, 1, 1, 4, 4, 4]} />
-      <MeshTransmissionMaterial
-        backside
-        samples={6}
-        thickness={0.4}
-        chromaticAberration={0.06}
-        anisotropy={0.1}
-        distortion={0.1}
-        distortionScale={0.2}
-        temporalDistortion={0.05}
-        color="#01d4c8"
-        transmission={0.95}
-        roughness={0.05}
-        ior={1.5}
-        toneMapped={true}
-      />
-    </mesh>
+    <line>
+      <primitive object={geometry} attach="geometry" />
+      <lineBasicMaterial color={ACCENT} transparent opacity={opacity * 0.35} toneMapped={false} />
+    </line>
   );
 }
 
-/* ---------- middle rotated glass ---------- */
-function MiddleCore() {
+/** The judgment: a faceted core, slowly turning; brighter facets suggest synthesis. */
+function JudgmentCore() {
   const ref = useRef<THREE.Mesh>(null!);
-  useFrame((_, delta) => {
-    ref.current.rotation.y -= delta * 0.12;
-    ref.current.rotation.z += delta * 0.05;
-  });
-  return (
-    <mesh ref={ref} scale={1.35} rotation={[0.3, 0.5, 0.2]}>
-      <boxGeometry args={[1, 1, 1, 3, 3, 3]} />
-      <MeshTransmissionMaterial
-        backside
-        samples={4}
-        thickness={0.3}
-        chromaticAberration={0.04}
-        transmission={0.9}
-        roughness={0.1}
-        color="#0ff5e6"
-        ior={1.4}
-        toneMapped={true}
-      />
-    </mesh>
-  );
-}
-
-/* ---------- inner luminous core ---------- */
-function InnerCore() {
-  const ref = useRef<THREE.Mesh>(null!);
-  useFrame((state) => {
-    const t = state.clock.elapsedTime;
-    ref.current.scale.setScalar(0.55 + Math.sin(t * 1.2) * 0.05);
+  useFrame((state, delta) => {
+    ref.current.rotation.y += delta * 0.12;
+    ref.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.18) * 0.12;
   });
   return (
     <mesh ref={ref}>
-      <octahedronGeometry args={[1, 0]} />
+      <icosahedronGeometry args={[0.85, 0]} />
       <meshStandardMaterial
-        color="#01d4c8"
-        emissive="#01d4c8"
-        emissiveIntensity={2.5}
+        color={ACCENT}
+        emissive={ACCENT}
+        emissiveIntensity={0.85}
+        flatShading
         transparent
-        opacity={0.9}
+        opacity={0.92}
         toneMapped={false}
       />
     </mesh>
   );
 }
 
-/* ---------- orbital rings ---------- */
-function OrbitalRing({ radius, speed, tilt, color }: {
-  radius: number;
-  speed: number;
-  tilt: [number, number, number];
-  color: string;
-}) {
+/** Inner nucleus visible through the core's facets. */
+function Nucleus() {
   const ref = useRef<THREE.Mesh>(null!);
-  useFrame((_, delta) => {
-    ref.current.rotation.z += delta * speed;
+  useFrame((state) => {
+    ref.current.rotation.y = -state.clock.elapsedTime * 0.2;
   });
   return (
-    <mesh ref={ref} rotation={tilt}>
-      <torusGeometry args={[radius, 0.008, 16, 128]} />
-      <meshStandardMaterial
-        color={color}
-        emissive={color}
-        emissiveIntensity={0.6}
-        transparent
-        opacity={0.35}
-        toneMapped={false}
-      />
+    <mesh ref={ref} scale={0.45}>
+      <octahedronGeometry args={[1, 0]} />
+      <meshStandardMaterial color="#e9fffb" emissive={ACCENT} emissiveIntensity={1.6} toneMapped={false} />
     </mesh>
   );
 }
 
-/* ---------- floating particles ---------- */
-function Particles({ count = 200 }: { count?: number }) {
+/** Layered translucent planes: quiet structural depth, not decoration. */
+function DepthPlanes() {
+  return (
+    <group>
+      <mesh rotation={[0.42, 0.2, 0]} position={[0, 0, -1.1]}>
+        <planeGeometry args={[4.6, 4.6]} />
+        <meshBasicMaterial color={ACCENT} transparent opacity={0.04} side={THREE.DoubleSide} toneMapped={false} />
+      </mesh>
+      <mesh rotation={[-0.3, -0.35, 0.1]} position={[0.3, -0.2, -1.6]}>
+        <planeGeometry args={[5.4, 5.4]} />
+        <meshBasicMaterial color={ACCENT} transparent opacity={0.03} side={THREE.DoubleSide} toneMapped={false} />
+      </mesh>
+    </group>
+  );
+}
+
+/** Evidence nodes with gentle independent drift (cheap: position sine per node). */
+function EvidenceField() {
+  const group = useRef<THREE.Group>(null!);
+  const seeds = useMemo(() => EVIDENCE_NODES.map((_, i) => i * 1.7), []);
+  useFrame((state) => {
+    const t = state.clock.elapsedTime;
+    group.current.children.forEach((child, i) => {
+      child.position.y = EVIDENCE_NODES[i]!.position[1] + Math.sin(t * 0.35 + seeds[i]!) * 0.08;
+    });
+  });
+  return (
+    <group ref={group}>
+      {EVIDENCE_NODES.map((node, i) => (
+        <group key={i} position={node.position}>
+          <mesh scale={node.size}>
+            <sphereGeometry args={[1, 10, 10]} />
+            <meshStandardMaterial
+              color={ACCENT}
+              emissive={ACCENT}
+              emissiveIntensity={0.9}
+              transparent
+              opacity={node.opacity}
+              toneMapped={false}
+            />
+          </mesh>
+          <ConnectionLine to={[0, 0, 0]} opacity={node.opacity} />
+        </group>
+      ))}
+    </group>
+  );
+}
+
+/** Sparse backdrop dust: depth without particle-noise. */
+function Dust({ count = 90 }: { count?: number }) {
   const ref = useRef<THREE.Points>(null!);
   const positions = useMemo(() => {
+    let seed = 13;
+    const rand = () => {
+      seed = (seed * 16807) % 2147483647;
+      return (seed - 1) / 2147483646;
+    };
     const arr = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
-      const r = 3 + Math.random() * 5;
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      arr[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-      arr[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-      arr[i * 3 + 2] = r * Math.cos(phi);
+      arr[i * 3] = (rand() - 0.5) * 11;
+      arr[i * 3 + 1] = (rand() - 0.5) * 7;
+      arr[i * 3 + 2] = -1 - rand() * 4;
     }
     return arr;
   }, [count]);
-
-  useFrame((state) => {
-    ref.current.rotation.y = state.clock.elapsedTime * 0.015;
+  useFrame((_, delta) => {
+    ref.current.rotation.y += delta * 0.008;
   });
-
   return (
     <points ref={ref}>
       <bufferGeometry>
-        <bufferAttribute
-          attach="attributes-position"
-          args={[positions, 3]}
-          count={count}
-          itemSize={3}
-        />
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} count={count} itemSize={3} />
       </bufferGeometry>
-      <pointsMaterial
-        size={0.025}
-        color="#01d4c8"
-        transparent
-        opacity={0.5}
-        sizeAttenuation
-        toneMapped={false}
-      />
+      <pointsMaterial size={0.02} color={ACCENT} transparent opacity={0.28} sizeAttenuation toneMapped={false} />
     </points>
   );
 }
 
-/* ---------- orbiting nodes ---------- */
-function OrbitNode({ orbitRadius, speed, offset, color, size = 0.06 }: {
-  orbitRadius: number;
-  speed: number;
-  offset: number;
-  color: string;
-  size?: number;
-}) {
-  const ref = useRef<THREE.Mesh>(null!);
-  useFrame((state) => {
-    const t = state.clock.elapsedTime * speed + offset;
-    ref.current.position.x = Math.cos(t) * orbitRadius;
-    ref.current.position.z = Math.sin(t) * orbitRadius;
-    ref.current.position.y = Math.sin(t * 0.5) * 0.3;
-  });
-  return (
-    <mesh ref={ref}>
-      <sphereGeometry args={[size, 16, 16]} />
-      <meshStandardMaterial
-        color={color}
-        emissive={color}
-        emissiveIntensity={1.5}
-        toneMapped={false}
-      />
-    </mesh>
-  );
-}
-
-/* ---------- ground reflection plane ---------- */
-function GroundPlane() {
-  return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.8, 0]}>
-      <planeGeometry args={[20, 20]} />
-      <meshStandardMaterial
-        color="#050607"
-        transparent
-        opacity={0.6}
-        roughness={0.9}
-      />
-    </mesh>
-  );
-}
-
-/* ---------- scene composition ---------- */
 function Scene() {
   return (
     <>
-      <ambientLight intensity={0.15} />
-      <directionalLight position={[5, 5, 5]} intensity={0.4} color="#e8ecef" />
-      <pointLight position={[-3, 2, -3]} intensity={0.3} color="#4c8dff" />
-      <pointLight position={[3, -2, 3]} intensity={0.2} color="#c86bdb" />
-      <spotLight
-        position={[0, 6, 0]}
-        angle={0.5}
-        penumbra={1}
-        intensity={0.6}
-        color="#01d4c8"
-        castShadow={false}
-      />
-
-      <Float speed={0.8} rotationIntensity={0.15} floatIntensity={0.3}>
-        <group>
-          <OuterCore />
-          <MiddleCore />
-          <InnerCore />
-        </group>
-      </Float>
-
-      <OrbitalRing radius={3.0} speed={0.15} tilt={[1.2, 0, 0.3]} color="#01d4c8" />
-      <OrbitalRing radius={3.5} speed={-0.1} tilt={[0.8, 0.4, 0]} color="#01d4c8" />
-      <OrbitalRing radius={4.0} speed={0.08} tilt={[0.3, 1.0, 0.5]} color="#4c8dff" />
-      <OrbitalRing radius={2.6} speed={-0.2} tilt={[1.5, 0.2, 0.1]} color="#01d4c8" />
-
-      <OrbitNode orbitRadius={3.2} speed={0.4} offset={0} color="#01d4c8" />
-      <OrbitNode orbitRadius={3.6} speed={0.3} offset={2} color="#4c8dff" size={0.05} />
-      <OrbitNode orbitRadius={4.1} speed={0.25} offset={4} color="#c86bdb" size={0.04} />
-      <OrbitNode orbitRadius={2.8} speed={0.5} offset={1} color="#e8a33d" size={0.045} />
-      <OrbitNode orbitRadius={3.8} speed={0.35} offset={3} color="#01d4c8" size={0.055} />
-
-      <Particles count={180} />
-      <GroundPlane />
-
-      <Environment preset="night" />
-      <EffectComposer>
-        <Bloom
-          luminanceThreshold={0.6}
-          luminanceSmoothing={0.4}
-          intensity={0.5}
-          mipmapBlur
-        />
-      </EffectComposer>
+      <ambientLight intensity={0.7} />
+      <directionalLight position={[4, 6, 5]} intensity={1.1} />
+      <pointLight position={[-4, -2, -3]} intensity={0.5} color={ACCENT} />
+      <JudgmentCore />
+      <Nucleus />
+      <DepthPlanes />
+      <EvidenceField />
+      <Dust />
     </>
   );
 }
 
-/* ---------- WebGL fallback ---------- */
-function WebGLFallback() {
+/** WebGL-less fallback (and Suspense fallback): the same composition in CSS. */
+function StaticEvidenceGraph() {
+  const nodes = useMemo(() => EVIDENCE_NODES.map((n) => ({
+    left: 50 + n.position[0] * 9,
+    top: 46 - n.position[1] * 11,
+    size: 5 + n.size * 60,
+    opacity: n.opacity,
+  })), []);
   return (
-    <div style={{
-      width: "100%",
-      height: "100%",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      background: "radial-gradient(ellipse at center, rgba(1, 212, 200, 0.06) 0%, transparent 60%)",
-      borderRadius: "16px",
-    }}>
-      <div style={{
-        width: 160,
-        height: 160,
-        border: "1px solid rgba(1, 212, 200, 0.2)",
-        borderRadius: "20px",
-        background: "rgba(1, 212, 200, 0.03)",
-        boxShadow: "0 0 60px rgba(1, 212, 200, 0.08)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        transform: "rotate(45deg)",
-      }}>
-        <div style={{
-          width: 60,
-          height: 60,
-          borderRadius: "12px",
-          background: "rgba(1, 212, 200, 0.15)",
-          boxShadow: "0 0 30px rgba(1, 212, 200, 0.2)",
-        }} />
-      </div>
+    <div className="hero-3d-static" aria-hidden>
+      <div className="hero-3d-static-core" />
+      {nodes.map((n, i) => (
+        <span
+          key={i}
+          className="hero-3d-static-node"
+          style={{ left: `${n.left}%`, top: `${n.top}%`, width: n.size, height: n.size, opacity: n.opacity }}
+        />
+      ))}
     </div>
   );
 }
 
-/* ---------- exported component ---------- */
+function hasWebGL(): boolean {
+  try {
+    const canvas = document.createElement("canvas");
+    return canvas.getContext("webgl2") !== null || canvas.getContext("webgl") !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** Exported scene: lazy-loaded by the landing page; safe under SSR/static rendering. */
 export function ResearchCoreScene() {
+  if (typeof document !== "undefined" && !hasWebGL()) return <StaticEvidenceGraph />;
   return (
-    <Suspense fallback={<WebGLFallback />}>
+    <Suspense fallback={<StaticEvidenceGraph />}>
       <Canvas
-        camera={{ position: [0, 1.5, 7], fov: 45 }}
+        camera={{ position: [0, 0.6, 6.6], fov: 42 }}
         dpr={[1, 1.5]}
-        gl={{
-          antialias: true,
-          alpha: true,
-          powerPreference: "high-performance",
-          toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 1.2,
-        }}
+        gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
         style={{ background: "transparent" }}
       >
         <Scene />
