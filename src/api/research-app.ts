@@ -415,7 +415,9 @@ function collectLimitations(result: LuiResult): string[] {
     if (f !== undefined) fromExecutions(f.outcome.executions);
   }
   if (result.rejected !== undefined) out.push(result.rejected.reason);
-  return out;
+  // Executions can legitimately surface the same constraint more than once (e.g. a
+  // capability retried across plan rounds); the user needs each distinct limitation once.
+  return [...new Set(out)];
 }
 
 export type { WorkspaceSnapshot };
