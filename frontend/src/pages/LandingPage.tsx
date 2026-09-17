@@ -1,160 +1,432 @@
 /**
- * Landing page; the most expressive surface. Signature art: a candlestick spine that
- * dissolves upward into an evidence constellation (CSS/SVG only, no images, no 3D libs).
+ * Landing page; premium dark research terminal aesthetic.
+ * Cinematic 3D hero with research core visualization,
+ * structured sections, scroll reveal animations.
  */
+import { lazy, Suspense, useState, useEffect, useRef, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+// Code-split: the three.js hero (~1MB) loads only when the landing page mounts,
+// keeping the app bundle (research surfaces) at its original size.
+const ResearchCoreScene = lazy(() =>
+  import("../components/hero/ResearchCore.js").then((m) => ({ default: m.ResearchCoreScene })),
+);
+import "../styles/landing.css";
 
-/** Deterministic pseudo-random candle series (fixed seed; no flicker between renders). */
-function candles(n: number): { up: boolean; h: number }[] {
-  const out: { up: boolean; h: number }[] = [];
-  let s = 7;
-  for (let i = 0; i < n; i++) {
-    s = (s * 1103515245 + 12345) % 2147483648;
-    const r = (s / 2147483648) - 0.5;
-    out.push({ up: r > -0.15, h: 8 + Math.abs(r) * 46 });
-  }
-  return out;
+/* ---------- scroll reveal hook ---------- */
+function useReveal() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          el.classList.add("visible");
+          obs.unobserve(el);
+        }
+      },
+      { threshold: 0.15 }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+  return ref;
 }
 
-function HeroArt() {
-  const series = candles(14);
-  const nodes = [
-    { x: 8, y: 4, c: "var(--cls-observation)" },
-    { x: 78, y: 9, c: "var(--cls-derived)" },
-    { x: 30, y: 16, c: "var(--cls-proxy)" },
-    { x: 62, y: 22, c: "var(--cls-observation)" },
-    { x: 15, y: 30, c: "var(--cls-interpretation)" },
-    { x: 84, y: 34, c: "var(--cls-derived)" },
-    { x: 45, y: 40, c: "var(--cls-speculation)" },
-    { x: 70, y: 48, c: "var(--cls-observation)" },
-    { x: 22, y: 54, c: "var(--cls-derived)" },
-    { x: 52, y: 60, c: "var(--cls-interpretation)" },
-  ];
+function RevealDiv({ className, children, delay }: {
+  className?: string;
+  children: React.ReactNode;
+  delay?: number;
+}) {
+  const ref = useReveal();
+  const delayClass = delay ? ` reveal-delay-${delay}` : "";
   return (
-    <div className="hero-art" aria-hidden>
-      <div style={{ position: "relative", height: 420 }}>
-        <div className="hero-orbit" style={{ left: "6%", right: "6%", top: "8%", bottom: "30%" }} />
-        {/* candlestick spine */}
-        <div style={{ position: "absolute", left: 0, bottom: "18%", display: "flex", flexDirection: "column", alignItems: "center" }}>
-          <div className="candle-col">
-            {series.map((c, i) => (
-              <div key={i} className={`candle ${c.up ? "up" : "down"}`} style={{ height: c.h, opacity: 0.35 + (i / series.length) * 0.65 }} />
-            ))}
-          </div>
-        </div>
-        {/* dissolve into constellation */}
-        <svg width="100%" height="100%" style={{ position: "absolute", inset: 0 }} viewBox="0 0 100 100" preserveAspectRatio="none">
-          <line x1="4" y1="34" x2="18" y2="30" stroke="rgba(1,212,200,0.35)" strokeWidth="0.25" />
-          <line x1="18" y1="30" x2="45" y2="40" stroke="rgba(1,212,200,0.28)" strokeWidth="0.25" />
-          <line x1="45" y1="40" x2="78" y2="9" stroke="rgba(1,212,200,0.3)" strokeWidth="0.25" />
-          <line x1="45" y1="40" x2="84" y2="34" stroke="rgba(1,212,200,0.24)" strokeWidth="0.25" />
-          <line x1="18" y1="30" x2="8" y2="4" stroke="rgba(1,212,200,0.3)" strokeWidth="0.25" />
-          <line x1="84" y1="34" x2="70" y2="48" stroke="rgba(1,212,200,0.3)" strokeWidth="0.25" />
-          <line x1="70" y1="48" x2="52" y2="60" stroke="rgba(1,212,200,0.22)" strokeWidth="0.25" />
-          <line x1="8" y1="4" x2="78" y2="9" stroke="rgba(1,212,200,0.14)" strokeWidth="0.2" />
-        </svg>
-        {nodes.map((n, i) => (
-          <span key={i} className="constellation-node" style={{ left: `${n.x}%`, top: `${n.y}%`, color: n.c }} />
-        ))}
-      </div>
+    <div ref={ref} className={`reveal${delayClass}${className ? ` ${className}` : ""}`}>
+      {children}
     </div>
   );
 }
 
-const CAPABILITIES = [
-  { glyph: "◎", title: "Evidence-first answers", body: "Every judgment traces to classified evidence; observations stay observations, interpretations stay labeled, proxy data carries its basis." },
-  { glyph: "⨂", title: "Built-in falsification", body: "The workbench actively searches for what could prove your thesis wrong; and tells you when it finds nothing instead of pretending." },
-  { glyph: "∿", title: "Continuity that decays honestly", body: "Saved knowledge is tracked with freshness. Stale memory never silently outranks current research." },
+/* ---------- research prompts ---------- */
+const PROMPTS = [
+  "What is affecting BTC right now?",
+  "Why did this happen?",
+  "Search historical data for similar BTC setups",
+  "What could prove my thesis wrong?",
+  "Evaluate my thesis",
 ];
 
+/* ---------- capabilities data ---------- */
+const CAPABILITIES = [
+  {
+    icon: "icon-evidence",
+    glyph: "◎",
+    title: "Evidence-first answers",
+    body: "Every judgment traces to classified evidence; observations stay observations, interpretations stay labeled, proxy data carries its basis.",
+  },
+  {
+    icon: "icon-falsification",
+    glyph: "⨂",
+    title: "Built-in falsification",
+    body: "The workbench actively searches for what could prove your thesis wrong; and tells you when it finds nothing instead of pretending.",
+  },
+  {
+    icon: "icon-memory",
+    glyph: "∿",
+    title: "Continuity that decays honestly",
+    body: "Saved knowledge is tracked with freshness. Stale memory never silently outranks current research.",
+  },
+];
+
+/* ---------- pipeline steps ---------- */
+const PIPELINE = [
+  { num: "01", title: "You ask", body: "Plain language in. The workbench classifies intent and resolves context from your workspace." },
+  { num: "02", title: "It plans", body: "A living research plan picks capabilities by information value; never a fixed script." },
+  { num: "03", title: "It investigates", body: "Market, news, sentiment and macro evidence gathered, classified and time-stamped." },
+  { num: "04", title: "It cross-checks", body: "Contradictions are preserved and typed; never forced into a tidy story." },
+  { num: "05", title: "You decide", body: "A judgment with confidence, uncertainty, and what would change it." },
+];
+
+/* ================================================================
+   LANDING PAGE COMPONENT
+   ================================================================ */
 export function LandingPage() {
   const navigate = useNavigate();
+  const [query, setQuery] = useState("");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (query.trim()) {
+      navigate("/research", { state: { question: query.trim() } });
+    }
+  };
+
+  const handlePromptClick = (prompt: string) => {
+    setQuery(prompt);
+  };
+
   return (
     <div className="landing">
-      <header className="landing-top">
-        <div className="brand" style={{ padding: 0 }}>
+      {/* ===== NAVIGATION ===== */}
+      <nav className={`landing-nav${mobileNavOpen ? " mobile-open" : ""}`}>
+        <a href="#/" className="landing-nav-brand">
           <span className="brand-mark" aria-hidden />
-          <div>
-            <div className="brand-name">Lumen Terminal</div>
-            <div className="brand-sub">AI RESEARCH WORKBENCH</div>
+          <div className="landing-nav-brand-text">
+            <span className="landing-nav-brand-name">Lumen Terminal</span>
+            <span className="landing-nav-brand-sub">AI Research Workbench</span>
           </div>
-        </div>
-        <nav className="landing-nav" aria-label="Landing">
+        </a>
+
+        <div className="landing-nav-links">
           <a href="#capabilities">Capabilities</a>
           <a href="#workflow">Workflow</a>
-          <button className="btn primary sm" onClick={() => navigate("/home")}>Enter workspace</button>
-        </nav>
-      </header>
-
-      <section className="hero">
-        <HeroArt />
-        <div className="hero-kicker">Bitget AI Hackathon · Track 3 · research, not execution</div>
-        <h1>
-          Ask better questions.<br />
-          <span className="dim">Get evidence, not echo.</span>
-        </h1>
-        <p className="hero-sub">
-          Lumen is an AI research workstation for traders. It plans investigations, gathers
-          classified evidence, tests your thesis against it; and shows its uncertainty instead
-          of hiding it.
-        </p>
-        <div className="hero-ctas">
-          <button className="btn primary" onClick={() => navigate("/home")}>Enter the workspace</button>
-          <button className="btn ghost" onClick={() => navigate("/research")}>See a live research thread</button>
+          <button className="landing-nav-enter" onClick={() => navigate("/home")}>
+            Enter workspace
+          </button>
         </div>
 
-        <div className="research-note-bar">
-          <span className="badge teal">research only</span>
-          <span style={{ color: "var(--text-2)", fontSize: 13 }}>
-            No order tickets, no execution, no leverage controls; the trader makes every decision.
-            Lumen does the investigating.
-          </span>
+        <button
+          className="landing-nav-burger"
+          onClick={() => setMobileNavOpen((v) => !v)}
+          aria-label="Toggle navigation"
+        >
+          {mobileNavOpen ? "✕" : "☰"}
+        </button>
+      </nav>
+
+      {/* ===== HERO ===== */}
+      <section className="hero-section">
+        <div className="hero-container">
+          {/* left: content */}
+          <div className="hero-content">
+            <div className="hero-eyebrow">
+              Bitget AI Hackathon · Track 3 · Research, Not Execution
+            </div>
+
+            <h1 className="hero-headline">
+              <span className="line-white">Ask better questions.</span>
+              <span className="line-cyan">Get evidence, not echo.</span>
+            </h1>
+
+            <p className="hero-description">
+              Lumen is an AI research workbench for traders. It plans investigations,
+              gathers classified evidence, tests your thesis against it; and shows its
+              uncertainty instead of hiding it.
+            </p>
+
+            <form onSubmit={handleSubmit}>
+              <div className="hero-input-wrap">
+                <span className="hero-input-icon" aria-hidden>✦</span>
+                <input
+                  className="hero-input"
+                  type="text"
+                  placeholder="Ask a research question..."
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  aria-label="Research question"
+                />
+                <button className="hero-input-submit" type="submit" aria-label="Submit">
+                  →
+                </button>
+              </div>
+            </form>
+
+            <div className="hero-chips">
+              <span className="hero-chips-label">Try asking:</span>
+              {PROMPTS.map((p) => (
+                <button
+                  key={p}
+                  className="hero-chip"
+                  onClick={() => handlePromptClick(p)}
+                  type="button"
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+
+            <div className="hero-ctas">
+              <button className="btn-primary" onClick={() => navigate("/home")}>
+                Enter the workspace
+              </button>
+              <button className="btn-ghost" onClick={() => navigate("/research")}>
+                See a live research thread
+              </button>
+            </div>
+          </div>
+
+          {/* right: 3D scene */}
+          <div className="hero-3d">
+            <Suspense fallback={null}>
+              <ResearchCoreScene />
+            </Suspense>
+            {/* floating data cards */}
+            <div className="floating-card fc-1">
+              <div className="floating-card-label">Market Data</div>
+              <div className="floating-card-value">
+                <span className="floating-card-dot" /> connected
+              </div>
+            </div>
+            <div className="floating-card fc-2">
+              <div className="floating-card-label">News &amp; Sentiment</div>
+              <div className="floating-card-value">
+                <span className="floating-card-dot blue" /> analyzing
+              </div>
+            </div>
+            <div className="floating-card fc-3">
+              <div className="floating-card-label">Macro</div>
+              <div className="floating-card-value">
+                <span className="floating-card-dot amber" /> 1,095 observations
+              </div>
+            </div>
+            <div className="floating-card fc-4">
+              <div className="floating-card-label">Historical</div>
+              <div className="floating-card-value">
+                <span className="floating-card-dot violet" /> synchronized
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
+      {/* ===== RESEARCH-ONLY STRIP ===== */}
+      <div className="research-strip">
+        <RevealDiv>
+          <div className="research-strip-inner">
+            <span className="research-strip-badge">Research Only</span>
+            <span className="research-strip-text">
+              No order tickets, no execution, no leverage controls; the trader makes every
+              decision. Lumen does the investigating.
+            </span>
+          </div>
+        </RevealDiv>
+      </div>
+
+      {/* ===== CAPABILITIES ===== */}
       <section className="landing-section" id="capabilities">
-        <h2>What the workbench does</h2>
-        <p className="lead">Three disciplines most tools skip: epistemic classification, active falsification, and honest memory.</p>
-        <div className="cap-grid">
-          {CAPABILITIES.map((c) => (
-            <div className="cap-card" key={c.title}>
-              <div className="cap-glyph" style={{ color: "var(--accent)" }} aria-hidden>{c.glyph}</div>
-              <h3>{c.title}</h3>
-              <p>{c.body}</p>
-            </div>
+        <RevealDiv>
+          <div className="section-label">Capabilities</div>
+          <h2 className="section-heading">What the workbench does</h2>
+          <p className="section-subheading">
+            Three disciplines most tools skip: epistemic classification, active
+            falsification, and honest memory.
+          </p>
+        </RevealDiv>
+
+        <div className="capabilities-grid">
+          {CAPABILITIES.map((c, i) => (
+            <RevealDiv key={c.title} delay={i + 1}>
+              <div className="cap-card">
+                <div className={`cap-card-icon ${c.icon}`}>
+                  <span aria-hidden>{c.glyph}</span>
+                </div>
+                <h3>{c.title}</h3>
+                <p>{c.body}</p>
+              </div>
+            </RevealDiv>
           ))}
         </div>
       </section>
 
+      {/* ===== HOW IT WORKS ===== */}
       <section className="landing-section" id="workflow">
-        <h2>How a question becomes a judgment</h2>
-        <p className="lead">A structured pipeline; every stage produces artifacts you can inspect, not a wall of text.</p>
-        <div className="flow-strip">
-          {[
-            ["01", "You ask", "Plain language in. The workbench classifies intent and resolves context from your workspace."],
-            ["02", "It plans", "A living research plan picks capabilities by information value; never a fixed script."],
-            ["03", "It investigates", "Market, news, sentiment and macro evidence gathered, classified and time-stamped."],
-            ["04", "It cross-checks", "Contradictions are preserved and typed; never forced into a tidy story."],
-            ["05", "You decide", "A judgment with confidence, uncertainty, and what would change it. The call is yours."],
-          ].map(([n, t, b]) => (
-            <div className="flow-step" key={n}>
-              <span className="flow-num">{n}</span>
-              <h4>{t}</h4>
-              <p>{b}</p>
+        <RevealDiv>
+          <div className="section-label">Workflow</div>
+          <h2 className="section-heading">How a question becomes a judgment</h2>
+          <p className="section-subheading">
+            A structured pipeline; every stage produces artifacts you can inspect, not a
+            wall of text.
+          </p>
+        </RevealDiv>
+
+        <div className="pipeline-wrap">
+          <RevealDiv>
+            <div className="pipeline">
+              {PIPELINE.map((s) => (
+                <div className="pipeline-step" key={s.num}>
+                  <div className="pipeline-num">{s.num}</div>
+                  <h4>{s.title}</h4>
+                  <p>{s.body}</p>
+                </div>
+              ))}
             </div>
-          ))}
+          </RevealDiv>
         </div>
       </section>
 
-      <footer className="landing-foot">
-        <div>
-          <b style={{ color: "var(--text-2)" }}>Lumen Terminal</b>
-          <br />A product identity built for the Bitget AI Hackathon Track 3 prototype.
-          Research content comes from your own workspace via the workbench backend.
+      {/* ===== PRODUCT PREVIEW ===== */}
+      <section className="landing-section preview-section">
+        <RevealDiv>
+          <div className="section-label">Interface</div>
+          <h2 className="section-heading">Built for serious research</h2>
+          <p className="section-subheading">
+            Every artifact is classified, every judgment carries its uncertainty, every
+            source is traceable.
+          </p>
+        </RevealDiv>
+
+        <RevealDiv>
+          <div className="preview-wrap">
+            <div className="preview-window">
+              <div className="preview-titlebar">
+                <span className="preview-dot active" />
+                <span className="preview-dot" />
+                <span className="preview-dot" />
+                <span className="preview-titlebar-text">Lumen Terminal; Research Workspace</span>
+              </div>
+              <div className="preview-body">
+                <div className="preview-main">
+                  <div className="preview-question">
+                    What is driving BTC sentiment right now?
+                  </div>
+                  <div className="preview-progress">
+                    <div className="preview-progress-bar done" />
+                    <div className="preview-progress-bar done" />
+                    <div className="preview-progress-bar done" />
+                    <div className="preview-progress-bar active" />
+                    <div className="preview-progress-bar" />
+                  </div>
+                  <div className="preview-evidence">
+                    <div className="preview-evidence-item">
+                      <span className="preview-ev-rail" style={{ background: "var(--cls-observation)" }} />
+                      <span>On-chain exchange inflows dropped 18% week-over-week; reduced selling pressure from large holders.</span>
+                    </div>
+                    <div className="preview-evidence-item">
+                      <span className="preview-ev-rail" style={{ background: "var(--cls-derived)" }} />
+                      <span>Funding rates across major perpetual markets shifted negative for the first time in 12 days.</span>
+                    </div>
+                    <div className="preview-evidence-item">
+                      <span className="preview-ev-rail" style={{ background: "var(--cls-interpretation)" }} />
+                      <span>Social sentiment metrics show cautious optimism rather than euphoria; historically a healthier signal.</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="preview-sidebar">
+                  <div className="preview-sidebar-title">Judgment</div>
+                  <div className="preview-confidence">
+                    <div className="preview-conf-track">
+                      <div className="preview-conf-cell on" />
+                      <div className="preview-conf-cell on" />
+                      <div className="preview-conf-cell" />
+                    </div>
+                    <span className="preview-confidence-label">MODERATE</span>
+                  </div>
+                  <div className="preview-sidebar-title">Metadata</div>
+                  <div className="preview-meta-row">
+                    <span className="preview-meta-key">Evidence</span>
+                    <span className="preview-meta-val">14 items</span>
+                  </div>
+                  <div className="preview-meta-row">
+                    <span className="preview-meta-key">Sources</span>
+                    <span className="preview-meta-val">7 unique</span>
+                  </div>
+                  <div className="preview-meta-row">
+                    <span className="preview-meta-key">Contradictions</span>
+                    <span className="preview-meta-val" style={{ color: "var(--warn)" }}>2 preserved</span>
+                  </div>
+                  <div className="preview-meta-row">
+                    <span className="preview-meta-key">Freshness</span>
+                    <span className="preview-meta-val" style={{ color: "var(--up)" }}>CURRENT</span>
+                  </div>
+                  <div className="preview-meta-row">
+                    <span className="preview-meta-key">Duration</span>
+                    <span className="preview-meta-val">42s</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </RevealDiv>
+      </section>
+
+      {/* ===== FINAL CTA ===== */}
+      <section className="cta-section">
+        <RevealDiv>
+          <h2 className="cta-heading">Research before you decide.</h2>
+          <p className="cta-text">
+            Lumen carries the investigation. You keep the judgment.
+          </p>
+          <div className="cta-buttons">
+            <button className="btn-primary" onClick={() => navigate("/home")}>
+              Enter the workspace
+            </button>
+            <button className="btn-ghost" onClick={() => navigate("/research")}>
+              Explore how it works
+            </button>
+          </div>
+        </RevealDiv>
+      </section>
+
+      {/* ===== FOOTER ===== */}
+      <footer className="landing-footer">
+        <div className="footer-brand">
+          <div className="footer-brand-name">Lumen Terminal</div>
+          <div className="footer-brand-desc">
+            AI research workbench. Built for the Bitget AI Hackathon Track 3
+            prototype. Research content comes from your own workspace via the
+            workbench backend.
+          </div>
         </div>
-        <div>
-          Research workstation; not an exchange interface. Not affiliated with Bitget.
-          <br />Research only · no trading execution · no keys in the browser.
+        <div className="footer-links">
+          <div className="footer-links-title">Product</div>
+          <a href="#capabilities">Capabilities</a>
+          <a href="#workflow">Workflow</a>
+          <a href="#/" onClick={() => navigate("/home")}>Open workspace</a>
+        </div>
+        <div className="footer-legal">
+          <div className="footer-legal-text">
+            Research workstation; not an exchange interface.
+            <br />
+            Not affiliated with Bitget.
+          </div>
+          <div className="footer-legal-text">
+            Research only.
+            <br />
+            No trading execution.
+            <br />
+            No keys in the browser.
+          </div>
         </div>
       </footer>
     </div>
