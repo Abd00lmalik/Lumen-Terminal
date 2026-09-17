@@ -4,7 +4,7 @@ Status: **the full application deploys to Vercel**; frontend (static SPA) and ba
 (serverless API functions) on one domain. This document describes the deployed
 architecture honestly, including its real limitations.
 
-Production URL: **https://asklumen.vercel.app/**
+Production URL: **https://asklumen.vercel.app/** (Vercel project: **lumen**, auto-deployed from `main` on GitHub)
 
 ---
 
@@ -84,7 +84,7 @@ cd frontend && npm run dev   # Vite on :5173 (proxies to localhost:3001 by defau
 npx vercel --prod --yes     # builds the SPA + API functions, promotes to production
 ```
 
-The custom domain `asklumen.vercel.app` is aliased to the current production deployment.
+The custom domain `asklumen.vercel.app` is attached to the `lumen` Vercel project and follows each production deployment from `main`.
 Note: a manual `vercel alias set` does NOT follow future deployments automatically —
 re-run it after a deployment if the domain drifts, or manage the domain in the project
 settings so it always tracks production.
