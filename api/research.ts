@@ -18,7 +18,6 @@
  * surface into responses.
  */
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { EventEmitter } from "node:events";
 import { buildApi } from "../src/api/server.js";
 import { GeminiProvider } from "../src/model/gemini.js";
 import { createBitgetAdapterSet } from "../src/adapters/bitget-skills.js";
@@ -55,11 +54,11 @@ function getApp(): AppPromise {
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   const { app } = await getApp();
   // Fastify's routing consumes Node's raw req/res. Vercel's helpers satisfy the
-  // IncomingMessage/ServerResponse surface Fastify needs; only the unused `emit`
-  // side-channel needs an Event-emitting stub (VercelRequest already emits).
+  // IncomingMessage/ServerResponse surface Fastify needs at runtime (VercelRequest
+  // is itself an EventEmitter); only the static types need the bridge.
   await app.ready();
   app.routing(
-    req as unknown as EventEmitter,
-    res as unknown as import("node:http").ServerResponse & EventEmitter,
+    req as unknown as import("node:http").IncomingMessage,
+    res as unknown as import("node:http").ServerResponse,
   );
 }
