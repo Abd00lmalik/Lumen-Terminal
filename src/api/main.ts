@@ -19,7 +19,8 @@ const provider =
   process.env.GROQ_API_KEY !== undefined && process.env.GROQ_API_KEY !== ""
     ? new ModelFallbackProvider({ providers: [new GeminiProvider(), new GroqProvider()] })
     : new GeminiProvider(); // env-only: GEMINI_API_KEY + GEMINI_MODEL
-const { registry } = createBitgetAdapterSet();
+const { registry, bindWorkspace } = createBitgetAdapterSet();
 const store = createStore("file", process.env.WORKSPACE_FILE ?? ".data/workspace.json");
+// buildApi binds the live workspace so LOCAL_KNOWLEDGE_RETRIEVAL sees session state.
 
-await startApi({ provider, registry, store });
+await startApi({ provider, registry, store, bindWorkspaceAccessor: bindWorkspace });

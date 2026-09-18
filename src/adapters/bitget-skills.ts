@@ -15,6 +15,7 @@ import { BitgetSkillAdapter, type SkillDescriptor, type OutputMapping } from "./
 import { registerEquityAdapters } from "./equity.js";
 import { registerHeuristAdapters } from "./heurist.js";
 import { CoinGeckoMarketDataAdapter } from "./coingecko.js";
+import { LocalKnowledgeAdapter } from "./local-knowledge.js";
 import { McpTransport } from "./transports/mcp.js";
 import { RestTransport, type Candle } from "./transports/rest.js";
 import { TransportError } from "./transports/resilience.js";
@@ -530,6 +531,12 @@ export interface BitgetAdapterSetOptions {
    * the NotConnected stub or a fake to exercise honest-unavailability laws.
    */
   readonly historical?: G1HistoricalDataAdapter | HistoricalDataStub;
+  /**
+   * Lazy accessor for the live Workspace (local-knowledge capability). Lazy because the
+   * workspace is created per session AFTER the registry exists; the adapter resolves it
+   * per request. Assigned via the returned bindWorkspace binding.
+   */
+  workspaceAccessor?: () => import("../domain/workspace.js").Workspace | undefined;
   /** G2 web-retrieval override (tests inject fakes; default is the real bounded adapter). */
   readonly webRetrieval?: G2WebRetrievalAdapter | WebRetrievalStub;
   /** Disable capability-level fallback providers (tests assert primary-only laws). */
@@ -541,6 +548,8 @@ export function createBitgetAdapterSet(options: BitgetAdapterSetOptions = {}): {
   registry: CapabilityRegistry;
   mcp: McpTransport;
   rest: RestTransport;
+  /** Bind the session workspace accessor (local-knowledge capability). */
+  bindWorkspace: (accessor: () => import("../domain/workspace.js").Workspace | undefined) => void;
 } {
   const registry = new CapabilityRegistry();
   const mcp = options.mcp ?? new McpTransport();
@@ -583,5 +592,10 @@ export function createBitgetAdapterSet(options: BitgetAdapterSetOptions = {}): {
     registerHeuristAdapters(registry);
   }
 
-  return { registry, mcp, rest };
+  // Local knowledge (trader-owned workspace context) is a first-class capability served by
+  // a lazy workspace accessor; the registry itself never holds a Workspace reference.
+  const localKnowledge = new LocalKnowledgeAdapter(() => options.workspaceAccessor?.());
+  registry.register(localKnowledge, 0);
+
+  return { registry, mcp, rest, bindWorkspace: (accessor: () => import("../domain/workspace.js").Workspace | undefined) => { options.workspaceAccessor = accessor; } };
 }

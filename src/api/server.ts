@@ -24,6 +24,11 @@ export interface ApiDeps {
   readonly provider: ModelProvider;
   readonly registry: CapabilityRegistry;
   readonly store?: WorkspaceStore;
+  /**
+   * Set once buildApi has the live Workspace: local-knowledge adapters resolve the session
+   * workspace lazily (the registry exists before any session does).
+   */
+  readonly bindWorkspaceAccessor?: (accessor: () => Workspace | undefined) => void;
 }
 
 /**
@@ -32,6 +37,10 @@ export interface ApiDeps {
  */
 export async function buildApi(deps: ApiDeps): Promise<{ app: FastifyInstance; researchApp: ResearchApp }> {
   const app = Fastify({ logger: false });
+
+  const workspaceHolder: { current?: Workspace } = {};
+  // The accessor is bound BEFORE the app builds routes; adapters resolve per request.
+  deps.bindWorkspaceAccessor?.(() => workspaceHolder.current);
 
   // Typed transport errors for framework-generated failures (body parsing, media type,
   // payload limits). Without this, Fastify's native body ({statusCode, error, message})
@@ -89,6 +98,7 @@ export async function buildApi(deps: ApiDeps): Promise<{ app: FastifyInstance; r
     store,
     workspace: new Workspace(), // initial workspace when the store is empty
   });
+  workspaceHolder.current = researchApp.getWorkspace();
 
   // ------------------------------------------------------------------
   // Health (F0 mandate §21); availability of THIS process only. No false signals:
@@ -124,6 +134,7 @@ export async function startApi(opts: {
   provider: ModelProvider;
   registry: CapabilityRegistry;
   store?: WorkspaceStore;
+  bindWorkspaceAccessor?: (accessor: () => Workspace | undefined) => void;
 }): Promise<void> {
   const { app } = await buildApi(opts);
   const port = opts.port ?? Number(process.env.API_PORT ?? 3001);

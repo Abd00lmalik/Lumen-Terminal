@@ -93,6 +93,11 @@ export class ResearchApp {
     }
   }
 
+  /** The live workspace (local-knowledge accessor; session-scoped state). */
+  getWorkspace(): Workspace {
+    return this.ws();
+  }
+
   private ws(): Workspace {
     if (this.workspace === undefined) {
       throw new NotFoundError("workspace (no session initialized; POST /api/session first)");

@@ -97,6 +97,7 @@ export function createProductionStore(
  */
 function getApp(): AppPromise {
   if (appPromise === undefined) {
+    const adapterSet = createBitgetAdapterSet();
     const attempt = buildApi({
       // deferCredentialCheck: in serverless, a missing GEMINI_API_KEY must NOT crash the whole
       // API at construction (it used to turn even /api/health into an opaque 500 on any instance
@@ -104,8 +105,9 @@ function getApp(): AppPromise {
       // model use: research requests get the same typed AUTH_FAILURE as any model failure and the
       // UI renders an honest MODEL_FAILURE; health/history routes stay up regardless.
       provider: buildModelChain(),
-      registry: createBitgetAdapterSet().registry,
+      registry: adapterSet.registry,
       store: createProductionStore(),
+      bindWorkspaceAccessor: adapterSet.bindWorkspace,
     });
     appPromise = attempt;
     attempt.catch(() => {

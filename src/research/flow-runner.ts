@@ -18,6 +18,7 @@
  */
 
 import type { CapabilityRegistry } from "../adapters/capability-registry.js";
+import { PLANNER_CAPABILITIES } from "./adaptive.js";
 import type { ModelProvider } from "../model/provider.js";
 import { ModelFailure } from "../model/provider.js";
 import {
@@ -156,7 +157,9 @@ export interface FlowOutcome {
 const BASE_PLAN_SYSTEM = [
   "You are the research planner inside a trading RESEARCH workbench. You plan; you never execute.",
   "The system executes capabilities and returns validated evidence. Plan rules:",
-  "- Request CAPABILITIES only (NEWS_ANALYSIS, TECHNICAL_ANALYSIS, SENTIMENT_ANALYSIS, MACRO_ANALYSIS, MARKET_DATA_ANALYSIS, ONCHAIN_ANALYSIS, HISTORICAL_COMPARISON, FALSIFICATION, SOURCE_VALIDATION, DERIVATIVES_ANALYSIS, CAUSAL_INVESTIGATION). Never providers or vendor tools.",
+  // CAUSAL_INVESTIGATION and EVENT_RECONSTRUCTION are flow-internal capabilities (flow2/flow3
+  // schedules); they are excluded from the adaptive planner's vocabulary but remain registered.
+  `- Request CAPABILITIES only (${[...PLANNER_CAPABILITIES, "CAUSAL_INVESTIGATION", "EVENT_RECONSTRUCTION"].join(", ")}). Never providers or vendor tools.`,
   "- Select the smallest capability set with material information value for THIS objective.",
   "- Respect trader constraints in scope.",
   "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",

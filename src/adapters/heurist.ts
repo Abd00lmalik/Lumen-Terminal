@@ -208,6 +208,8 @@ export interface HeuristAgentSpec {
   readonly subjectParam?: string;
   /** Fallback subject value when the question resolved no target (e.g. index overviews). */
   readonly defaultSubject?: string;
+  /** Fixed extra tool arguments for subjectless/question-agnostic tools (e.g. network scope). */
+  readonly defaultSubjectParams?: Readonly<Record<string, unknown>>;
   /** Deep-research agents accept the raw question text as their subject (query/prompt). */
   readonly acceptsQuestion?: boolean;
   readonly limitations: readonly string[];
@@ -267,6 +269,9 @@ export class HeuristAgentAdapter implements ProviderAdapter {
       toolArguments[this.spec.subjectParam] = subject;
     } else if (this.spec.acceptsQuestion === true && typeof params.question === "string" && params.question.trim() !== "") {
       toolArguments.query = params.question;
+    }
+    for (const [key, value] of Object.entries(this.spec.defaultSubjectParams ?? {})) {
+      toolArguments[key] = value;
     }
     // Pass through any explicitly requested extra arguments (bounded, scalar only).
     const extra = params.toolArguments;
@@ -476,7 +481,191 @@ export function createHeuristAskAdapter(transport?: HeuristMeshTransport): Heuri
   );
 }
 
-/** Register all Heurist adapters at low priority (they serve when direct providers cannot). */
+/**
+ * Heurist search agents (Exa, DuckDuckGo) — bounded WEB_SEARCH fallback tier.
+ * Registered BELOW G2: primary-source-bounded discovery first, commercial neural search
+ * second, keyless DDG third. All outputs are FACTUAL_OBSERVATION (secondary reporting
+ * until the URL is retrieved and validated by G2 semantics).
+ */
+export function createHeuristExaSearchAdapter(transport?: HeuristMeshTransport): HeuristAgentAdapter {
+  return new HeuristAgentAdapter(
+    ["WEB_SEARCH"],
+    {
+      agentId: "ExaSearchAgent",
+      upstreamSource: "exa-search",
+      tool: "exa_web_search",
+      subjectParam: "search_term",
+      acceptsQuestion: true,
+      limitations: [
+        "search results are discovery, not verified evidence; snippets are secondary reporting",
+        "same underlying article across search agents is one source, never independent corroboration",
+      ],
+      freshnessProfile: "web:retrieval-time",
+    },
+    transport,
+  );
+}
+
+/** DuckDuckGo keyless search — final WEB_SEARCH tier when G2 and Exa cannot serve. */
+export function createHeuristDuckDuckGoAdapter(transport?: HeuristMeshTransport): HeuristAgentAdapter {
+  return new HeuristAgentAdapter(
+    ["WEB_SEARCH"],
+    {
+      agentId: "DuckDuckGoSearchAgent",
+      upstreamSource: "duckduckgo",
+      tool: "search_web",
+      subjectParam: "search_term",
+      acceptsQuestion: true,
+      limitations: [
+        "keyless web search; result titles/URLs only, not extracted primary-source content",
+      ],
+      freshnessProfile: "web:retrieval-time",
+    },
+    transport,
+  );
+}
+
+/**
+ * Heurist on-chain agents (Etherscan, CoinGecko on-chain) — first real ONCHAIN_ANALYSIS
+ * providers. Previously ONCHAIN_ANALYSIS was honestly UNAVAILABLE ("NOT true on-chain
+ * intelligence"); these provide address history, top holders, and large DEX trades with
+ * upstream lineage preserved. Holder counts are DIRECT_OBSERVATION of chain data via the
+ * agent's tool normalization; wallet attribution remains ANALYST_INTERPRETATION at most.
+ */
+export function createHeuristEtherscanAdapter(transport?: HeuristMeshTransport): HeuristAgentAdapter {
+  return new HeuristAgentAdapter(
+    ["ONCHAIN_ANALYSIS"],
+    {
+      agentId: "EtherscanAgent",
+      upstreamSource: "etherscan",
+      tool: "get_erc20_token_transfers",
+      subjectParam: "address",
+      limitations: [
+        "EVM chains only; requires a resolved contract/address; a token name alone is not an address",
+        "transfer/holder observations are chain data; behavioral interpretation of them is NOT included",
+      ],
+      freshnessProfile: "chain:near-realtime",
+    },
+    transport,
+  );
+}
+
+/** CoinGecko on-chain toolset (holders, large trades) as a second ONCHAIN_ANALYSIS provider. */
+export function createHeuristOnchainAdapter(transport?: HeuristMeshTransport): HeuristAgentAdapter {
+  return new HeuristAgentAdapter(
+    ["ONCHAIN_ANALYSIS"],
+    {
+      agentId: "CoinGeckoTokenInfoAgent",
+      upstreamSource: "coingecko-onchain",
+      tool: "get_recent_large_trades",
+      subjectParam: "address",
+      defaultSubjectParams: { network: "eth" },
+      limitations: [
+        "CoinGecko on-chain network scope (eth etc.); requires token contract address for holder/trade tools",
+        "large-trade feed is DEX activity, not exchange order flow",
+      ],
+      freshnessProfile: "chain:near-realtime",
+    },
+    transport,
+  );
+}
+
+/**
+ * Heurist DeFi agents (DefiLlama, L2Beat) — DEFI_ANALYSIS providers: protocol TVL, fees,
+ * revenue, chain metrics, L2 summary/costs. All quantitative tool-normalized observations
+ * with DefiLlama/L2Beat lineage (no double-count with market price data).
+ */
+export function createHeuristDefiLlamaAdapter(transport?: HeuristMeshTransport): HeuristAgentAdapter {
+  return new HeuristAgentAdapter(
+    ["DEFI_ANALYSIS"],
+    {
+      agentId: "DefiLlamaAgent",
+      upstreamSource: "defillama",
+      tool: "get_protocol_metrics",
+      subjectParam: "protocol",
+      acceptsQuestion: false,
+      limitations: [
+        "protocol slug resolution is heuristic; an unknown slug returns no data rather than a guess",
+      ],
+      freshnessProfile: "defi:daily",
+    },
+    transport,
+  );
+}
+
+/** L2Beat — L2 ecosystem metrics as a second DEFI_ANALYSIS provider (subjectless tools). */
+export function createHeuristL2BeatAdapter(transport?: HeuristMeshTransport): HeuristAgentAdapter {
+  return new HeuristAgentAdapter(
+    ["DEFI_ANALYSIS"],
+    {
+      agentId: "L2BeatAgent",
+      upstreamSource: "l2beat",
+      tool: "get_l2_summary",
+      limitations: ["L2 ecosystem aggregates; per-project depth is bounded to what L2Beat publishes"],
+      freshnessProfile: "defi:daily",
+    },
+    transport,
+  );
+}
+
+/**
+ * Heurist project-research agents (ProjectKnowledge, DexScreener, TrendingToken) —
+ * PROJECT_RESEARCH providers: project description/links, DEX pair discovery, trending
+ * narrative signals. Descriptions are project-reported facts (secondary), trends are
+ * PROXY_EVIDENCE for attention, never for price direction.
+ */
+export function createHeuristProjectAdapter(transport?: HeuristMeshTransport): HeuristAgentAdapter {
+  return new HeuristAgentAdapter(
+    ["PROJECT_RESEARCH"],
+    {
+      agentId: "ProjectKnowledgeAgent",
+      upstreamSource: "project-knowledge",
+      tool: "get_project",
+      subjectParam: "name",
+      acceptsQuestion: true,
+      limitations: [
+        "project descriptions are self-reported/project-reported facts, not verified claims",
+      ],
+      freshnessProfile: "project:descriptor",
+    },
+    transport,
+  );
+}
+
+/** DexScreener pair discovery — second PROJECT_RESEARCH provider (market-structure data). */
+export function createHeuristDexScreenerAdapter(transport?: HeuristMeshTransport): HeuristAgentAdapter {
+  return new HeuristAgentAdapter(
+    ["PROJECT_RESEARCH"],
+    {
+      agentId: "DexScreenerTokenInfoAgent",
+      upstreamSource: "dexscreener",
+      tool: "search_pairs",
+      subjectParam: "search_term",
+      acceptsQuestion: false,
+      limitations: ["DEX pair data is venue-level; CEX market structure is not covered here"],
+      freshnessProfile: "defi:minutes",
+    },
+    transport,
+  );
+}
+
+/**
+ * Register the extended research tier. Sits at the Heurist priority band (direct keyless
+ * providers first); deep-research agents (Caesar/AskHeurist) remain the last tier.
+ */
+export function registerExtendedHeuristAdapters(registry: import("./capability-registry.js").CapabilityRegistry, priority = 300): void {
+  registry.register(createHeuristExaSearchAdapter(), priority);
+  registry.register(createHeuristDuckDuckGoAdapter(), priority + 1);
+  registry.register(createHeuristEtherscanAdapter(), priority);
+  registry.register(createHeuristOnchainAdapter(), priority + 1);
+  registry.register(createHeuristDefiLlamaAdapter(), priority);
+  registry.register(createHeuristL2BeatAdapter(), priority + 1);
+  registry.register(createHeuristProjectAdapter(), priority);
+  registry.register(createHeuristDexScreenerAdapter(), priority + 1);
+}
+
+/**
+ * Register all Heurist adapters at low priority (they serve when direct providers cannot). */
 export function registerHeuristAdapters(registry: import("./capability-registry.js").CapabilityRegistry, priority = 300): void {
   registry.register(createHeuristOptionsAdapter(), priority);
   registry.register(createHeuristTechnicalAdapter(), priority);
@@ -487,4 +676,5 @@ export function registerHeuristAdapters(registry: import("./capability-registry.
   // capability chain could not answer get ONE generated-analysis attempt each, clearly labeled.
   registry.register(createHeuristCaesarAdapter(), priority + 1);
   registry.register(createHeuristAskAdapter(), priority + 1);
+  registerExtendedHeuristAdapters(registry, priority);
 }

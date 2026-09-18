@@ -60,16 +60,35 @@ export interface AdaptiveLoopOutcome {
 /** Schemas as prompt fragments; the model must answer in one of these shapes. */
 export { RESEARCH_PLAN_SCHEMA_DESC, ADAPTIVE_DECISION_SCHEMA_DESC };
 
-const PLAN_SYSTEM = [
+/**
+ * The planner's capability vocabulary, declared ONCE and consumed by BOTH the prompt below
+ * AND the zero-dead-end conformance test: any capability added here without a registered
+ * provider fails the test at build time, so "no provider registered" can never reach a user.
+ */
+export const PLANNER_CAPABILITIES: readonly string[] = [
+  "MARKET_DATA_ANALYSIS", "TECHNICAL_ANALYSIS", "SENTIMENT_ANALYSIS", "NEWS_ANALYSIS", "MACRO_ANALYSIS",
+  "DERIVATIVES_ANALYSIS", "HISTORICAL_COMPARISON", "FALSIFICATION", "SOURCE_VALIDATION", "WEB_SEARCH",
+  "CROSS_DOMAIN_SYNTHESIS", "ONCHAIN_ANALYSIS", "DEFI_ANALYSIS", "PROJECT_RESEARCH",
+  "EQUITY_MARKET_DATA", "EQUITY_FUNDAMENTALS", "EQUITY_EARNINGS", "EARNINGS_CALENDAR", "OPTIONS_CHAIN_ANALYSIS", "EQUITY_NEWS",
+  "LOCAL_KNOWLEDGE_RETRIEVAL",
+];
+
+/**
+ * The planner's capability vocabulary lives here and ONLY here; the zero-dead-end
+ * conformance test imports it to prove every name below resolves to a registered provider.
+ */
+export const PLAN_SYSTEM = [
   "You are the research planner inside a trading RESEARCH workbench. You plan; you never execute.",
-  "The system executes capabilities on your behalf and returns validated evidence.",
-  "Plan rules:",
+  `The system executes capabilities on your behalf and returns validated evidence. Available capabilities: ${PLANNER_CAPABILITIES.join(", ")}.
+  Plan rules:`,
   "- Request CAPABILITIES. Never name providers or vendor tools.",
   "- Crypto assets: MARKET_DATA_ANALYSIS, TECHNICAL_ANALYSIS, SENTIMENT_ANALYSIS, NEWS_ANALYSIS, MACRO_ANALYSIS, DERIVATIVES_ANALYSIS (funding/open interest), HISTORICAL_COMPARISON, FALSIFICATION, SOURCE_VALIDATION or WEB_SEARCH (same discovery capability), CROSS_DOMAIN_SYNTHESIS.",
   "- Equities and listed instruments (stocks, ETFs): EQUITY_MARKET_DATA (price, OHLCV, volume), EQUITY_FUNDAMENTALS (revenue, margins, valuation, shares), EQUITY_EARNINGS or EARNINGS_CALENDAR (next/last earnings dates and consensus estimates, same capability), OPTIONS_CHAIN_ANALYSIS (options chains, only when options are explicitly relevant), EQUITY_NEWS (company headlines), plus the shared NEWS_ANALYSIS / MACRO_ANALYSIS / HISTORICAL_COMPARISON / FALSIFICATION / SOURCE_VALIDATION capabilities.",
   "- Commodities (gold, silver, oil), FX pairs, indexes (SPX, VIX, DXY) and broad cross-asset questions: NEWS_ANALYSIS and MACRO_ANALYSIS carry the investigation; EQUITY_MARKET_DATA may be added ONLY when a concrete tradable target is named (gold, EUR/USD, VIX all resolve). Do NOT request equity or crypto market-data capabilities when no target is resolvable; a capability without a target only produces provider-failure noise.",
-  "- Broad synthesis questions that may span domains: CROSS_DOMAIN_SYNTHESIS is available as a deep-research capability of last resort; prefer specific capabilities first.",
+  "- On-chain and DeFi questions (wallet/token activity, protocol TVL, L2 metrics, DEX structure): ONCHAIN_ANALYSIS (address/holder/trade observations where an address is resolvable) and DEFI_ANALYSIS (protocol/chain/L2 metrics); PROJECT_RESEARCH covers project descriptions, DEX pair discovery, and narrative/trending context.",
+  "- Broad synthesis questions that may span domains: CROSS_DOMAIN_SYNTHESIS is available as a deep-research capability of last resort; prefer specific capabilities first. WEB_SEARCH (bounded source discovery) is available when narrative or primary-source hunting matters.",
   "- For a company question, plan the smallest set that can answer it: market data for what happened, earnings/estimates for event context, company news for narrative, macro or index context only when the question crosses into the broader market.",
+  "- LOCAL_KNOWLEDGE_RETRIEVAL serves the trader's own saved context (frameworks, saved research conclusions, memories, theses). When the question references our research, my framework, previous findings, or an evaluation against stored criteria, request it FIRST; live providers then supply the current-state evidence that outranks stale local claims.",
   "- Select the smallest capability set with material information value. Do not request every capability.",
   "- Respect trader constraints (e.g. exclusions) in scope.",
   "- Never assume evidence that does not exist yet; plan tasks around what would decide the question.",
