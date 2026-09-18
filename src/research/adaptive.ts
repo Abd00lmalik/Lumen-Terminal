@@ -64,7 +64,10 @@ const PLAN_SYSTEM = [
   "You are the research planner inside a trading RESEARCH workbench. You plan; you never execute.",
   "The system executes capabilities on your behalf and returns validated evidence.",
   "Plan rules:",
-  "- Request CAPABILITIES (e.g. NEWS_ANALYSIS, TECHNICAL_ANALYSIS, SENTIMENT_ANALYSIS, MACRO_ANALYSIS, MARKET_DATA_ANALYSIS, ONCHAIN_ANALYSIS, HISTORICAL_COMPARISON, FALSIFICATION, SOURCE_VALIDATION). Never name providers or vendor tools.",
+  "- Request CAPABILITIES. Never name providers or vendor tools.",
+  "- Crypto assets: MARKET_DATA_ANALYSIS, TECHNICAL_ANALYSIS, SENTIMENT_ANALYSIS, NEWS_ANALYSIS, MACRO_ANALYSIS, ONCHAIN_ANALYSIS, HISTORICAL_COMPARISON, FALSIFICATION, SOURCE_VALIDATION.",
+  "- Equities and listed instruments (stocks, ETFs): EQUITY_MARKET_DATA (price, OHLCV, volume), EQUITY_FUNDAMENTALS (revenue, margins, valuation, shares), EQUITY_EARNINGS (next/last earnings dates and consensus estimates), EQUITY_NEWS (company headlines), plus the shared NEWS_ANALYSIS / MACRO_ANALYSIS / HISTORICAL_COMPARISON / FALSIFICATION / SOURCE_VALIDATION capabilities.",
+  "- For a company question, plan the smallest set that can answer it: market data for what happened, earnings/estimates for event context, company news for narrative, macro or index context only when the question crosses into the broader market.",
   "- Select the smallest capability set with material information value. Do not request every capability.",
   "- Respect trader constraints (e.g. exclusions) in scope.",
   "- Never assume evidence that does not exist yet; plan tasks around what would decide the question.",
@@ -174,8 +177,11 @@ export async function runAdaptiveResearch(
 
     const executions: RoundExecution[] = [];
     for (const task of roundTasks) {
-      for (const capability of task.capabilities) {
-        // Capability-first execution: registry resolves providers; the engine owns execution.
+      // Independent capability calls run in PARALLEL (performance mandate §32): the registry
+      // executes each through its own provider chain with bounded transport timeouts, and one
+      // failure never cancels siblings. Evidence ingestion stays in plan order after all
+      // settle, so determinism of the research graph is preserved.
+      const pending = task.capabilities.map(async (capability) => {
         options.onProgress?.(progressEvent("capability_started", at(), `capability ${capability} started`, { capability }));
         const result = await options.registry.execute(
           capability,
@@ -184,6 +190,10 @@ export async function runAdaptiveResearch(
           at(),
         );
         options.onProgress?.(progressEvent("capability_completed", at(), `capability ${capability} completed: ${result.failure.type === "NONE" ? result.completeness : `failed (${result.failure.type})`}`, { capability, ...(result.failure.type === "NONE" ? { completeness: result.completeness } : { failureType: result.failure.type }) }));
+        return { capability, result };
+      });
+      const settled = await Promise.all(pending);
+      for (const { capability, result } of settled) {
         const evidenceIds: string[] = [];
         if (result.failure.type === "NONE" && result.validation !== "INVALID") {
           for (const output of result.normalizedOutput) {

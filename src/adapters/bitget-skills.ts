@@ -12,6 +12,7 @@ import { G1HistoricalDataAdapter, BINANCE_VISION_BASE_URL } from "./g1-historica
 import { G2WebRetrievalAdapter } from "./g2-web-retrieval.js";
 import { NewsFallbackAdapter, SentimentFallbackAdapter, MacroFallbackAdapter } from "./fallback-providers.js";
 import { BitgetSkillAdapter, type SkillDescriptor, type OutputMapping } from "./bitget-skill-adapter.js";
+import { registerEquityAdapters } from "./equity.js";
 import { McpTransport } from "./transports/mcp.js";
 import { RestTransport, type Candle } from "./transports/rest.js";
 import { TransportError } from "./transports/resilience.js";
@@ -563,6 +564,10 @@ export function createBitgetAdapterSet(options: BitgetAdapterSetOptions = {}): {
     registry.register(new SentimentFallbackAdapter(), 200);
     registry.register(new MacroFallbackAdapter(), 200);
   }
+  // Equity capabilities (2026-09-18): Yahoo Finance primary (OHLCV/quote, fundamentals,
+  // earnings calendar, per-ticker news) with Stooq CSV as the market-data fallback inside
+  // the adapter. Same registry mechanism; no Flow→provider hardcoding.
+  registerEquityAdapters(registry);
 
   return { registry, mcp, rest };
 }

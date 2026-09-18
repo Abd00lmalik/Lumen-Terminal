@@ -343,15 +343,35 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
         </Panel>
       )}
 
-      {run.limitations.length > 0 && (
-        <Panel kicker="honest limitations" title="What this run could not do">
-          <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {/* Dedupe defensively: DTOs produced before server-side dedupe (or relayed
-                payloads) could repeat a limitation; rendering each distinct one once. */}
-            {[...new Set(run.limitations)].map((l, i) => <UnavailableNote key={i} note={l} />)}
-          </div>
-        </Panel>
-      )}
+      {run.limitations.length > 0 && (() => {
+        // Limitation hierarchy (capability-expansion mandate §35): show the few that
+        // describe WHAT IS MISSING materially; tuck provider/provenance detail (laws,
+        // per-feed skips, fallback trails) into a collapsed diagnostics list. The run
+        // must never LOOK failed just because some source was unavailable.
+        const all = [...new Set(run.limitations)];
+        const material = all.filter((l) =>
+          /UNAVAILABLE|no provider registered|no coverage|insufficient|not available|requires|unreachable|ConnectTimeout|timeout/i.test(l)
+          && !/never|must not|failure is a technical condition|limitations? \(|FINDINGS\.md|final lock|§/i.test(l)
+        ).slice(0, 5);
+        const detail = all.filter((l) => !material.includes(l));
+        return (
+          <Panel kicker="coverage notes" title="What this run could not do">
+            <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {material.map((l, i) => <UnavailableNote key={`m${i}`} note={l} />)}
+              {detail.length > 0 && (
+                <details style={{ marginTop: 2 }}>
+                  <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--text-3)" }}>
+                    {detail.length} data-source note{detail.length === 1 ? "" : "s"} (sources, provenance, evidence laws)
+                  </summary>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                    {detail.map((l, i) => <UnavailableNote key={`d${i}`} note={l} />)}
+                  </div>
+                </details>
+              )}
+            </div>
+          </Panel>
+        );
+      })()}
 
       {run.evidence.length > 0 && (
         <Panel

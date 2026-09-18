@@ -30,7 +30,9 @@ describe("five Bitget skills registered through the generic registry (final lock
     expect(registry.resolve("MACRO_ANALYSIS").map((r) => r.adapter.providerId)).toEqual(["bitget-signal/macro-analyst"]);
     expect(registry.resolve("MARKET_DATA_ANALYSIS").map((r) => r.adapter.providerId)).toEqual(["bitget-signal/market-intel"]);
     expect(registry.resolve("SENTIMENT_ANALYSIS").map((r) => r.adapter.providerId)).toEqual(["bitget-signal/sentiment-analyst"]);
-    expect(registry.resolve("NEWS_ANALYSIS").map((r) => r.adapter.providerId)).toEqual(["bitget-signal/news-briefing"]);
+    // Equity capabilities (2026-09-18) register NEWS_ANALYSIS via the Yahoo headline feed
+    // alongside the Bitget primary; everything else stays single-provider here.
+    expect(registry.resolve("NEWS_ANALYSIS").map((r) => r.adapter.providerId)).toEqual(["bitget-signal/news-briefing", "equity/yahoo-headlines"]);
     expect(registry.resolve("TECHNICAL_ANALYSIS").map((r) => r.adapter.providerId)).toEqual(["bitget-signal/technical-analysis"]);
     // G1 (vendor selected 2026-09-15): the REAL provider resolves HISTORICAL_COMPARISON
     // execute() no longer throws NotConnectedError (the both-venues-fail typed-failure law
@@ -194,6 +196,7 @@ describe("five Bitget skills registered through the generic registry (final lock
       "bitget-signal/news-briefing",
       "bitget-signal/sentiment-analyst",
       "bitget-signal/technical-analysis",
+      "equity/yahoo-headlines",
       "fallback/fear-greed",
       "fallback/news-rss",
       "fallback/world-bank",

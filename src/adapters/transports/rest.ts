@@ -45,6 +45,10 @@ export interface RestGetOptions {
   /** Query parameters; values stringified in order. */
   readonly params?: Record<string, string>;
   readonly requestTimeoutMs?: number;
+  /** Per-request headers merged over the transport defaults (e.g. crumb cookies). */
+  readonly headers?: Record<string, string>;
+  /** "json" (default) parses the body as JSON; "text" returns the raw text (CSV/XML/RSS endpoints). */
+  readonly responseType?: "json" | "text";
 }
 
 export interface RestGetOutcome {
@@ -63,6 +67,8 @@ export interface RestTransportOptions {
   readonly retryOptions?: Pick<RetryOptions, "now" | "sleep" | "onRetry">;
   /** Test seam: override the underlying HTTP fetch. */
   readonly fetchImpl?: typeof fetch;
+  /** Default headers sent with every request (e.g. a browser User-Agent). */
+  readonly defaultHeaders?: Record<string, string>;
 }
 
 export class RestTransport {
@@ -71,6 +77,7 @@ export class RestTransport {
   private readonly throttler: Throttler;
   private readonly retryOptions: Pick<RetryOptions, "now" | "sleep" | "onRetry">;
   private readonly fetchImpl: typeof fetch;
+  private readonly defaultHeaders: Record<string, string>;
 
   readonly rawCapture: RawCapture;
 
@@ -80,6 +87,7 @@ export class RestTransport {
     this.throttler = new Throttler(options.throttler ?? { minIntervalMs: 120 });
     this.retryOptions = options.retryOptions ?? {};
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.defaultHeaders = options.defaultHeaders ?? {};
     this.rawCapture = new RawCapture();
   }
 
@@ -111,7 +119,7 @@ export class RestTransport {
     const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
     let response: Response;
     try {
-      response = await this.fetchImpl(url, { method: "GET", signal: controller.signal });
+      response = await this.fetchImpl(url, { method: "GET", signal: controller.signal, headers: { ...this.defaultHeaders, ...options.headers } });
     } catch (error) {
       if (controller.signal.aborted) throw timeoutError(`REST GET ${path}`, requestTimeoutMs);
       throw new TransportError("PROVIDER_ERROR", `network error on GET ${path}: ${error instanceof Error ? error.message : String(error)}`, { retriable: true });
@@ -127,6 +135,9 @@ export class RestTransport {
     // Capture the raw payload BEFORE parsing: even unparseable/failed responses must remain
     // inspectable for provenance (final lock §7); nothing is silently swallowed.
     const rawReference = this.rawCapture.capture("rest", `GET ${path}${url.search}`, text);
+    if (options.responseType === "text") {
+      return { body: text, rawReference, attempts: 0, durationMs: 0, status: response.status };
+    }
     let body: unknown;
     try {
       body = JSON.parse(text);
