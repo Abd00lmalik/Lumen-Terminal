@@ -97,3 +97,11 @@ settings so it always tracks production.
    transport failure, never fabricated success).
 3. **No background monitoring**; monitoring remains a persistent handoff record; the
    serverless model has no worker, and the product does not pretend to run one.
+
+### Credential injection diagnostics
+
+`/api/health` exposes `credentials.geminiKeyDefined` / `credentials.geminiKeyNonEmpty`
+(presence booleans only, never values). If research returns MODEL_FAILURE (AUTH_FAILURE)
+while the dashboard shows the variables configured, check these booleans first: a
+deployment built before the variable had a value, or an empty value, produces exactly
+this signature. Re-saving the variable and pushing a new deployment resolves it.
