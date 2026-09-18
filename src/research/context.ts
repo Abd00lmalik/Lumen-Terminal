@@ -99,15 +99,57 @@ export function contextKindForEvidence(e: Evidence): ContextItem["kind"] {
 /** Evidence whose observation text is JSON-serialized (news items etc.); humanize for context. */
 function evidenceText(e: Evidence): string {
   try {
-    const parsed = JSON.parse(e.observation) as Record<string, unknown>;
-    if (typeof parsed.title === "string") {
-      const summary = typeof parsed.summary === "string" ? `; ${String(parsed.summary).slice(0, 200)}` : "";
-      return `${parsed.title}${summary}`;
+    const parsed = JSON.parse(e.observation) as unknown;
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const rec = parsed as Record<string, unknown>;
+      if (typeof rec.title === "string") {
+        const summary = typeof rec.summary === "string" ? `; ${String(rec.summary).slice(0, 200)}` : "";
+        return `${rec.title}${summary}`;
+      }
+      // Quantitative tool payloads arrive as one dense JSON line; models misread them as
+      // "no data" (production-observed). Rendering the ACTUAL fields deterministically is not
+      // fabrication: every rendered token comes from the payload, and the raw JSON stays on
+      // the evidence object for provenance.
+      const humanized = humanizeRecord(rec);
+      if (humanized !== "") return humanized;
     }
   } catch {
     // not JSON; use as-is
   }
   return e.observation;
+}
+
+/** Render a tool payload's fields as readable text; bounded, lossless at one nesting level. */
+function humanizeRecord(rec: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(rec)) {
+    if (value === null || value === undefined) continue;
+    if (Array.isArray(value)) {
+      const names = value
+        .slice(0, 3)
+        .map((entry) => {
+          if (entry !== null && typeof entry === "object" && "name" in (entry as Record<string, unknown>)) {
+            return String((entry as Record<string, unknown>).name);
+          }
+          return typeof entry === "object" ? "" : String(entry);
+        })
+        .filter((s) => s !== "")
+        .join(", ");
+      if (names !== "") parts.push(`${key}: ${names}${value.length > 3 ? ` (+${value.length - 3} more)` : ""}`);
+      continue;
+    }
+    if (typeof value === "object") {
+      for (const [subKey, subValue] of Object.entries(value as Record<string, unknown>)) {
+        if (subValue !== null && subValue !== undefined && typeof subValue !== "object") {
+          parts.push(`${key}.${subKey}: ${String(subValue)}`);
+        }
+      }
+      continue;
+    }
+    parts.push(`${key}: ${String(value)}`);
+  }
+  const text = parts.join("; ");
+  return text.length > 700 ? `${text.slice(0, 700)}...` : text;
 }
 
 /**

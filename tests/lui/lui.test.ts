@@ -632,6 +632,34 @@ describe("research context (M3 §9); epistemic distinctions preserved", () => {
     expect(ctx.thesis?.statement).toBe("my thesis");
     expect(ctx.thesis?.claims).toEqual(["c"]);
   });
+
+  it("dense JSON tool payloads are humanized into the model context (never misread as no data)", async () => {
+    const { buildResearchContext } = await import("../../src/research/context.js");
+    const workspace = new Workspace();
+    workspace.addEvidence(
+      {
+        observation: JSON.stringify({
+          chain: "Ethereum",
+          tvl: { current: "52.02B USD", trend: "Up 4.1% WoW" },
+          fees: { past24h: "14.60M USD" },
+          top_protocols_by_fees: [{ name: "Lido" }, { name: "Aave V3" }],
+          protocol_count: 593,
+        }),
+        evidenceType: "DEFI_ANALYSIS",
+        evidenceClass: "OBSERVATION",
+      },
+      system,
+    );
+    const ctx = buildResearchContext(workspace);
+    const text = ctx.items.map((i) => i.text).join(" ");
+    // Every rendered token comes from the payload (no invention), but the values the model
+    // needs to actually USE the observation are legible:
+    expect(text).toContain("Ethereum");
+    expect(text).toContain("52.02B USD");
+    expect(text).toContain("14.60M USD");
+    expect(text).toContain("Lido");
+    expect(text).toContain("protocol_count: 593");
+  });
 });
 
 describe("workspace persistence with M3 objects", () => {
