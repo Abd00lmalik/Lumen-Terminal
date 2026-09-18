@@ -61,18 +61,31 @@ export function createProductionStore(
     : createStore("memory");
 }
 
-/** Build (once per warm instance) the same app the local CLI serves. */
+/**
+ * Build (once per warm instance) the same app the local CLI serves.
+ *
+ * A FAILED construction must never be cached: `appPromise ??=` would pin a rejected
+ * promise for the lifetime of the instance, turning every later request on it (including
+ * /api/health and well-formed research POSTs) into an opaque 500 no matter how valid the
+ * request was. On failure the attempt is discarded so the next request retries cleanly.
+ */
 function getApp(): AppPromise {
-  appPromise ??= buildApi({
-    // deferCredentialCheck: in serverless, a missing GEMINI_API_KEY must NOT crash the whole
-    // API at construction (it used to turn even /api/health into an opaque 500 on any instance
-    // built before the env vars existed). With deferral the provider validates lazily at first
-    // model use: research requests get the same typed AUTH_FAILURE as any model failure and the
-    // UI renders an honest MODEL_FAILURE; health/history routes stay up regardless.
-    provider: new GeminiProvider({ deferCredentialCheck: true }),
-    registry: createBitgetAdapterSet().registry,
-    store: createProductionStore(),
-  });
+  if (appPromise === undefined) {
+    const attempt = buildApi({
+      // deferCredentialCheck: in serverless, a missing GEMINI_API_KEY must NOT crash the whole
+      // API at construction (it used to turn even /api/health into an opaque 500 on any instance
+      // built before the env vars existed). With deferral the provider validates lazily at first
+      // model use: research requests get the same typed AUTH_FAILURE as any model failure and the
+      // UI renders an honest MODEL_FAILURE; health/history routes stay up regardless.
+      provider: new GeminiProvider({ deferCredentialCheck: true }),
+      registry: createBitgetAdapterSet().registry,
+      store: createProductionStore(),
+    });
+    appPromise = attempt;
+    attempt.catch(() => {
+      if (appPromise === attempt) appPromise = undefined; // allow a clean retry; never pin a rejection
+    });
+  }
   return appPromise;
 }
 
