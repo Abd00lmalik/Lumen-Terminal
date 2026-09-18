@@ -291,6 +291,8 @@ const STATE_CHANGE_SYSTEM = [
 const RESPONSE_SYSTEM = [
   "Compose the final trader-facing response from the validated research outcome.",
   "Structure (progressive disclosure, default levels 0–1): answer first, 2–4 strongest reasons, strongest opposition where present, confidence, key uncertainty, decision-relevant implication.",
+  "- The answer must state the SUBSTANCE of what the evidence shows about the question, including the key concrete observations (numbers, dates, names, levels) drawn from the research outcome. Never write process commentary such as 'sufficient observations have been gathered' or 'the objective can be fulfilled'; describe the findings themselves.",
+  "- If the evidence genuinely does not answer the question, say exactly what is missing in one research-relevant sentence; do not describe the research process.",
   "- NEVER expose chain-of-thought. Reasons are observable evidence/object-based statements.",
   "- Only cite object refs that appear in the provided context/research outcome. No fabricated citations.",
   "- Confidence: HIGH only with direct multi-source observation; LOW when evidence is thin, partial, or single-source; UNKNOWN when no usable evidence.",
