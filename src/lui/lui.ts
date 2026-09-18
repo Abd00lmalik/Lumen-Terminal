@@ -694,7 +694,12 @@ export class Lui {
         workspace,
         store: this.options.store,
         constraints: step.params["constraints"] !== undefined ? step.params["constraints"].split(";").map((s) => s.trim()).filter((s) => s !== "") : [],
-        capabilityParams: step.params["asset"] !== undefined ? { asset: step.params["asset"] } : {},
+        capabilityParams: {
+          ...(step.params["asset"] !== undefined ? { asset: step.params["asset"] } : {}),
+          // G2 DISCOVER falls back to the question text when a task carries no query:
+          // the objective still bounds the investigation; never a hard schema failure.
+          question: step.params["question"] ?? objective,
+        },
         ...(this.options.now !== undefined ? { now: this.options.now } : {}),
         ...(deadlineMs !== undefined ? { deadlineMs } : {}),
         ...(onProgress !== undefined ? { onProgress } : {}),

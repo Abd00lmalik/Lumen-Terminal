@@ -107,7 +107,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // First attempt threw (network/abort shape); retry once before giving up.
     res = await attempt();
   }
-  if (!res.ok) await parseErrorBody(res);
+  if (!res.ok) {
+    // A typed {error:{code}} body is OUR app's considered answer (INVALID_REQUEST,
+    // AWAITING_CONFIRMATION, ...): never retried, never masked. A status whose body is not
+    // our envelope is a platform-level response the app never generated (observed once as
+    // a browser-only 400); for safe idempotent reads, retry once before surfacing.
+    let typed = true;
+    try {
+      const probe = res.clone();
+      const body = (await probe.json()) as ApiErrorDto;
+      typed = body?.error?.code !== undefined;
+    } catch {
+      typed = false;
+    }
+    if (!typed && (init?.method === undefined || init.method === "GET")) {
+      const retried = await attempt();
+      if (retried.ok) {
+        res = retried;
+      } else {
+        await parseErrorBody(retried);
+      }
+    } else {
+      await parseErrorBody(res);
+    }
+  }
   if (res.status === 204) return undefined as T;
   try {
     return (await res.json()) as T;

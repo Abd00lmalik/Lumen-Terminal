@@ -98,8 +98,13 @@ export class HeuristMeshTransport {
       throw new TransportError("PROVIDER_ERROR", `Heurist ${agentId}.${tool} failed: ${String(detail).slice(0, 300)}`, { retriable: true });
     }
     const result = (body as { result?: unknown }).result;
-    if (result === undefined) {
-      throw new TransportError("INVALID_RESPONSE", `Heurist ${agentId}.${tool} response has no result (raw captured: ${rawReference})`, { retriable: false });
+    if (result === undefined || result === null) {
+      // Distinguish honest emptiness from malformed output: agents legitimately return
+      // null/absent results when they have no coverage for a subject. That is "no data",
+      // NOT a protocol failure; the registry records it as an empty attempt and any
+      // earlier direct provider's data still stands. Only structurally wrong payloads
+      // (non-JSON, wrong types) are INVALID_RESPONSE.
+      throw new TransportError("EMPTY_RESULT", `Heurist ${agentId}.${tool} has no result for this subject (raw captured: ${rawReference})`, { retriable: false });
     }
     return { result, rawReference };
   }
@@ -203,6 +208,8 @@ export interface HeuristAgentSpec {
   readonly subjectParam?: string;
   /** Fallback subject value when the question resolved no target (e.g. index overviews). */
   readonly defaultSubject?: string;
+  /** Deep-research agents accept the raw question text as their subject (query/prompt). */
+  readonly acceptsQuestion?: boolean;
   readonly limitations: readonly string[];
   readonly freshnessProfile: string;
 }
@@ -238,7 +245,10 @@ export class HeuristAgentAdapter implements ProviderAdapter {
     const tool = typeof params.tool === "string" && params.tool.trim() !== "" ? params.tool : this.spec.tool;
     const toolArguments: Record<string, unknown> = {};
     if (this.spec.subjectParam !== undefined) {
-      const raw = [params[this.spec.subjectParam], params.asset, params.symbol].find((v) => typeof v === "string" && v.trim() !== "");
+      const raw = [
+        params[this.spec.subjectParam], params.asset, params.symbol,
+        ...(this.spec.acceptsQuestion === true ? [params.question] : []),
+      ].find((v) => typeof v === "string" && v.trim() !== "");
       const subject = typeof raw === "string" ? raw.trim() : this.spec.defaultSubject;
       if (subject === undefined) {
         return {
@@ -255,6 +265,8 @@ export class HeuristAgentAdapter implements ProviderAdapter {
         };
       }
       toolArguments[this.spec.subjectParam] = subject;
+    } else if (this.spec.acceptsQuestion === true && typeof params.question === "string" && params.question.trim() !== "") {
+      toolArguments.query = params.question;
     }
     // Pass through any explicitly requested extra arguments (bounded, scalar only).
     const extra = params.toolArguments;
@@ -368,6 +380,7 @@ export function createHeuristSecAdapter(transport?: HeuristMeshTransport): Heuri
       upstreamSource: "sec-edgar",
       tool: "filing_timeline",
       subjectParam: "query",
+      acceptsQuestion: true,
       limitations: [
         "the filing itself is the primary source; Heurist's summary of it is secondary treatment of that source",
         "filing links/identifiers are preserved in outputs; verify against the filing text when material",
@@ -427,6 +440,7 @@ export function createHeuristCaesarAdapter(transport?: HeuristMeshTransport): He
       upstreamSource: "caesar-research",
       tool: "caesar_research",
       subjectParam: "query",
+      acceptsQuestion: true,
       limitations: [
         "Caesar is an AI research agent: its output is generated analysis over web/academic sources, NOT direct market observation",
         "expensive (10 credits/call): only invoked when the direct capability chain produced no coverage",
@@ -450,6 +464,7 @@ export function createHeuristAskAdapter(transport?: HeuristMeshTransport): Heuri
       upstreamSource: "ask-heurist",
       tool: "ask_heurist",
       subjectParam: "prompt",
+      acceptsQuestion: true,
       limitations: [
         "AskHeurist is a crypto Q&A research agent: its output is generated analysis, NOT direct market observation",
         "expensive (10 credits/call): only invoked when the direct capability chain produced no coverage",

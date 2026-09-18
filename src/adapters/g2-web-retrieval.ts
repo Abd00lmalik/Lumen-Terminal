@@ -238,12 +238,11 @@ export class G2WebRetrievalAdapter implements ProviderAdapter {
         const source = await this.retrieve(q.url);
         return this.successResult([this.sourceToOutput(source, false)], "COMPLETE", `retrieve:${source.url}`);
       }
-      // DISCOVER (default intent)
-      if (typeof q.query !== "string" || q.query.trim() === "") {
-        throw new TransportError("SCHEMA_ERROR", "DISCOVER requires a non-empty query", { retriable: false });
-      }
-      const sources = await this.discover(q.query);
-      if (sources.length === 0) {
+      // DISCOVER (default intent): a missing query is degraded with the question text as a
+      // fallback (the objective still bounds the investigation), never a hard failure —
+      // an empty discovery result is the honest outcome, not an error trail.
+      const query = typeof q.query === "string" && q.query.trim() !== "" ? q.query : (typeof params.question === "string" && params.question.trim() !== "" ? params.question : undefined);
+      if (query === undefined) {
         return {
           tool: this.providerId,
           capability,
@@ -252,7 +251,21 @@ export class G2WebRetrievalAdapter implements ProviderAdapter {
           outputs: [],
           completeness: "EMPTY",
           validation: "VALID",
-          failure: { type: "EMPTY_RESULT", message: `no sources discovered for "${q.query}"`, retriable: true },
+          failure: { type: "EMPTY_RESULT", message: "no discovery query resolved for this task", retriable: false },
+          limitations: this.limitations,
+        };
+      }
+      const sources = await this.discover(query);
+      if (sources.length === 0) {
+        return {
+          tool: this.providerId,
+          capability,
+          transport: "web:discover",
+          params: { ...q, query },
+          outputs: [],
+          completeness: "EMPTY",
+          validation: "VALID",
+          failure: { type: "EMPTY_RESULT", message: `no sources discovered for "${query}"`, retriable: true },
           limitations: this.limitations,
         };
       }
@@ -264,7 +277,7 @@ export class G2WebRetrievalAdapter implements ProviderAdapter {
         seen.add(fp);
         return this.sourceToOutput(s, duplicateContent);
       });
-      return this.successResult(outputs, "COMPLETE", `discover:${q.query}`);
+      return this.successResult(outputs, "COMPLETE", `discover:${query}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const isTyped = error instanceof TransportError;

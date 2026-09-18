@@ -163,12 +163,13 @@ describe("G2 adapter (deterministic, fake fetch)", () => {
     expect(rThin.failure.type).toBe("INVALID_RESPONSE");
   });
 
-  it("invalid usage: missing url / missing query → SCHEMA_ERROR", async () => {
+  it("invalid usage: missing url → SCHEMA_ERROR; missing query degrades to honest EMPTY (question-text fallback keeps discovery usable)", async () => {
     const g2 = new G2WebRetrievalAdapter({ fetchImpl: htmlResponse("x") });
     const rNoUrl = await g2.execute("SOURCE_VALIDATION", { intent: "RETRIEVE" });
     expect(rNoUrl.failure.type).toBe("SCHEMA_ERROR");
     const rNoQuery = await g2.execute("SOURCE_VALIDATION", { intent: "DISCOVER" });
-    expect(rNoQuery.failure.type).toBe("SCHEMA_ERROR");
+    expect(rNoQuery.failure.type).toBe("EMPTY_RESULT");
+    expect(rNoQuery.outputs.length).toBe(0);
   });
 
   it("interface conformance: rejects unmapped capabilities", async () => {

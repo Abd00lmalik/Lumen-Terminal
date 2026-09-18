@@ -17,7 +17,7 @@ import type { ToolFailureType } from "../../domain/tool-result.js";
 /** Failure types a transport can produce. */
 export type TransportFailureType = Extract<
   ToolFailureType,
-  "TIMEOUT" | "RATE_LIMIT" | "AUTHENTICATION_FAILURE" | "UNAVAILABLE" | "INVALID_RESPONSE" | "PROVIDER_ERROR" | "SCHEMA_ERROR"
+  "TIMEOUT" | "RATE_LIMIT" | "AUTHENTICATION_FAILURE" | "UNAVAILABLE" | "INVALID_RESPONSE" | "PROVIDER_ERROR" | "SCHEMA_ERROR" | "EMPTY_RESULT"
 >;
 
 /**

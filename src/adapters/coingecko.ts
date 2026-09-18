@@ -31,6 +31,21 @@ const COMMON_COIN_IDS: ReadonlyMap<string, string> = new Map([
   ["TON", "the-open-network"],
   ["TRX", "tron"],
   ["SHIB", "shiba-inu"],
+  ["ZEC", "zcash"],
+  ["XMR", "monero"],
+  ["ATOM", "cosmos"],
+  ["NEAR", "near"],
+  ["APT", "aptos"],
+  ["ARB", "arbitrum"],
+  ["OP", "optimism"],
+  ["SUI", "sui"],
+  ["INJ", "injective-protocol"],
+  ["FIL", "filecoin"],
+  ["ETC", "ethereum-classic"],
+  ["BCH", "bitcoin-cash"],
+  ["UNI", "uniswap"],
+  ["AAVE", "aave"],
+  ["PEPE", "pepe"],
 ]);
 
 interface CoinGeckoSimple {
@@ -77,7 +92,8 @@ export class CoinGeckoMarketDataAdapter implements ProviderAdapter {
     const coinId = coinIdOf(params);
     if (coinId === undefined) {
       const requested = [params.asset, params.symbol, params.coin].find((v) => typeof v === "string" && (v as string).trim() !== "");
-      const notCrypto = typeof requested === "string" && NON_CRYPTO_TARGETS.has(requested.trim().toUpperCase().split(/[\s/:\-]/)[0] ?? "");
+      const requestedToken = typeof requested === "string" ? (requested.trim().toUpperCase().split(/[\s/:\-]/)[0] ?? "") : "";
+      const notCrypto = requestedToken !== "" && NON_CRYPTO_TARGETS.has(requestedToken);
       return {
         tool: this.providerId,
         capability,

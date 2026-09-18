@@ -299,6 +299,57 @@ export async function runAdaptiveResearch(
     }
   }
 
+  // Deep-research fallback (engine-owned, never planner-dependent): when the loop concluded
+  // with INSUFFICIENT_EVIDENCE and produced NO usable evidence, the direct capability chain
+  // failed the question. Before concluding, fire the last-resort CROSS_DOMAIN_SYNTHESIS
+  // deep-research tier ONCE with the exact objective. The model never decides this (it does
+  // not know provider coverage); the engine knows when nothing was gathered. Outputs remain
+  // classified by the evidence layer (agent analysis, never direct observation).
+  const deepResearchFired =
+    stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE" &&
+    allExecutions.every((e) => e.evidenceIds.length === 0) &&
+    !allExecutions.some((e) => e.capability === "CROSS_DOMAIN_SYNTHESIS") &&
+    options.registry.resolve("CROSS_DOMAIN_SYNTHESIS").length > 0 &&
+    (options.deadlineMs === undefined || at().getTime() < options.deadlineMs);
+  if (deepResearchFired) {
+    options.onProgress?.(progressEvent("capability_started", at(), "direct capabilities produced no coverage; invoking deep-research agents", { capability: "CROSS_DOMAIN_SYNTHESIS" }));
+    const deepRound: RoundExecution[] = [];
+    try {
+      const result = await options.registry.execute(
+        "CROSS_DOMAIN_SYNTHESIS",
+        { ...(options.capabilityParams ?? {}), question: objective },
+        systemOrigin,
+        at(),
+      );
+      options.onProgress?.(progressEvent("capability_completed", at(), `deep research completed: ${result.failure.type === "NONE" ? result.completeness : `failed (${result.failure.type})`}`, { capability: "CROSS_DOMAIN_SYNTHESIS" }));
+      const evidenceIds: string[] = [];
+      if (result.failure.type === "NONE" && result.validation !== "INVALID") {
+        for (const output of result.normalizedOutput) {
+          try {
+            const evidence = evidenceFromToolResult(
+              result,
+              output,
+              { kind: "tool", toolRef: result.tool, invocation: result.invocation.params },
+              {},
+              at(),
+            );
+            workspace.ingestEvidence(evidence, researchRef);
+            evidenceIds.push(evidence.id);
+          } catch {
+            // UNAVAILABLE/ERROR outputs never become evidence (evidence.ts invariant).
+          }
+        }
+      }
+      const execution: RoundExecution = { round: rounds.length + 1, capability: "CROSS_DOMAIN_SYNTHESIS", result, evidenceIds };
+      deepRound.push(execution);
+      allExecutions.push(execution);
+      rounds.push({ round: rounds.length + 1, executions: deepRound, decision: finalDecision });
+    } catch {
+      // A deep-research throw is recorded as a failed round, never a crash; the honest
+      // insufficiency conclusion below stands.
+    }
+  }
+
   // Lifecycle honesty: the loop CONCLUDED (by sufficiency, insufficiency, budget, or model
   // failure); the research object must reflect that instead of staying ACTIVE forever.
   workspace.transitionResearch(researchRef, "COMPLETED", { kind: "agent", detail: "adaptive research loop" }, `research concluded: ${stoppedBecause}`, at());
