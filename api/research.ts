@@ -111,7 +111,7 @@ function startLoopbackServer(): Promise<http.Server> {
         // client-request problems become a typed 400; anything else is contained as a
         // 500 with a safe message. The error code is logged for production diagnosis.
         const code = typeof (err as { code?: unknown })?.code === "string" ? (err as { code: string }).code : `(no code: ${String((err as Error)?.name)})`;
-        console.error("[api] app.routing sync failure:", code);
+        console.error("[api:tag:routing-sync] app.routing sync failure:", code);
         const clientProblem = code === "FST_ERR_CTP_INVALID_MEDIA_TYPE" || code === "FST_ERR_CTP_EMPTY_JSON_BODY" || code === "FST_ERR_CTP_INVALID_JSON" || code === "FST_ERR_CTP_INVALID_CONTENT_LENGTH" || code === "FST_ERR_BAD_REQUEST" || (err instanceof SyntaxError && /JSON/i.test(String((err as Error).message)));
         respondTypedError(
           rawRes as unknown as VercelResponse,
@@ -408,7 +408,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
     await respondViaInject(req, res);
   } catch (err) {
-    console.error("[api] handler failure:", err);
+    console.error("[api:tag:handler-catch] handler failure:", err);
     respondTypedError(
       res,
       500,
