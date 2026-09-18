@@ -51,6 +51,16 @@ export interface GeminiOptions {
   /** Retry budget for TRANSIENT provider conditions (5xx / 429 / network / timeout).
    *  Injected `sleep` keeps tests deterministic. Defaults: 3 attempts, 1.5s base backoff. */
   readonly transientRetry?: { attempts: number; baseDelayMs: number; sleep?: (ms: number) => Promise<void> };
+  /**
+   * Defer credential validation from construction to FIRST MODEL USE (serverless resilience).
+   * Default false: `npm run api` fails fast locally with the typed AUTH_FAILURE.
+   * When true (production/Vercel), constructing the provider NEVER throws — a missing
+   * GEMINI_API_KEY surfaces as the same typed AUTH_FAILURE ModelFailure when research
+   * actually needs the model, so health/history routes stay up and the UI can render an
+   * honest MODEL_FAILURE instead of an opaque 500. The message still names the variable,
+   * never its value.
+   */
+  readonly deferCredentialCheck?: boolean;
 }
 
 interface GeminiCandidate {
@@ -68,6 +78,7 @@ export class GeminiProvider implements ModelProvider {
   readonly providerId = "google/gemini";
   readonly modelId: string;
   private readonly apiKey: string;
+  private readonly deferCredentialCheck: boolean;
   private readonly fetchImpl: typeof fetch;
   private readonly maxRawBytes: number;
   /** Bounded retry for TRANSIENT provider conditions (5xx / 429 / network), mirroring the
@@ -76,11 +87,21 @@ export class GeminiProvider implements ModelProvider {
   private readonly transientRetry: { attempts: number; baseDelayMs: number; sleep?: (ms: number) => Promise<void> };
 
   constructor(options: GeminiOptions = {}) {
-    // Credentials come ONLY from environment (M3 §2). Throws typed AUTH_FAILURE when absent;
-    // the error message names the variable, never its value.
-    const config = requireEnvConfig(options.env ?? process.env, "GEMINI_API_KEY", "GEMINI_MODEL", DEFAULT_GEMINI_MODEL);
-    this.apiKey = config.apiKey;
-    this.modelId = config.model;
+    // Credentials come ONLY from environment (M3 §2). By default validation is eager and
+    // throws typed AUTH_FAILURE when absent (message names the variable, never its value).
+    // With deferCredentialCheck the same validation runs lazily at first model use, so a
+    // serverless instance with missing env vars serves health/history and reports MODEL_FAILURE
+    // for research instead of crashing every route at construction.
+    const env = options.env ?? process.env;
+    if (options.deferCredentialCheck === true) {
+      this.apiKey = env.GEMINI_API_KEY ?? "";
+      this.modelId = env.GEMINI_MODEL ?? DEFAULT_GEMINI_MODEL;
+    } else {
+      const config = requireEnvConfig(env, "GEMINI_API_KEY", "GEMINI_MODEL", DEFAULT_GEMINI_MODEL);
+      this.apiKey = config.apiKey;
+      this.modelId = config.model;
+    }
+    this.deferCredentialCheck = options.deferCredentialCheck === true;
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
     this.maxRawBytes = options.maxRawBytes ?? 256_000;
     this.transientRetry = options.transientRetry ?? { attempts: 3, baseDelayMs: 1500 };
@@ -89,6 +110,16 @@ export class GeminiProvider implements ModelProvider {
   async structured<T>(request: StructuredRequest): Promise<StructuredResponse<T>> {
     if (typeof request.schemaName !== "string" || request.schemaName === "") {
       throw new ModelFailure("INVALID_OUTPUT", "structured request requires a schemaName", false);
+    }
+
+    // Lazy credential gate (deferCredentialCheck): the SAME typed AUTH_FAILURE the eager
+    // constructor throws, raised at first model use. Non-retriable, key-free message.
+    if (this.deferCredentialCheck && this.apiKey === "") {
+      throw new ModelFailure(
+        "AUTH_FAILURE",
+        "GEMINI_API_KEY is not set. Configure it via environment (see .env.example). The provider cannot run without credentials.",
+        false,
+      );
     }
 
     // Bounded retry for TRANSIENT conditions only (the M1 resilience law applied to the model

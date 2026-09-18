@@ -64,7 +64,12 @@ export function createProductionStore(
 /** Build (once per warm instance) the same app the local CLI serves. */
 function getApp(): AppPromise {
   appPromise ??= buildApi({
-    provider: new GeminiProvider(),
+    // deferCredentialCheck: in serverless, a missing GEMINI_API_KEY must NOT crash the whole
+    // API at construction (it used to turn even /api/health into an opaque 500 on any instance
+    // built before the env vars existed). With deferral the provider validates lazily at first
+    // model use: research requests get the same typed AUTH_FAILURE as any model failure and the
+    // UI renders an honest MODEL_FAILURE; health/history routes stay up regardless.
+    provider: new GeminiProvider({ deferCredentialCheck: true }),
     registry: createBitgetAdapterSet().registry,
     store: createProductionStore(),
   });
@@ -165,55 +170,131 @@ function writeViaVercelResponse(
   }
 }
 
+/**
+ * Forward the upstream body to the Vercel response and call `onDone` exactly once when the
+ * upstream body has fully ended (or failed). `pipe` is used only when the response object is
+ * a real stream (vercel dev, real Node); Vercel's production wrapped response is driven
+ * manually via write/end, which its runtime guarantees.
+ */
+function forwardUpstreamResponse(
+  res: VercelResponse,
+  upstreamRes: http.IncomingMessage,
+  onDone: () => void,
+): void {
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    onDone();
+  };
+  const endQuietly = () => {
+    try {
+      (res as unknown as { end: () => unknown }).end();
+    } catch {
+      // nothing further can be done if even end() fails
+    }
+  };
+  const streamLike = res as unknown as { pipe?: unknown; on?: unknown; write?: unknown; end?: unknown };
+  if (typeof streamLike.pipe === "function" && typeof streamLike.on === "function") {
+    upstreamRes.pipe(res as unknown as NodeJS.WritableStream);
+    upstreamRes.on("end", finish);
+    upstreamRes.on("error", finish);
+    return;
+  }
+  if (typeof streamLike.write === "function" && typeof streamLike.end === "function") {
+    upstreamRes.on("data", (chunk: Buffer) => {
+      (res as unknown as { write: (c: Buffer) => unknown }).write(chunk);
+    });
+    upstreamRes.on("end", () => {
+      (res as unknown as { end: () => unknown }).end();
+      finish();
+    });
+    upstreamRes.on("error", () => {
+      endQuietly();
+      finish();
+    });
+    return;
+  }
+  // Last resort: buffer the whole body and end once (SSE arrives in one body).
+  const chunks: Buffer[] = [];
+  upstreamRes.on("data", (c: Buffer) => chunks.push(c));
+  upstreamRes.on("end", () => {
+    try {
+      res.end(Buffer.concat(chunks));
+    } catch {
+      // nothing further can be done
+    }
+    finish();
+  });
+  upstreamRes.on("error", () => {
+    endQuietly();
+    finish();
+  });
+}
+
 async function proxyThroughSocket(req: VercelRequest, res: VercelResponse, server: http.Server): Promise<void> {
   const { port } = server.address() as AddressInfo;
   const headers = hopByHopRequestHeaders(req, port);
 
-  const upstream = http.request(
-    { host: "127.0.0.1", port, path: req.url, method: req.method, headers },
-    (upstreamRes) => {
-      // Forward the response unbuffered (SSE progress streams included), stripping
-      // hop-by-hop headers that must never cross a proxy boundary.
-      const outHeaders: Record<string, string | string[]> = {};
-      for (const [key, value] of Object.entries(upstreamRes.headers)) {
-        const lower = key.toLowerCase();
-        if (lower === "connection" || lower === "transfer-encoding" || lower === "keep-alive") continue;
-        if (value === undefined) continue;
-        outHeaders[key] = value;
-      }
-      writeViaVercelResponse(res, upstreamRes.statusCode ?? 500, outHeaders);
-      upstreamRes.pipe(res);
-    },
-  );
-  upstream.on("error", (err) => {
-    // Logged (never leaked to the client beyond a typed JSON body): this is the one
-    // failure mode of the bridge worth diagnosing from function logs.
-    console.error("[api] internal bridge request failed:", err);
-    respondTypedError(res, 502, "BRIDGE_FAILURE", "The API's internal request bridge failed; the research service is temporarily unavailable.");
-  });
+  // The handler MUST NOT resolve before the upstream response has been fully forwarded:
+  // Vercel finalizes the invocation when the handler promise settles, so resolving early
+  // would truncate (or entirely drop) the response body and every SSE event.
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
 
-  // Vercel parses the body for us (req.body); a raw stream (vercel dev) is piped through.
-  if (req.body !== undefined && req.body !== null) {
-    const payload = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
-    if (!headers["content-type"]) headers["content-type"] = "application/json";
-    upstream.setHeader("content-type", headers["content-type"]);
-    upstream.end(payload);
-  } else if (typeof (req as unknown as { pipe?: unknown }).pipe === "function") {
-    req.pipe(upstream);
-  } else {
-    upstream.end();
-  }
-
-  // If the client disconnects mid-research, stop feeding the upstream request.
-  // NOTE: this must be detected on the RESPONSE stream (closed before it finished
-  // writing), not on `req` "close": a request message completes as soon as its body
-  // ends (immediately for GET, and long before the SSE reply streams for POST), so a
-  // req-based check would abort every request before any response arrived.
-  if (typeof res.on === "function") {
-    res.on("close", () => {
-      if (!res.writableEnded) upstream.destroy();
+    const upstream = http.request(
+      { host: "127.0.0.1", port, path: req.url, method: req.method, headers },
+      (upstreamRes) => {
+        // Forward the response unbuffered (SSE progress streams included), stripping
+        // hop-by-hop headers that must never cross a proxy boundary.
+        const outHeaders: Record<string, string | string[]> = {};
+        for (const [key, value] of Object.entries(upstreamRes.headers)) {
+          const lower = key.toLowerCase();
+          if (lower === "connection" || lower === "transfer-encoding" || lower === "keep-alive") continue;
+          if (value === undefined) continue;
+          outHeaders[key] = value;
+        }
+        writeViaVercelResponse(res, upstreamRes.statusCode ?? 500, outHeaders);
+        forwardUpstreamResponse(res, upstreamRes, settle);
+      },
+    );
+    upstream.on("error", (err) => {
+      // Logged (never leaked to the client beyond a typed JSON body): this is the one
+      // failure mode of the bridge worth diagnosing from function logs.
+      console.error("[api] internal bridge request failed:", err);
+      respondTypedError(res, 502, "BRIDGE_FAILURE", "The API's internal request bridge failed; the research service is temporarily unavailable.");
+      settle();
     });
-  }
+
+    // Vercel parses the body for us (req.body); a raw stream (vercel dev) is piped through.
+    if (req.body !== undefined && req.body !== null) {
+      const payload = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+      if (!headers["content-type"]) headers["content-type"] = "application/json";
+      upstream.setHeader("content-type", headers["content-type"]);
+      upstream.end(payload);
+    } else if (typeof (req as unknown as { pipe?: unknown }).pipe === "function") {
+      req.pipe(upstream);
+    } else {
+      upstream.end();
+    }
+
+    // If the client disconnects mid-research, stop feeding the upstream request.
+    // NOTE: this must be detected on the RESPONSE stream (closed before it finished
+    // writing), not on `req` "close": a request message completes as soon as its body
+    // ends (immediately for GET, and long before the SSE reply streams for POST), so a
+    // req-based check would abort every request before any response arrived.
+    if (typeof res.on === "function") {
+      res.on("close", () => {
+        if (!res.writableEnded) upstream.destroy();
+        settle();
+      });
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------

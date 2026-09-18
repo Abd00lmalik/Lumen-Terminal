@@ -240,4 +240,54 @@ describe("GeminiProvider construction (M3 §2; no key required to run the suite)
       .rejects.toMatchObject({ type: "RATE_LIMITED" });
     expect(calls).toBe(2); // retried through the budget before failing
   });
+
+  // Serverless resilience (production 500 root cause, 2026-09-18): a function instance built
+  // before GEMINI_API_KEY existed crashed at CONSTRUCTION, turning every route (even health)
+  // into an opaque FUNCTION_INVOCATION_FAILED. With deferCredentialCheck the provider never
+  // throws at construction; the same typed AUTH_FAILURE surfaces at first model use.
+  describe("deferCredentialCheck (serverless: missing env must not crash every route)", () => {
+    it("construction succeeds without credentials; first structured() call fails typed", async () => {
+      const provider = new GeminiProvider({ env: {}, deferCredentialCheck: true });
+      expect(provider.providerId).toBe("google/gemini"); // construction is harmless
+      await expect(provider.structured({ schemaName: "s", schemaDescription: "{}", system: "sys", prompt: "p" }))
+        .rejects.toMatchObject({ type: "AUTH_FAILURE", retriable: false });
+    });
+
+    it("the deferred failure message names the variable, never a value", async () => {
+      const provider = new GeminiProvider({ env: {}, deferCredentialCheck: true });
+      try {
+        await provider.structured({ schemaName: "s", schemaDescription: "{}", system: "sys", prompt: "p" });
+        expect.unreachable("structured() must reject without credentials");
+      } catch (error) {
+        expect(String(error)).toContain("GEMINI_API_KEY");
+        expect(String(error)).not.toMatch(/sk-|AIza|[A-Za-z0-9_-]{20,}/); // no value-shaped content
+      }
+    });
+
+    it("deferral is transparent when the key IS set (model + behavior unchanged)", async () => {
+      let calls = 0;
+      const provider = new GeminiProvider({
+        env: { GEMINI_API_KEY: "k", GEMINI_MODEL: "custom-model" },
+        deferCredentialCheck: true,
+        fetchImpl: (async () => {
+          calls++;
+          return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"name":"a","count":1,"tags":[]}' }] } }] }), { status: 200 }) as unknown as Response;
+        }) as unknown as typeof fetch,
+      });
+      expect(provider.modelId).toBe("custom-model");
+      const result = await provider.structured<unknown>({
+        schemaName: "test.schema", schemaDescription: "{}", system: "sys", prompt: "p",
+      });
+      expect(result.modelId).toBe("custom-model");
+      // Provider contract (M3 §6): raw text comes back unvalidated; the shared validation
+      // gate turns it into typed data. Same behavior in deferred mode as in eager mode.
+      const { data } = validateModelOutput<{ name: string; count: number; tags: string[] }>(schema, result.raw);
+      expect(data).toEqual({ name: "a", count: 1, tags: [] });
+      expect(calls).toBe(1);
+    });
+
+    it("eager mode (default) still fails fast at construction for local `npm run api`", () => {
+      expect(() => new GeminiProvider({ env: {} })).toThrow(ModelFailure);
+    });
+  });
 });
