@@ -251,6 +251,38 @@ export function ResearchWorkspacePage() {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
+  // AUTO-RECOVERY: while the banner is up, a bounded background retry keeps trying to load
+  // workspace state; the moment one succeeds the banner clears itself (a user should never
+  // have to know that a cold serverless instance blipped). Backs off 5s, 10s, 20s, then 30s.
+  const loadError = ws.loadError;
+  useEffect(() => {
+    if (loadError === undefined) return;
+    let cancelled = false;
+    let attempt = 0;
+    const tick = async (): Promise<void> => {
+      if (cancelled) return;
+      attempt += 1;
+      try {
+        const snapshot = await getWorkspace();
+        if (!cancelled) {
+          setWs({
+            evidence: snapshot.recentEvidence.map(evidenceFromDto),
+            judgment: snapshot.currentJudgment !== undefined ? judgmentFromDto(snapshot.currentJudgment) : undefined,
+            thesis: undefined,
+            snapshot,
+            loadError: undefined,
+          });
+        }
+        return; // recovered; stop the chain
+      } catch {
+        if (attempt < 4 && !cancelled) setTimeout(() => { void tick(); }, Math.min(5000 * 2 ** (attempt - 1), 30000));
+      }
+    };
+    const t = setTimeout(() => { void tick(); }, 5000);
+    return () => { cancelled = true; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadError]);
+
   // A question handed over from the home hero (navigation state) is asked once on arrival.
   useEffect(() => {
     const q = (location.state as { question?: string } | null)?.question;

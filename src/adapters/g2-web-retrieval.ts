@@ -35,7 +35,12 @@ import type { WebQuery, RetrievedSource, ProviderAdapter } from "./capability-re
 import type { CapabilityName } from "./capability-registry.js";
 import type { ToolOutput, ToolResultInput } from "../domain/tool-result.js";
 
-export const G2_CAPABILITIES: readonly CapabilityName[] = ["SOURCE_VALIDATION"];
+// WEB_SEARCH and FALSIFICATION are registered as aliases of SOURCE_VALIDATION: the
+// planner's vocabulary sometimes names them, and bounded discovery + source validation is
+// exactly what serves both (all resolve to the same DISCOVER → RETRIEVE → VALIDATE →
+// EXTRACT pipeline; no provider is hardcoded, and each capability keeps its own name so
+// the evidence trail stays honest about what was requested).
+export const G2_CAPABILITIES: readonly CapabilityName[] = ["SOURCE_VALIDATION", "WEB_SEARCH", "FALSIFICATION"];
 
 /** Default discovery endpoint: Wikipedia opensearch-style query API (no key, reachable). */
 export const DEFAULT_SEARCH_ENDPOINT = "https://en.wikipedia.org/w/api.php";
@@ -226,7 +231,7 @@ export class G2WebRetrievalAdapter implements ProviderAdapter {
 
   /** Registry path: params is a WebQuery. Returns sources as classified outputs. */
   async execute(capability: string, params: Record<string, unknown>): Promise<ToolResultInput> {
-    if (capability !== "SOURCE_VALIDATION") {
+    if (!G2_CAPABILITIES.includes(capability)) {
       throw new TransportError("SCHEMA_ERROR", `${this.providerId} has no mapping for capability ${capability}`, { retriable: false });
     }
     const q = params as unknown as WebQuery;
