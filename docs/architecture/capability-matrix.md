@@ -26,10 +26,22 @@ Verification labels: **VERIFIED LIVE** (real endpoint probed from this environme
 | EVENT_RECONSTRUCTION | causal | engine-composed (news + timeline capabilities) | - | derived | - | - | - | PARTIAL | composed from news capabilities; no dedicated event DB |
 | CAUSAL_INVESTIGATION | causal | engine-composed | - | derived | - | - | - | PARTIAL | causality is never asserted from correlation; LUI boundary |
 | ONCHAIN_ANALYSIS | on-chain | none | none | - | - | - | - | UNAVAILABLE | no real on-chain provider; proxies stay PROXY_EVIDENCE (never labeled on-chain) |
-| DERIVATIVES_ANALYSIS | derivatives | none (crypto) | none | - | - | - | - | UNAVAILABLE | funding/OI/liquidations have no real provider; never invented |
+| DERIVATIVES_ANALYSIS | derivatives | none (crypto, exchange-native) | heurist/FundingRateAgent (priority 300; Binance USDⓈ-M funding + OI; requires HEURIST_API_KEY) | funding, open interest | minutes | agent-limited | Heurist credits | PARTIAL | Bitget-primary positioning views remain UNAVAILABLE; Heurist data is Binance-sourced (provenance states this); liquidations still have no provider and are never invented |
 | FALSIFICATION | thesis challenge | engine-composed (news + falsification planning) | - | derived | - | - | - | PARTIAL | disconfirming evidence sought via NEWS/HISTORICAL capabilities |
 | CROSS_DOMAIN_SYNTHESIS | synthesis | engine-composed | - | derived | - | - | - | PARTIAL | Flow 6 composition; no new data source |
-| OPTIONS_CHAIN_ANALYSIS | options | none | none | - | - | - | - | BLOCKED-EXTERNAL | Yahoo options endpoint requires crumb-protected v7 API currently returning 401; capability returns honest UNAVAILABLE, never synthesized IV/strikes |
+| OPTIONS_CHAIN_ANALYSIS | options | heurist/YahooFinanceAgent (options_chain tool; requires HEURIST_API_KEY) | none | strikes, prices, volume, OI, IV where present | intraday | chain snapshot | Heurist credits | UNVERIFIED LIVE | adapter + registry chain VERIFIED DETERMINISTICALLY; direct Yahoo options API is BLOCKED-EXTERNAL (401), so Heurist is the only viable source; without HEURIST_API_KEY the capability returns honest UNAVAILABLE; same Yahoo upstream as the equity adapter (never counted as independent corroboration) |
+| MACRO_ANALYSIS (FRED series) | macro | fallback/world-bank (priority 200) | heurist/FredMacroAgent (priority 300; CPI/rates/labor/credit/growth + release calendar + ALFRED vintage; requires HEURIST_API_KEY) | series observations | release-cycle | provider archive | Heurist credits | UNVERIFIED LIVE | World Bank fallback VERIFIED LIVE; FRED agent adds US series semantics and vintage history; observation dates are FRED-reported |
+| SOURCE_VALIDATION (SEC filings) | equities/primary-source | g2/web-retrieval | heurist/SecEdgarAgent (priority 300; filing timelines, XBRL facts, insider/13F; requires HEURIST_API_KEY) | filing metadata + links | as-filed | EDGAR archive | Heurist credits | UNVERIFIED LIVE | the filing itself is the primary source; Heurist's summary is secondary treatment; filing URLs preserved as provenance |
+
+## Heurist Mesh
+
+Heurist Mesh agents (`src/adapters/heurist.ts`) register at priority 300 as the LAST tier:
+credit-based paid service, so direct keyless providers always serve first. All Heurist
+outputs carry `upstreamSource` lineage (yahoo-finance / sec-edgar / fred / binance-usdm)
+so the same upstream served via Heurist and directly can never count as independent
+corroboration (no-double-count law). Agent prose is classified ANALYST_INTERPRETATION
+with an interpretation basis; it can never self-upgrade to observation. Full research:
+docs/integrations/heurist.md.
 
 ## Provider reachability
 

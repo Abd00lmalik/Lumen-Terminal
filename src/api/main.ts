@@ -8,10 +8,17 @@
 
 import { startApi } from "./server.js";
 import { GeminiProvider } from "../model/gemini.js";
+import { GroqProvider } from "../model/groq.js";
+import { ModelFallbackProvider } from "../model/fallback.js";
 import { createBitgetAdapterSet } from "../adapters/bitget-skills.js";
 import { createStore } from "../persistence/index.js";
 
-const provider = new GeminiProvider(); // env-only: GEMINI_API_KEY + GEMINI_MODEL
+// Model chain: Gemini primary, Groq fallback when GROQ_API_KEY is configured (env-only;
+// keys never cross the API surface). Without GROQ_API_KEY this transparently runs Gemini-only.
+const provider =
+  process.env.GROQ_API_KEY !== undefined && process.env.GROQ_API_KEY !== ""
+    ? new ModelFallbackProvider({ providers: [new GeminiProvider(), new GroqProvider()] })
+    : new GeminiProvider(); // env-only: GEMINI_API_KEY + GEMINI_MODEL
 const { registry } = createBitgetAdapterSet();
 const store = createStore("file", process.env.WORKSPACE_FILE ?? ".data/workspace.json");
 

@@ -13,6 +13,7 @@ import { G2WebRetrievalAdapter } from "./g2-web-retrieval.js";
 import { NewsFallbackAdapter, SentimentFallbackAdapter, MacroFallbackAdapter } from "./fallback-providers.js";
 import { BitgetSkillAdapter, type SkillDescriptor, type OutputMapping } from "./bitget-skill-adapter.js";
 import { registerEquityAdapters } from "./equity.js";
+import { registerHeuristAdapters } from "./heurist.js";
 import { McpTransport } from "./transports/mcp.js";
 import { RestTransport, type Candle } from "./transports/rest.js";
 import { TransportError } from "./transports/resilience.js";
@@ -568,6 +569,14 @@ export function createBitgetAdapterSet(options: BitgetAdapterSetOptions = {}): {
   // earnings calendar, per-ticker news) with Stooq CSV as the market-data fallback inside
   // the adapter. Same registry mechanism; no Flow→provider hardcoding.
   registerEquityAdapters(registry);
+  // Heurist Mesh (2026-09-18): specialized agent/data-provider fallbacks at priority 300 —
+  // options chains (the only working source), technical snapshots, SEC filings, FRED macro,
+  // funding/OI. Credit-based service: serves only when the direct chain cannot; lineage
+  // (upstreamSource) is preserved so the same upstream never double-counts as corroboration.
+  // Gated by the same flag as the other fallback tiers (primary-only wiring law in tests).
+  if (options.fallbacks !== false) {
+    registerHeuristAdapters(registry);
+  }
 
   return { registry, mcp, rest };
 }

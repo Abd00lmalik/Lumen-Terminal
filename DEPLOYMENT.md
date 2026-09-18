@@ -46,6 +46,9 @@ Key properties:
 |---|---|---|
 | `GEMINI_API_KEY` | production, preview | Gemini model access; **server-side only; never exposed to the browser** |
 | `GEMINI_MODEL` | production, preview | Model override (free-tier-reliable Flash-class default) |
+| `GROQ_API_KEY` | production, preview | Optional second model (typed fallback when Gemini fails technically: quota/outage/timeout). OpenAI-compatible; free tier |
+| `GROQ_MODEL` | optional | Groq model override (`llama-3.3-70b-versatile` default) |
+| `HEURIST_API_KEY` | production, preview | Optional Heurist Mesh agent/data-provider fallbacks (options chains, funding/OI, SEC filings, FRED macro). See `docs/integrations/heurist.md` |
 | `WORKSPACE_FILE` | optional | Opt in to a `FileStore` at an explicit path. **Do not set it to a normal serverless disk path** (see §3) |
 
 There are no `VITE_*` secrets and no credentials in the frontend bundle; the secret scan

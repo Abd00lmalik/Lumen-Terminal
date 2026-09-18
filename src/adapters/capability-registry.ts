@@ -95,7 +95,10 @@ export class CapabilityRegistry {
     }
 
     let lastFailure: ToolResult | undefined;
-    /** Fallback audit trail: every non-serving provider attempt, preserved on the winner. */
+    /** First FAILED candidate's result: headlined when ALL candidates fail (never erased by later attempts). */
+    let primaryFailure: ToolResult | undefined;
+    let primaryFailureIndex = -1;
+    /** Fallback audit trail: every non-serving provider attempt, in order (1:1 with candidates). */
     const attempts: { provider: string; outcome: string; failureType?: ToolResult["failure"]["type"] }[] = [];
     for (const { adapter } of candidates) {
       try {
@@ -134,10 +137,16 @@ export class CapabilityRegistry {
               : `failed (${result.failure.type})`,
           ...(result.failure.type !== "NONE" ? { failureType: result.failure.type } : {}),
         });
+        // Empty-without-failure is NOT a headline candidate: when every provider is merely
+        // empty, the last empty result with the full trail remains the honest answer.
+        if (result.failure.type !== "NONE" && primaryFailure === undefined) {
+          primaryFailure = result;
+          primaryFailureIndex = attempts.length - 1;
+        }
         lastFailure = result;
       } catch (error) {
         attempts.push({ provider: adapter.providerId, outcome: "threw" });
-        lastFailure = normalizedResult(
+        const thrown = normalizedResult(
           {
             tool: adapter.providerId,
             capability,
@@ -155,9 +164,34 @@ export class CapabilityRegistry {
           origin,
           at,
         );
+        if (primaryFailure === undefined) {
+          primaryFailure = thrown;
+          primaryFailureIndex = attempts.length - 1;
+        }
+        lastFailure = thrown;
       }
     }
-    return lastFailure!;
+    // All candidates failed: return the PRIMARY's failure as the headline (its result is the
+    // most authoritative statement of why the capability is unavailable) with the fallback
+    // trail attached. A later candidate's failure must never erase the primary's (failover
+    // law); the trail keeps every other attempt inspectable. When nothing technically failed
+    // (all empty), the last empty result + full trail is returned unchanged.
+    const headline = primaryFailure ?? lastFailure!;
+    // The trail carries every attempt EXCEPT the headline's own (its identity is `tool`, not a
+    // fallback entry); this stays correct whether the headline is a failed primary or the last
+    // empty result (which already embeds earlier attempts in its own attemptedProviders).
+    const headlineIndex = primaryFailure !== undefined ? primaryFailureIndex : attempts.length - 1;
+    const failedTrail = attempts.map((a) => `${a.provider}: ${a.outcome}`).join("; ");
+    return Object.freeze({
+      ...headline,
+      attemptedProviders: Object.freeze(
+        attempts.filter((_, i) => i !== headlineIndex).map((a) => Object.freeze({ ...a })),
+      ),
+      limitations: Object.freeze([
+        ...headline.limitations,
+        ...(primaryFailure !== undefined && failedTrail !== "" ? [`provider fallback attempted and failed: ${failedTrail}`] : []),
+      ]),
+    });
   }
 }
 

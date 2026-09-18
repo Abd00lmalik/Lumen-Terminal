@@ -49,7 +49,7 @@ flowchart TD
     USER[Trader] --> UI[Lumen Terminal UI<br/>React + Vite]
     UI -->|natural language + SSE| API[F0 API<br/>Fastify]
     API --> LUI[LUI<br/>intent · target · ambiguity · consequence · safety]
-    LUI -->|structured requests| GEMINI[Gemini Model Provider<br/>server-side key only]
+    LUI -->|structured requests| GEMINI[Model Providers<br/>Gemini primary → Groq fallback<br/>server-side keys only]
     LUI --> ENGINE[Research Engine]
     ENGINE --> REG[Capability Registry]
     REG --> BITGET[Bitget research capabilities<br/>MCP + REST]
@@ -106,10 +106,12 @@ flowchart LR
 ```mermaid
 flowchart TD
     FLOW[Flow requests a capability<br/>never names a provider] --> REG[Capability Registry<br/>priority-ordered providers]
-    REG --> P1[Primary: Bitget MCP/REST]
-    REG --> P2[Fallback: news RSS · Fear&Greed · World Bank]
+    REG --> P1[Primary: Bitget MCP/REST · Yahoo direct]
+    REG --> P2[Fallback: news RSS · Fear&Greed · World Bank · Stooq]
+    REG --> P3[Last tier: Heurist Mesh agents<br/>options chains · funding/OI · SEC · FRED<br/>credit-based, upstream lineage preserved]
     P1 -->|typed failure OR empty coverage| REG
     P2 -->|serves| TR[TOOL_RESULT + attemptedProviders trail<br/>+ fallback limitation]
+    P3 -->|serves| TR3[TOOL_RESULT + upstreamSource lineage<br/>no double-counting with direct providers]
     P1 -->|serves| TR2[TOOL_RESULT; no fallback noise]
     REG -->|all fail / all empty| EMPTY[Honest EMPTY<br/>never fabricated, never negative evidence]
 ```
@@ -148,6 +150,7 @@ flowchart LR
 - Gemini **never** executes tools, never invents evidence, and its background knowledge is never presented as current market data. All market facts come from capabilities with provenance.
 - The API key lives **server-side only** (`GEMINI_API_KEY`); the browser never sees it and never calls Gemini.
 - Default model: `gemini-3.5-flash-lite` (selected by a live free-tier audit; see `.env.example`); configurable via `GEMINI_MODEL`.
+- **Model fallback** (optional, `GROQ_API_KEY`): technical model failures (quota exhaustion, outages, timeouts) fail over to Groq behind the same `ModelProvider` interface; a genuine safety refusal is never bypassed; providers get a bounded circuit-breaker cooldown rather than permanent disablement; provenance records which model served. See `docs/architecture/model-provider-fallback.md`.
 - Model/provider failures surface as typed `MODEL_FAILURE` states; never silently retried into fabrication.
 
 ## Bitget, G1, and G2 capabilities
@@ -155,6 +158,7 @@ flowchart LR
 - **Bitget (M1/M2)**; MCP + REST transports with throttling, bounded retry, freshness, and `TOOL_RESULT` normalization. Live-verified: real technical-analysis evidence (RSI/MACD/Bollinger) with conflicting interpretations preserved as genuine disagreement. Live-verified from production Vercel: real kline-derived technical evidence flowing end to end.
 - **G1 historical data**; engine-selected `HistoricalQuery` (symbol, metric, window, interval) served by **Bitget REST when reachable**, with **Binance Vision** (`data-api.binance.vision`, Binance's official keyless market-data mirror) as the live fallback; the serving venue is recorded in provenance. OHLCV is real and multi-year; funding/open-interest/liquidations are honestly `UNAVAILABLE` (mirrored nowhere reachable; never fabricated).
 - **G2 web/primary sources**; bounded retrieval with URL validation (SSRF-safe), HTML-to-text extraction, source classification (**primary / secondary / commentary / community**), and source/evidence separation: a web page is a *source*, not automatically evidence. Repeated syndication of one origin is not counted as independent corroboration.
+- **Heurist Mesh agents** (optional, `HEURIST_API_KEY`); specialized data-provider fallbacks registered at the lowest registry tier: Yahoo options chains, Binance funding/OI, SEC EDGAR filings, FRED macro series. Every output carries `upstreamSource` lineage so the same upstream served via Heurist and directly is never double-counted as corroboration; agent-generated prose is classified as external analysis, never as direct observation. See `docs/integrations/heurist.md`.
 
 ### Provider fallback (registry-owned)
 

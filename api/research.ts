@@ -40,8 +40,26 @@ import type { AddressInfo } from "node:net";
 import http from "node:http";
 import { buildApi } from "../src/api/server.js";
 import { GeminiProvider } from "../src/model/gemini.js";
+import { GroqProvider } from "../src/model/groq.js";
+import { ModelFallbackProvider } from "../src/model/fallback.js";
 import { createBitgetAdapterSet } from "../src/adapters/bitget-skills.js";
 import { createStore } from "../src/persistence/index.js";
+
+/**
+ * Model chain (model-fallback phase 13/14): Gemini primary, Groq fallback. Both are
+ * deferred-credential providers, so absent keys degrade independently: without GROQ_API_KEY
+ * the facade transparently runs Gemini-only; without GEMINI_API_KEY a technical Gemini
+ * failure (or its missing-key AUTH_FAILURE) fails over to Groq when configured.
+ * Safety refusals are never bypassed; the facade's breaker adds temporary cooldown after
+ * repeated technical failures without ever permanently disabling a provider.
+ */
+function buildModelChain(): ModelFallbackProvider {
+  const providers: (GeminiProvider | GroqProvider)[] = [new GeminiProvider({ deferCredentialCheck: true })];
+  if (process.env.GROQ_API_KEY !== undefined && process.env.GROQ_API_KEY !== "") {
+    providers.push(new GroqProvider({ deferCredentialCheck: true }));
+  }
+  return new ModelFallbackProvider({ providers });
+}
 
 type AppPromise = ReturnType<typeof buildApi>;
 let appPromise: AppPromise | undefined;
@@ -77,7 +95,7 @@ function getApp(): AppPromise {
       // built before the env vars existed). With deferral the provider validates lazily at first
       // model use: research requests get the same typed AUTH_FAILURE as any model failure and the
       // UI renders an honest MODEL_FAILURE; health/history routes stay up regardless.
-      provider: new GeminiProvider({ deferCredentialCheck: true }),
+      provider: buildModelChain(),
       registry: createBitgetAdapterSet().registry,
       store: createProductionStore(),
     });

@@ -104,6 +104,10 @@ export async function buildApi(deps: ApiDeps): Promise<{ app: FastifyInstance; r
     credentials: {
       geminiKeyDefined: process.env.GEMINI_API_KEY !== undefined,
       geminiKeyNonEmpty: process.env.GEMINI_API_KEY !== undefined && process.env.GEMINI_API_KEY !== "",
+      groqKeyDefined: process.env.GROQ_API_KEY !== undefined,
+      groqKeyNonEmpty: process.env.GROQ_API_KEY !== undefined && process.env.GROQ_API_KEY !== "",
+      heuristKeyDefined: process.env.HEURIST_API_KEY !== undefined,
+      heuristKeyNonEmpty: process.env.HEURIST_API_KEY !== undefined && process.env.HEURIST_API_KEY !== "",
     },
     note: "API process availability only; provider reachability is not probed; no background monitoring exists; this workbench performs research only (no trading).",
   }));

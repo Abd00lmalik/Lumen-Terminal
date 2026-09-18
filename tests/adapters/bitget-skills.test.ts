@@ -139,7 +139,7 @@ describe("five Bitget skills registered through the generic registry (final lock
     expect(result.tool).toBe("bitget-signal/news-briefing"); // fallback served the capability
   });
 
-  it("all providers failing → failed TOOL_RESULT with the last failure, no fabricated outputs (lock §18)", async () => {
+  it("all providers failing → PRIMARY's failure headlined with the full fallback trail, no fabricated outputs (lock §18 + failover law)", async () => {
     const registry = new CapabilityRegistry();
     const fail = (id: string): ProviderAdapter => ({
       providerId: id,
@@ -158,7 +158,13 @@ describe("five Bitget skills registered through the generic registry (final lock
     expect(result.failure.retriable).toBe(true);
     expect(result.completeness).toBe("EMPTY");
     expect(result.normalizedOutput).toHaveLength(0); // nothing invented
-    expect(result.limitations.join(" ")).toContain("fake/b limitation");
+    // The PRIMARY's failure is headlined (never erased by a later fallback's failure)...
+    expect(result.tool).toBe("fake/a");
+    expect(result.limitations.join(" ")).toContain("fake/a limitation");
+    // ...and the full fallback trail is preserved for provenance.
+    expect(result.limitations.join(" ")).toContain("provider fallback attempted and failed");
+    expect(result.limitations.join(" ")).toContain("fake/b");
+    expect(result.attemptedProviders?.map((a) => a.provider)).toEqual(["fake/b"]);
   });
 
   it("no execution surface: no adapter, capability, or registry method exposes trading operations (lock §13/§17)", () => {
@@ -182,9 +188,9 @@ describe("five Bitget skills registered through the generic registry (final lock
   });
 
   it("adapters are wired as flat instances; no hidden per-flow branches in the factory", () => {
-    // the factory registers exactly 10 providers by DEFAULT (5 skills + G1 + G2 + 3 capability
-    // fallbacks). G1 (vendor selected 2026-09-15) and G2 (bounded web retrieval, implemented
-    // 2026-09-15) both replace their NotConnected stubs.
+    // the factory registers 14 providers across the probed capabilities by DEFAULT (5 skills +
+    // G1 + G2 + 3 capability fallbacks + 4 equity + 3 Heurist reachable via these capability
+    // names). G1 (2026-09-15) and G2 (2026-09-15) both replace their NotConnected stubs.
     const { registry } = createBitgetAdapterSet({ mcp: mcp as never, rest: rest as never });
     const providers = new Set<string>();
     for (const capability of ["MACRO_ANALYSIS", "MARKET_DATA_ANALYSIS", "SENTIMENT_ANALYSIS", "NEWS_ANALYSIS", "TECHNICAL_ANALYSIS", "HISTORICAL_COMPARISON", "SOURCE_VALIDATION"]) {
@@ -202,6 +208,9 @@ describe("five Bitget skills registered through the generic registry (final lock
       "fallback/world-bank",
       "g1/historical-data",
       "g2/web-retrieval",
+      "heurist/FredMacroAgent",
+      "heurist/SecEdgarAgent",
+      "heurist/YahooFinanceAgent",
     ]);
   });
 
