@@ -227,6 +227,25 @@ describe("equity market data fallback and failure semantics", () => {
     expect(result.normalizedOutput[0]!.outputClass).toBe("UNAVAILABLE");
   });
 
+  it("named commodities resolve to real futures symbols (gold → GC=F) and return live-style observations", async () => {
+    const registry = new CapabilityRegistry();
+    const rest = fakeRest(yahooHosts());
+    registry.register(new EquityMarketDataAdapter(rest));
+    const result = await registry.execute("EQUITY_MARKET_DATA", { asset: "gold", limit: 5 }, origin);
+    expect(result.failure.type).toBe("NONE");
+    expect(decodeURIComponent(rest.calls[0]?.url ?? "")).toContain("GC=F");
+    expect(result.normalizedOutput[0]!.outputClass).toBe("QUANTITATIVE_OBSERVATION");
+  });
+
+  it("crypto assets are quietly not-applicable in equity market data (EMPTY_RESULT, no failure noise)", async () => {
+    const registry = new CapabilityRegistry();
+    registry.register(new EquityMarketDataAdapter(fakeRest(yahooHosts())));
+    const result = await registry.execute("EQUITY_MARKET_DATA", { asset: "BTC" }, origin);
+    expect(result.failure.type).toBe("EMPTY_RESULT");
+    expect(result.failure.message).toContain("not applicable");
+    expect(result.normalizedOutput[0]!.outputClass).toBe("UNAVAILABLE");
+  });
+
   it("empty RSS feed → typed EMPTY_RESULT (retrieval emptiness is technical, never negative evidence)", async () => {
     const registry = new CapabilityRegistry();
     registry.register(new EquityNewsAdapter(fakeRest(yahooHosts({ rss: () => `<?xml version="1.0"?><rss><channel></channel></rss>` }))));

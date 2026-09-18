@@ -43,10 +43,14 @@ interface CoinGeckoSimple {
   };
 }
 
+/** Targets CoinGecko honestly cannot serve (commodities/FX/indexes): quiet no-coverage. */
+const NON_CRYPTO_TARGETS: ReadonlySet<string> = new Set(["GOLD", "XAU", "XAUUSD", "SILVER", "XAG", "OIL", "CRUDE", "WTI", "BRENT", "COPPER", "NATGAS", "SPX", "SP500", "NASDAQ", "DOW", "RUSSELL", "VIX", "DXY", "EURUSD", "GBPUSD", "USDJPY", "USDNGN"]);
+
 function coinIdOf(params: Record<string, unknown>): string | undefined {
   const raw = [params.asset, params.symbol, params.coin].find((v) => typeof v === "string" && v.trim() !== "");
   if (typeof raw !== "string") return undefined;
   const token = raw.trim().toUpperCase().split(/[\s/:\-]/)[0] ?? "";
+  if (NON_CRYPTO_TARGETS.has(token)) return undefined;
   return COMMON_COIN_IDS.get(token) ?? token.toLowerCase();
 }
 
@@ -72,16 +76,20 @@ export class CoinGeckoMarketDataAdapter implements ProviderAdapter {
     }
     const coinId = coinIdOf(params);
     if (coinId === undefined) {
+      const requested = [params.asset, params.symbol, params.coin].find((v) => typeof v === "string" && (v as string).trim() !== "");
+      const notCrypto = typeof requested === "string" && NON_CRYPTO_TARGETS.has(requested.trim().toUpperCase().split(/[\s/:\-]/)[0] ?? "");
       return {
         tool: this.providerId,
         capability,
-        transport: "rest:api.coingecko.com",
+        transport: "none",
         params,
-        outputs: [{ outputClass: "UNAVAILABLE" as const, content: "no crypto asset resolved for this question; cannot query CoinGecko" }],
+        outputs: [{ outputClass: "UNAVAILABLE" as const, content: notCrypto
+          ? `${requested} is not a crypto asset; CoinGecko market data does not cover it`
+          : "no crypto asset resolved for this question; cannot query CoinGecko" }],
         completeness: "EMPTY",
         freshness: "CURRENT",
         validation: "VALID",
-        failure: { type: "SCHEMA_ERROR", message: "missing asset", retriable: false },
+        failure: { type: "EMPTY_RESULT", message: notCrypto ? `capability not applicable to ${requested}` : "missing asset", retriable: false },
         limitations: this.limitations,
       };
     }

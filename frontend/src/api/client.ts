@@ -86,18 +86,41 @@ async function parseErrorBody(res: Response): Promise<never> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // One automatic retry for transient conditions: serverless cold starts, deploy windows,
+  // and platform-level responses whose body is not our typed envelope can produce a single
+  // failed workspace/history read; a confirmed double failure surfaces honestly.
+  const attempt = async (): Promise<Response> => {
+    try {
+      return await fetch(`${BASE_URL}${path}`, {
+        ...init,
+        headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+      });
+    } catch (cause) {
+      throw new NetworkError(cause);
+    }
+  };
   let res: Response;
   try {
-    res = await fetch(`${BASE_URL}${path}`, {
-      ...init,
-      headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-    });
-  } catch (cause) {
-    throw new NetworkError(cause);
+    res = await attempt();
+    if (!res.ok && res.status >= 500) res = await attempt();
+  } catch {
+    // First attempt threw (network/abort shape); retry once before giving up.
+    res = await attempt();
   }
   if (!res.ok) await parseErrorBody(res);
   if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  try {
+    return (await res.json()) as T;
+  } catch {
+    // A 200 whose body failed to parse is transport corruption, not app state; one retry.
+    const retried = await attempt();
+    if (!retried.ok) await parseErrorBody(retried);
+    try {
+      return (await retried.json()) as T;
+    } catch {
+      throw new ApiError("INTERNAL_ERROR", `Response failed to parse (${path}); retried once. HTTP ${retried.status}.`, retried.status);
+    }
+  }
 }
 
 export const http = {

@@ -121,12 +121,32 @@ function candleOutputs(candles: Candle[], about: string, limit: number): ToolOut
   }));
 }
 
+/**
+ * Commodity/FX/index names → tradable Yahoo Finance symbols, resolved at the adapter
+ * boundary so a question about "gold" or "EUR/USD" fetches real market data instead of
+ * failing ticker resolution. Crypto assets are deliberately NOT here: they belong to the
+ * crypto capabilities (MARKET_DATA_ANALYSIS), and are guarded separately below.
+ */
+const NAMED_TARGETS: ReadonlyMap<string, string> = new Map([
+  ["GOLD", "GC=F"], ["XAU", "GC=F"], ["XAUUSD", "GC=F"],
+  ["SILVER", "SI=F"], ["XAG", "SI=F"], ["XAGUSD", "SI=F"],
+  ["OIL", "CL=F"], ["CRUDE", "CL=F"], ["WTI", "CL=F"], ["BRENT", "BZ=F"],
+  ["COPPER", "HG=F"], ["NATGAS", "NG=F"],
+  ["SPX", "^GSPC"], ["SP500", "^GSPC"], ["NASDAQ", "^IXIC"], ["DOW", "^DJI"], ["RUSSELL", "^RUT"],
+  ["VIX", "^VIX"], ["DXY", "DX-Y.NYB"],
+  ["EURUSD", "EURUSD=X"], ["GBPUSD", "GBPUSD=X"], ["USDJPY", "USDJPY=X"], ["USDNGN", "USDNGN=X"],
+]);
+
+/** Known crypto assets: requesting them from EQUITY capabilities is a routing mismatch. */
+const CRYPTO_ASSETS: ReadonlySet<string> = new Set(["BTC", "BITCOIN", "ETH", "ETHEREUM", "SOL", "XRP", "BNB", "ADA", "DOGE", "AVAX", "LINK", "DOT", "LTC", "TRX", "SHIB", "TON", "MATIC"]);
+
 function symbolOf(params: Record<string, unknown>): string | undefined {
   // The engine's canonical target param is `asset` (LUI resolvedTarget); `symbol` is an
   // accepted alias so the capability also works when called directly with ticker vocabulary.
   const raw = typeof params.asset === "string" && params.asset.trim() !== "" ? params.asset : typeof params.symbol === "string" ? params.symbol : "";
-  const symbol = raw.trim().toUpperCase();
-  return symbol !== "" ? symbol : undefined;
+  const token = raw.trim().toUpperCase();
+  if (token === "") return undefined;
+  return NAMED_TARGETS.get(token) ?? token;
 }
 
 function schemaError(tool: string, capability: CapabilityName, params: Record<string, unknown>, message: string): ToolResultInput {
@@ -174,6 +194,22 @@ export class EquityMarketDataAdapter implements ProviderAdapter {
     const symbol = symbolOf(params);
     if (symbol === undefined) {
       return schemaError(this.providerId, capability, params, "no ticker symbol resolved for this question; equities require a corporate ticker");
+    }
+    if (CRYPTO_ASSETS.has(symbol)) {
+      // Routing mismatch, not a failure of the question: crypto assets are served by the
+      // crypto market-data capability chain. Quiet honest emptiness; never negative evidence.
+      return {
+        tool: this.providerId,
+        capability,
+        transport: "none",
+        params,
+        outputs: [{ outputClass: "UNAVAILABLE" as const, content: `${symbol} is a crypto asset; market data for it is served by the crypto market-data capability, not equity market data` }],
+        completeness: "EMPTY",
+        freshness: "CURRENT",
+        validation: "VALID",
+        failure: { type: "EMPTY_RESULT", message: `capability not applicable to ${symbol}`, retriable: false },
+        limitations: [],
+      };
     }
     const range = typeof params.range === "string" ? params.range : "5d";
     const interval = typeof params.interval === "string" ? params.interval : "1d";
