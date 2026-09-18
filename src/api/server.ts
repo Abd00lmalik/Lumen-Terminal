@@ -59,6 +59,13 @@ export async function buildApi(deps: ApiDeps): Promise<{ app: FastifyInstance; r
     status: "ok",
     api: "f0",
     timestamp: new Date().toISOString(),
+    // Credential PRESENCE booleans only (never values, never lengths). This makes the
+    // classic serverless failure "deployment was built without its env vars" diagnosable
+    // from production without exposing anything secret.
+    credentials: {
+      geminiKeyDefined: process.env.GEMINI_API_KEY !== undefined,
+      geminiKeyNonEmpty: process.env.GEMINI_API_KEY !== undefined && process.env.GEMINI_API_KEY !== "",
+    },
     note: "API process availability only; provider reachability is not probed; no background monitoring exists; this workbench performs research only (no trading).",
   }));
 

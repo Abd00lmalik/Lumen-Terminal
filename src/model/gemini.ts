@@ -101,8 +101,7 @@ export class GeminiProvider implements ModelProvider {
       this.apiKey = config.apiKey;
       this.modelId = config.model;
     }
-    this.deferCredentialCheck = options.deferCredentialCheck === true;
-    this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
+    this.deferCredentialCheck = options.deferCredentialCheck === true;    this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
     this.maxRawBytes = options.maxRawBytes ?? 256_000;
     this.transientRetry = options.transientRetry ?? { attempts: 3, baseDelayMs: 1500 };
   }
