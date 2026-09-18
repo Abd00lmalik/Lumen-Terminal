@@ -169,6 +169,25 @@ function detectTransport(): Promise<{ mode: Transport; server?: http.Server }> {
 }
 
 // ---------------------------------------------------------------------------
+// Request body access (production runtime law)
+// ---------------------------------------------------------------------------
+
+/**
+ * Vercel's runtime implements `req.body` as a LAZY GETTER that THROWS (statusCode 400,
+ * message "Invalid JSON") when the client body is malformed. Proven from production logs:
+ * an unguarded access inside the proxy escapes the adapter and used to be re-emitted by
+ * the last-resort catch as 500 INTERNAL_ERROR — misclassifying a client error. Contain
+ * the access: a throwing getter means the REQUEST is malformed → typed 400.
+ */
+function readRequestBody(req: VercelRequest): { ok: true; body: unknown } | { ok: false } {
+  try {
+    return { ok: true, body: (req as { body?: unknown }).body };
+  } catch {
+    return { ok: false };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // SOCKET transport: proxy through the loopback server (true SSE streaming)
 // ---------------------------------------------------------------------------
 
@@ -267,6 +286,16 @@ async function proxyThroughSocket(req: VercelRequest, res: VercelResponse, serve
   const { port } = server.address() as AddressInfo;
   const headers = hopByHopRequestHeaders(req, port);
 
+  // Contain the lazy body getter FIRST (it throws on malformed JSON; see readRequestBody):
+  // a malformed request is a client error and must be answered with the typed 400 before
+  // any upstream work begins.
+  const parsedBody = readRequestBody(req);
+  if (!parsedBody.ok) {
+    respondTypedError(res, 400, "INVALID_REQUEST", 'The request body could not be parsed. Send application/json with a "message" string.');
+    return;
+  }
+  const requestBody = parsedBody.body;
+
   // The handler MUST NOT resolve before the upstream response has been fully forwarded:
   // Vercel finalizes the invocation when the handler promise settles, so resolving early
   // would truncate (or entirely drop) the response body and every SSE event.
@@ -302,9 +331,9 @@ async function proxyThroughSocket(req: VercelRequest, res: VercelResponse, serve
       settle();
     });
 
-    // Vercel parses the body for us (req.body); a raw stream (vercel dev) is piped through.
-    if (req.body !== undefined && req.body !== null) {
-      const payload = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+    // Vercel parses the body for us (already contained above); a raw stream (vercel dev) is piped through.
+    if (requestBody !== undefined && requestBody !== null) {
+      const payload = typeof requestBody === "string" ? requestBody : JSON.stringify(requestBody);
       if (!headers["content-type"]) headers["content-type"] = "application/json";
       upstream.setHeader("content-type", headers["content-type"]);
       upstream.end(payload);
@@ -347,6 +376,14 @@ async function respondViaInject(req: VercelRequest, res: VercelResponse): Promis
   const { app } = await getApp();
   await app.ready();
 
+  // Same lazy-getter containment as the socket transport (see readRequestBody).
+  const parsedBody = readRequestBody(req);
+  if (!parsedBody.ok) {
+    respondTypedError(res, 400, "INVALID_REQUEST", 'The request body could not be parsed. Send application/json with a "message" string.');
+    return;
+  }
+  const requestBody = parsedBody.body;
+
   const [path, queryPart] = (req.url ?? "/").split("?");
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(req.headers)) {
@@ -356,11 +393,11 @@ async function respondViaInject(req: VercelRequest, res: VercelResponse): Promis
   }
 
   const payload =
-    req.body === undefined || req.body === null
+    requestBody === undefined || requestBody === null
       ? undefined
-      : typeof req.body === "string"
-        ? req.body
-        : JSON.stringify(req.body);
+      : typeof requestBody === "string"
+        ? requestBody
+        : JSON.stringify(requestBody);
   if (payload !== undefined && headers["content-type"] === undefined) headers["content-type"] = "application/json";
 
   const response = await app.inject({
