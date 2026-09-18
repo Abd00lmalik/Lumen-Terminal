@@ -33,6 +33,45 @@ export interface ApiDeps {
 export async function buildApi(deps: ApiDeps): Promise<{ app: FastifyInstance; researchApp: ResearchApp }> {
   const app = Fastify({ logger: false });
 
+  // Typed transport errors for framework-generated failures (body parsing, media type,
+  // payload limits). Without this, Fastify's native body ({statusCode, error, message})
+  // reaches clients and the frontend cannot classify it — it used to render such 400s as
+  // "INTERNAL_ERROR · Request failed (HTTP 400)", collapsing a client error into an
+  // internal one. Classification follows HTTP semantics (never code enumeration):
+  // framework errors carrying a 4xx status are client request problems (400
+  // INVALID_REQUEST); 5xx or status-less framework faults are contained as 500. No
+  // internals are exposed.
+  app.setErrorHandler((error, _req, reply) => {
+    const code = typeof (error as { code?: unknown }).code === "string" ? (error as { code: string }).code : "";
+    const status = typeof (error as { statusCode?: unknown }).statusCode === "number" ? (error as { statusCode: number }).statusCode : 0;
+    if (code.startsWith("FST_ERR_")) {
+      if (status >= 500 || status === 0) {
+        void reply.code(500).send({ error: { code: "INTERNAL_ERROR", message: "The research API failed to handle this request. No research content was fabricated; try again shortly." } });
+        return;
+      }
+      const parseProblem = code.startsWith("FST_ERR_CTP_") || code === "FST_ERR_BAD_REQUEST";
+      void reply.code(400).send({
+        error: {
+          code: "INVALID_REQUEST",
+          message: parseProblem
+            ? 'The request body could not be parsed. Send application/json with a "message" string.'
+            : "Invalid request.",
+        },
+      });
+      return;
+    }
+    if (status >= 400 && status < 500) {
+      void reply.code(400).send({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+      return;
+    }
+    void reply.send(error);
+  });
+
+  // Typed 404s (unknown routes) instead of Fastify's native shape — same taxonomy rule.
+  app.setNotFoundHandler((_req, reply) => {
+    void reply.code(404).send({ error: { code: "NOT_FOUND", message: "Route not found." } });
+  });
+
   // Dev CORS: localhost development origins only (F0 mandate §20). This is explicitly a
   // development convenience; no broad production assumptions are made here.
   await app.register(cors, {

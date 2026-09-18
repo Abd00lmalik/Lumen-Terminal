@@ -449,4 +449,86 @@ describe("security", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Error taxonomy regression (production 400 debug mandate §11/§12)
+// Laws: framework-generated request problems are typed INVALID_REQUEST/NOT_FOUND with
+// the standard {error:{code}} shape (never Fastify's raw {statusCode,error,message}
+// body, which the frontend cannot classify and used to render as
+// "INTERNAL_ERROR · Request failed (HTTP 400)"). Model failures surface as typed
+// outcomes/failures, never as a generic 400 INTERNAL_ERROR. The exact production
+// question must be accepted as a valid research request.
+// ---------------------------------------------------------------------------
+
+describe("error taxonomy regression", () => {
+  it("accepts the exact production question as a valid research request (reaches LUI, no refusal)", { timeout: 30_000 }, async () => {
+    const provider = new FakeModelProvider(new Map());
+    scriptLuiDefaults(provider, ADAPTIVE_PLAN);
+    provider.responses.set("research.plan", responses.researchPlan());
+    provider.responses.set("research.adaptive_decision", responses.adaptiveDecision("COMPLETE"));
+    const { app } = await makeApp({ provider });
+    const res = await app.inject({ method: "POST", url: "/api/research", payload: { message: "What is affecting BTC right now?" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().outcome).toBe("COMPLETED");
+    // Reaches the LUI research path; no execution-refusal or 400 anywhere.
+    expect(provider.calls.some((c) => c.schemaName === "lui.normalized_request")).toBe(true);
+    await app.close();
+  });
+
+  it("maps framework parse failures to typed 400 INVALID_REQUEST (standard error shape)", async () => {
+    const { app } = await makeApp({ provider: new FakeModelProvider(new Map()) });
+    const invalid = await app.inject({
+      method: "POST",
+      url: "/api/research",
+      payload: "{invalid",
+      headers: { "content-type": "application/json" },
+    });
+    expect(invalid.statusCode).toBe(400);
+    const body = invalid.json();
+    expect(body.error.code).toBe("INVALID_REQUEST"); // NOT raw Fastify shape, NOT INTERNAL_ERROR
+    expect(body.error.message).not.toContain("Bad Request");
+
+    const empty = await app.inject({ method: "POST", url: "api/research", payload: "", headers: { "content-type": "application/json" } });
+    expect(empty.statusCode).toBe(400);
+    expect(empty.json().error.code).toBe("INVALID_REQUEST");
+    await app.close();
+  });
+
+  it("maps unknown routes to typed 404 NOT_FOUND (standard error shape)", async () => {
+    const { app } = await makeApp({ provider: new FakeModelProvider(new Map()) });
+    const res = await app.inject({ method: "GET", url: "/api/definitely-not-a-route" });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error.code).toBe("NOT_FOUND");
+    await app.close();
+  });
+
+  it("maps model failures to typed MODEL_FAILURE (never a 400 INTERNAL_ERROR)", { timeout: 30_000 }, async () => {
+    const provider = new FakeModelProvider(new Map(), { failWith: new ModelFailure("PROVIDER_UNAVAILABLE", "Gemini unreachable", false) });
+    const { app } = await makeApp({ provider });
+    const res = await app.inject({ method: "POST", url: "/api/research", payload: { message: "What is affecting BTC right now?" } });
+    const body = res.json();
+    // Honest typed outcome — the research layer reports the model failure verbatim.
+    expect(body.outcome).toBe("MODEL_FAILURE");
+    expect(body.modelFailure.type).toBe("PROVIDER_UNAVAILABLE");
+    expect(res.statusCode).toBe(200); // the request itself was valid
+    expect(body.evidence).toEqual([]); // no fabricated evidence
+    await app.close();
+  });
+
+  it("keeps the confirmation boundary distinct (a confirmation-gated plan halts as AWAITING_CONFIRMATION with the confirmation payload, never a refusal)", { timeout: 30_000 }, async () => {
+    const provider = new FakeModelProvider(new Map());
+    scriptLuiDefaults(provider, SAVE_PLAN);
+    // A consequence flag requiring confirmation is the safety boundary working; it must
+    // produce a typed confirmation halt, never collapse into a generic refusal/400.
+    provider.responses.set("lui.consequence", responses.consequence("CONSEQUENTIAL", true));
+    const { app } = await makeApp({ provider });
+    const res = await app.inject({ method: "POST", url: "/api/research", payload: { message: "What is affecting BTC right now?" } });
+    const body = res.json();
+    expect(body.outcome).toBe("AWAITING_CONFIRMATION");
+    // Nothing persisted/executed for the gated step; the halt is typed, not a refusal 400.
+    expect(body.researchRef).toBeUndefined();
+    expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+});
+
 // ModelFailure imported at top (used in the typed-failure test).

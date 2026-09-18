@@ -90,7 +90,25 @@ function startLoopbackServer(): Promise<http.Server> {
     const { app } = await getApp();
     await app.ready();
     const server = http.createServer((rawReq, rawRes) => {
-      app.routing(rawReq, rawRes);
+      try {
+        app.routing(rawReq, rawRes);
+      } catch (err) {
+        // Fastify internals can throw synchronously for malformed input before its async
+        // error pipeline engages (e.g. a JSON body parse error). Classify it: known
+        // client-request problems become a typed 400; anything else is contained as a
+        // 500 with a safe message. The error code is logged for production diagnosis.
+        const code = typeof (err as { code?: unknown })?.code === "string" ? (err as { code: string }).code : `(no code: ${String((err as Error)?.name)})`;
+        console.error("[api] app.routing sync failure:", code);
+        const clientProblem = code === "FST_ERR_CTP_INVALID_MEDIA_TYPE" || code === "FST_ERR_CTP_EMPTY_JSON_BODY" || code === "FST_ERR_CTP_INVALID_JSON" || code === "FST_ERR_CTP_INVALID_CONTENT_LENGTH" || code === "FST_ERR_BAD_REQUEST" || (err instanceof SyntaxError && /JSON/i.test(String((err as Error).message)));
+        respondTypedError(
+          rawRes as unknown as VercelResponse,
+          clientProblem ? 400 : 500,
+          clientProblem ? "INVALID_REQUEST" : "INTERNAL_ERROR",
+          clientProblem
+            ? 'The request body could not be parsed. Send application/json with a "message" string.'
+            : "The research API failed to handle this request. No research content was fabricated; try again shortly.",
+        );
+      }
     });
     server.keepAliveTimeout = 65_000;
     await new Promise<void>((resolve, reject) => {
