@@ -56,6 +56,12 @@ export const FRESHNESS_PROFILES = {
     documentedLag: "live public data; refresh cadence undocumented (FINDINGS.md §2.2)",
     staleAfterMs: 10 * 60 * 1000,
   },
+  /** CoinGecko public API: ~30-60s aggregation lag; no documented SLA. */
+  coingecko: {
+    id: "coingecko:public",
+    documentedLag: "CoinGecko public aggregation; refresh cadence undocumented, typically under a minute",
+    staleAfterMs: 10 * 60 * 1000,
+  },
 } as const satisfies Record<string, FreshnessProfile>;
 
 export type ProfileKey = keyof typeof FRESHNESS_PROFILES;

@@ -14,6 +14,7 @@ import { NewsFallbackAdapter, SentimentFallbackAdapter, MacroFallbackAdapter } f
 import { BitgetSkillAdapter, type SkillDescriptor, type OutputMapping } from "./bitget-skill-adapter.js";
 import { registerEquityAdapters } from "./equity.js";
 import { registerHeuristAdapters } from "./heurist.js";
+import { CoinGeckoMarketDataAdapter } from "./coingecko.js";
 import { McpTransport } from "./transports/mcp.js";
 import { RestTransport, type Candle } from "./transports/rest.js";
 import { TransportError } from "./transports/resilience.js";
@@ -564,6 +565,10 @@ export function createBitgetAdapterSet(options: BitgetAdapterSetOptions = {}): {
     registry.register(new NewsFallbackAdapter(), 200);
     registry.register(new SentimentFallbackAdapter(), 200);
     registry.register(new MacroFallbackAdapter(), 200);
+    // Crypto market-data fallback (2026-09-18): when Bitget's MCP upstreams time out from
+    // production, prices previously had NO fallback (RSS is news, not market data). CoinGecko's
+    // public keyless API serves the same observation vocabulary (price/24h stats).
+    registry.register(new CoinGeckoMarketDataAdapter(), 200);
   }
   // Equity capabilities (2026-09-18): Yahoo Finance primary (OHLCV/quote, fundamentals,
   // earnings calendar, per-ticker news) with Stooq CSV as the market-data fallback inside

@@ -43,7 +43,8 @@ import { GeminiProvider } from "../src/model/gemini.js";
 import { GroqProvider } from "../src/model/groq.js";
 import { ModelFallbackProvider } from "../src/model/fallback.js";
 import { createBitgetAdapterSet } from "../src/adapters/bitget-skills.js";
-import { createStore } from "../src/persistence/index.js";
+import { createStore, type WorkspaceStore } from "../src/persistence/index.js";
+import { VercelBlobStore } from "../src/persistence/vercel-edge.js";
 
 /**
  * Model chain (model-fallback phase 13/14): Gemini primary, Groq fallback. Both are
@@ -73,7 +74,14 @@ let appPromise: AppPromise | undefined;
  */
 export function createProductionStore(
   env: NodeJS.ProcessEnv = process.env,
-): ReturnType<typeof createStore> {
+): WorkspaceStore {
+  // Durable production persistence (history survival across cold starts/instances):
+  // when Vercel Blob is enabled for the project (BLOB_READ_WRITE_TOKEN injected by the
+  // runtime), snapshots persist to Blob so refresh/back/another instance still see the
+  // research history. Otherwise fall back to the honest per-instance MemoryStore.
+  if (env.BLOB_READ_WRITE_TOKEN !== undefined && env.BLOB_READ_WRITE_TOKEN !== "") {
+    return new VercelBlobStore();
+  }
   return env.WORKSPACE_FILE !== undefined && env.WORKSPACE_FILE !== ""
     ? createStore("file", env.WORKSPACE_FILE)
     : createStore("memory");

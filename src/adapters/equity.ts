@@ -476,7 +476,11 @@ interface CalendarEventsBody {
 
 export class EarningsCalendarAdapter implements ProviderAdapter {
   readonly providerId = "equity/yahoo-earnings-calendar";
-  readonly capabilities: readonly CapabilityName[] = ["EARNINGS_CALENDAR"];
+  // EQUITY_EARNINGS is an accepted planner alias for EARNINGS_CALENDAR (the model occasionally
+  // emits the shorter name; capability names are user-facing vocabulary, not a provider
+  // contract, so both resolve to the same provider instead of an honest-but-useless
+  // "no provider registered" note).
+  readonly capabilities: readonly CapabilityName[] = ["EARNINGS_CALENDAR", "EQUITY_EARNINGS"];
   readonly limitations: readonly string[] = [
     "Yahoo Finance calendarEvents: next earnings date may be provider-estimated (isEarningsDateEstimate carried verbatim)",
     "consensus EPS figures are ANALYST ESTIMATES, never reported results; reported EPS history is not provided by this source",
@@ -492,7 +496,7 @@ export class EarningsCalendarAdapter implements ProviderAdapter {
   }
 
   async execute(capability: CapabilityName, params: Record<string, unknown>): Promise<ToolResultInput> {
-    if (capability !== "EARNINGS_CALENDAR") {
+    if (capability !== "EARNINGS_CALENDAR" && capability !== "EQUITY_EARNINGS") {
       throw new Error(`${this.providerId} has no mapping for capability ${capability}`);
     }
     const symbol = symbolOf(params);

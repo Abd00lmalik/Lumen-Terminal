@@ -46,6 +46,10 @@ export interface ResearchAppOptions {
  */
 export class ResearchApp {
   private lui?: Lui;
+  /** Completed-run response archive (ref -> response DTO): lets history hydrate the FULL
+   *  answer of a past run without re-running it. Bounded FIFO; warm-instance scope that
+   *  becomes durable wherever the store is durable (Blob/File). */
+  private responseArchive = new Map<string, { response: ResearchResponseDTO; question: string }>();
 
   constructor(
     public readonly options: ResearchAppOptions,
@@ -142,6 +146,7 @@ export class ResearchApp {
     if (trimmed.length > 8000) {
       throw new InvalidRequestError("message exceeds the 8000-character limit");
     }
+    const submittedQuestion = trimmed;
     if (typeof confirmed !== "boolean") {
       throw new InvalidRequestError("" + "confirmed must be a boolean when present");
     }
@@ -173,11 +178,11 @@ export class ResearchApp {
       || result.thesisAssessment !== undefined;
     if (mutated) await this.persist();
 
-    return this.toResponseDTO(crypto.randomUUID(), result);
+    return this.toResponseDTO(crypto.randomUUID(), result, submittedQuestion);
   }
 
   /** Map a LuiResult into the safe response DTO (epistemic status preserved as data). */
-  private toResponseDTO(requestId: string, result: LuiResult): ResearchResponseDTO {
+  private toResponseDTO(requestId: string, result: LuiResult, submittedQuestion: string): ResearchResponseDTO {
     const ws = this.ws();
     const answer: AnswerDTO = result.rejected !== undefined
       ? {
@@ -236,7 +241,7 @@ export class ResearchApp {
       : result.modelFailure !== undefined && !ranResearch ? "MODEL_FAILURE"
       : "COMPLETED";
 
-    return {
+    const response: ResearchResponseDTO = {
       requestId,
       action: result.request.primaryAction,
       outcome,
@@ -254,6 +259,16 @@ export class ResearchApp {
         ? { historicalAnalysis: toHistoricalAnalysisDTO(result.flow5.historicalAnalysis) }
         : {}),
     };
+    // Archive completed runs for history hydration (bounded to the last 25).
+    if (outcome === "COMPLETED" && researchRef !== undefined) {
+      this.responseArchive.set(researchRef, { response, question: submittedQuestion });
+      while (this.responseArchive.size > 25) {
+        const oldest = this.responseArchive.keys().next().value;
+        if (oldest === undefined) break;
+        this.responseArchive.delete(oldest);
+      }
+    }
+    return response;
   }
 
   // ------------------------------------------------------------------
@@ -279,6 +294,11 @@ export class ResearchApp {
   getResearch(ref: string) {
     const r = this.ws().getResearch(ref);
     if (r === undefined) throw new NotFoundError("research");
+    // Full response hydration: when this instance completed the run, serve the archived
+    // response DTO (answer, reasons, evidence) so the frontend history renders past runs
+    // verbatim instead of the bare research summary.
+    const archived = this.responseArchive.get(ref);
+    if (archived !== undefined) return archived.response;
     return researchToDTO(r);
   }
 

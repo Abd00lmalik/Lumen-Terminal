@@ -188,9 +188,9 @@ describe("five Bitget skills registered through the generic registry (final lock
   });
 
   it("adapters are wired as flat instances; no hidden per-flow branches in the factory", () => {
-    // the factory registers 14 providers across the probed capabilities by DEFAULT (5 skills +
-    // G1 + G2 + 3 capability fallbacks + 4 equity + 3 Heurist reachable via these capability
-    // names). G1 (2026-09-15) and G2 (2026-09-15) both replace their NotConnected stubs.
+    // the factory registers 15 providers across the probed capabilities by DEFAULT (5 skills +
+    // G1 + G2 + 4 capability fallbacks incl. CoinGecko + 4 equity + 3 Heurist reachable via
+    // these capability names). G1 (2026-09-15) and G2 (2026-09-15) replace their stubs.
     const { registry } = createBitgetAdapterSet({ mcp: mcp as never, rest: rest as never });
     const providers = new Set<string>();
     for (const capability of ["MACRO_ANALYSIS", "MARKET_DATA_ANALYSIS", "SENTIMENT_ANALYSIS", "NEWS_ANALYSIS", "TECHNICAL_ANALYSIS", "HISTORICAL_COMPARISON", "SOURCE_VALIDATION"]) {
@@ -203,6 +203,7 @@ describe("five Bitget skills registered through the generic registry (final lock
       "bitget-signal/sentiment-analyst",
       "bitget-signal/technical-analysis",
       "equity/yahoo-headlines",
+      "fallback/coingecko-market",
       "fallback/fear-greed",
       "fallback/news-rss",
       "fallback/world-bank",

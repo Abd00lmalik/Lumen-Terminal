@@ -21,14 +21,24 @@ export function BackendDownNote({ error, children }: { error: unknown; children?
         : String(error);
   return (
     <div className="note warn" role="alert">
-      <b>{isNetwork ? "Research service unavailable." : "Research could not start."}</b>{" "}
+      <b>{isNetwork ? "Research service unavailable." : "Workspace state could not load."}</b>{" "}
       {isNetwork && error.environment === "development" && (
         <>The research backend is not responding. Start the local API with <code>npm run api</code> and refresh.</>
       )}
       {isNetwork && error.environment === "production" && (
         <>The research service is temporarily unavailable (usually a deployment or cold start). Try again shortly.</>
       )}
-      {!isNetwork && <>The request was refused before research began. Try rephrasing, or try again shortly.</>}
+      {!isNetwork && (
+        <>
+          {/* This note also renders for workspace-snapshot loads, which are independent of
+              submissions: research itself may be running or completed while this read failed.
+              The old wording ("Research could not start / request refused") mislabeled that
+              condition and made it look like the submission was blocked. */}
+          Your workspace state (history, evidence, thesis) could not be loaded. Submitting new
+          research still works; the result will appear here and in history once the connection
+          recovers. Try Refresh state in a moment.
+        </>
+      )}
       <details style={{ marginTop: 6, fontSize: 12, color: "var(--text-3)" }}>
         <summary style={{ cursor: "pointer" }}>View diagnostics</summary>
         <span className="mono" style={{ wordBreak: "break-all" }}>{diagnostic}</span>

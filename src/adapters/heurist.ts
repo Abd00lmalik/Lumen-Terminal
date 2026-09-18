@@ -412,6 +412,55 @@ export function createHeuristFundingRateAdapter(transport?: HeuristMeshTransport
   );
 }
 
+/**
+ * Heurist Caesar research agent — LAST-RESORT deep research for synthesis questions the direct
+ * capability chain could not answer (mandate: "for anything we could not answer, use a Heurist
+ * deep-research agent"). Output is generated research analysis: it arrives pre-classified as
+ * ANALYST_INTERPRETATION (agent-generated, never a direct observation) and the evidence layer
+ * treats it as EXTERNAL_AGENT_ANALYSIS, never as market data.
+ */
+export function createHeuristCaesarAdapter(transport?: HeuristMeshTransport): HeuristAgentAdapter {
+  return new HeuristAgentAdapter(
+    ["CROSS_DOMAIN_SYNTHESIS"],
+    {
+      agentId: "CaesarResearchAgent",
+      upstreamSource: "caesar-research",
+      tool: "caesar_research",
+      subjectParam: "query",
+      limitations: [
+        "Caesar is an AI research agent: its output is generated analysis over web/academic sources, NOT direct market observation",
+        "expensive (10 credits/call): only invoked when the direct capability chain produced no coverage",
+        "synchronous call can take up to ~2 minutes for deep queries",
+      ],
+      freshnessProfile: "web:retrieval-time",
+    },
+    transport,
+  );
+}
+
+/**
+ * Heurist AskHeurist agent — crypto Q&A deep research, same last-resort tier as Caesar.
+ * `mode: "quick"` keeps latency bounded; output is AGENT analysis, classified accordingly.
+ */
+export function createHeuristAskAdapter(transport?: HeuristMeshTransport): HeuristAgentAdapter {
+  return new HeuristAgentAdapter(
+    ["CROSS_DOMAIN_SYNTHESIS"],
+    {
+      agentId: "AskHeuristAgent",
+      upstreamSource: "ask-heurist",
+      tool: "ask_heurist",
+      subjectParam: "prompt",
+      limitations: [
+        "AskHeurist is a crypto Q&A research agent: its output is generated analysis, NOT direct market observation",
+        "expensive (10 credits/call): only invoked when the direct capability chain produced no coverage",
+        "async-capable agent invoked in quick mode; deep jobs are not awaited here",
+      ],
+      freshnessProfile: "web:retrieval-time",
+    },
+    transport,
+  );
+}
+
 /** Register all Heurist adapters at low priority (they serve when direct providers cannot). */
 export function registerHeuristAdapters(registry: import("./capability-registry.js").CapabilityRegistry, priority = 300): void {
   registry.register(createHeuristOptionsAdapter(), priority);
@@ -419,4 +468,8 @@ export function registerHeuristAdapters(registry: import("./capability-registry.
   registry.register(createHeuristSecAdapter(), priority);
   registry.register(createHeuristFredAdapter(), priority);
   registry.register(createHeuristFundingRateAdapter(), priority);
+  // Deep-research tier (priority +1 = after the specialized agents): synthesis questions the
+  // capability chain could not answer get ONE generated-analysis attempt each, clearly labeled.
+  registry.register(createHeuristCaesarAdapter(), priority + 1);
+  registry.register(createHeuristAskAdapter(), priority + 1);
 }

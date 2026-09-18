@@ -17,9 +17,9 @@ import {
   ProxyNote, UnavailableNote, KV, Note, Empty, timeAgo,
 } from "../components/ui.js";
 import { evidenceFromDto, judgmentFromDto } from "../data/adapters.js";
-import { getWorkspace } from "../api/index.js";
+import { getWorkspace, listResearch, getResearch } from "../api/index.js";
 import type { EvidenceItem, JudgmentView, ThesisView } from "../data/types.js";
-import type { ResearchResponseDto, ContinuitySnapshotDto, HistoricalAnalysisDto } from "../api/index.js";
+import type { ResearchResponseDto, ResearchDto, ContinuitySnapshotDto, HistoricalAnalysisDto } from "../api/index.js";
 import { useResearchStream } from "../hooks/useResearchStream.js";
 
 interface WorkspaceData {
@@ -33,6 +33,43 @@ interface WorkspaceData {
 interface Turn {
   readonly question: string;
   readonly run: ResearchResponseDto;
+}
+
+/**
+ * Hydrate a history entry into a renderable turn. `getResearch` serves the FULL archived
+ * response for runs completed on the serving instance (answer, reasons, evidence); older
+ * or cold-store runs degrade to the bare summary DTO rendered as an honest research
+ * reference (objective + status) instead of a fabricated answer.
+ */
+function researchDtoToTurn(dto: ResearchDto & Partial<ResearchResponseDto>): Turn | undefined {
+  const question = dto.question?.length > 0 ? dto.question : dto.objective;
+  if (question.length === 0) return undefined;
+  const answer = (dto as { answer?: ResearchResponseDto["answer"] }).answer;
+  if (answer === undefined) {
+    // Bare summary (full response not archived on this instance): render honestly.
+    return {
+      question,
+      run: {
+        requestId: dto.ref,
+        action: "RESEARCH",
+        outcome: "COMPLETED",
+        answer: {
+          answer: `Completed research (history): ${dto.objective}. Full reasoning is not retained on this server instance; ask again to re-run it in full.`,
+          supportingReasons: [],
+          opposingReasons: [],
+          confidence: "UNKNOWN",
+          keyUncertainty: "",
+          implication: "",
+          citedObjectRefs: [],
+        },
+        limitations: [],
+        evidenceRefs: [...dto.evidenceRefs],
+        evidence: [],
+        judgments: [],
+      },
+    };
+  }
+  return { question, run: dto as ResearchResponseDto };
 }
 
 /**
@@ -78,7 +115,9 @@ export function ResearchWorkspacePage() {
   const streamDone = stream.result !== undefined;
   useEffect(() => {
     if (streamDone) {
-      setRuns((prev) => [...prev, { question: stream.question, run: stream.result! }]);
+      // Replace any history-hydrated copy of this same question with the fresh full response
+      // (dedup by question text: history loads first, the live result supersedes it).
+      setRuns((prev) => [...prev.filter((t) => t.question !== stream.question), { question: stream.question, run: stream.result! }]);
       void refresh();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -118,6 +157,29 @@ export function ResearchWorkspacePage() {
 
   const refresh = useCallback(async () => {
     try {
+      // Research history is server-side state (issue: refresh/back used to lose finished runs
+      // because they lived only in React state). Load the history list, hydrate the most
+      // recent completed run's full response, and show everything completed. Best-effort:
+      // a history read failing never blocks the page (the ask-bar and live stream still work).
+      let historyTurns: readonly Turn[] = [];
+      try {
+        const history = await listResearch();
+        const completed = history.filter((r) => r.status === "COMPLETED").slice(-3);
+        const hydrated = await Promise.all(
+          completed.map(async (r): Promise<Turn | undefined> => {
+            try {
+              const full = await getResearch(r.ref);
+              return researchDtoToTurn(full);
+            } catch {
+              return undefined; // one unreadable run must not sink the rest
+            }
+          }),
+        );
+        historyTurns = hydrated.filter((t): t is Turn => t !== undefined);
+      } catch {
+        // History unavailable (cold store, transient fault); the page still renders.
+      }
+      setRuns(historyTurns);
       const snapshot = await getWorkspace();
       setWs({
         evidence: snapshot.recentEvidence.map(evidenceFromDto),
@@ -344,14 +406,18 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
       )}
 
       {run.limitations.length > 0 && (() => {
-        // Limitation hierarchy (capability-expansion mandate §35): show the few that
-        // describe WHAT IS MISSING materially; tuck provider/provenance detail (laws,
-        // per-feed skips, fallback trails) into a collapsed diagnostics list. The run
-        // must never LOOK failed just because some source was unavailable.
+        // Limitation hierarchy (capability-expansion mandate §35): show only what is
+        // materially MISSING for THIS question. Provider-fallback trails ("research
+        // continued using ...") are SUCCESS stories, not failures: they belong in the
+        // collapsed data-source notes, never in the visible wall. Only true capability
+        // gaps (no provider at all, explicit UNAVAILABLE data dimensions) stay visible.
         const all = [...new Set(run.limitations)];
+        const isFallbackNote = /provider fallback:|research continued using|fallback provider:|served by|attempted/i;
+        const isProvenanceNote = /FINDINGS\.md|final lock|§|failure is a technical condition|must not|never |law|prox|aggregat|headline-level|secondary reporting|freshness|retrieval failure|proxy/i;
         const material = all.filter((l) =>
-          /UNAVAILABLE|no provider registered|no coverage|insufficient|not available|requires|unreachable|ConnectTimeout|timeout/i.test(l)
-          && !/never|must not|failure is a technical condition|limitations? \(|FINDINGS\.md|final lock|§/i.test(l)
+          (/UNAVAILABLE|no provider registered|insufficient|not available|unreachable|ConnectTimeout|timeout/i.test(l))
+          && !isFallbackNote.test(l)
+          && !isProvenanceNote.test(l)
         ).slice(0, 5);
         const detail = all.filter((l) => !material.includes(l));
         return (
