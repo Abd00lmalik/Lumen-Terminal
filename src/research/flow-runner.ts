@@ -18,7 +18,7 @@
  */
 
 import type { CapabilityRegistry } from "../adapters/capability-registry.js";
-import { PLANNER_CAPABILITIES } from "./adaptive.js";
+import { PLANNER_CAPABILITIES, partialDecision } from "./adaptive.js";
 import type { ModelProvider } from "../model/provider.js";
 import { ModelFailure } from "../model/provider.js";
 import {
@@ -302,7 +302,7 @@ export async function runFlow(
         ? error
         : new ModelFailure("INVALID_OUTPUT", `adaptive decision validation failed: ${error instanceof Error ? error.message : String(error)}`, false);
       stoppedBecause = "MODEL_FAILURE";
-      finalDecision = { decision: "INSUFFICIENT_EVIDENCE", rationale: `loop ended on model failure: ${modelFailure.message}; no fabricated continuation`, nextTasks: [] };
+      finalDecision = { decision: "INSUFFICIENT_EVIDENCE", rationale: "The interpretation model became unavailable before evidence could be gathered; nothing was fabricated. The request can be retried.", nextTasks: [] };
       rounds.push({ round, executions, decision: finalDecision });
       await options.store.save(workspace.toSnapshot()); // preserve partial state (lock §14)
       return finish(workspace, researchRef, flow, plan, rounds, allExecutions, finalDecision, stoppedBecause, modelFailure, at);
@@ -318,13 +318,13 @@ export async function runFlow(
     if (options.deadlineMs !== undefined && at().getTime() >= options.deadlineMs) {
       options.onProgress?.(progressEvent("research_stopped", at(), "research stopped: TIME_BUDGET_EXHAUSTED", { reason: "TIME_BUDGET_EXHAUSTED" }));
       stoppedBecause = "TIME_BUDGET_EXHAUSTED";
-      finalDecision = { decision: "INSUFFICIENT_EVIDENCE", rationale: `time budget exhausted after ${rounds.length} round(s); evidence gathered so far is preserved`, nextTasks: [] };
+      finalDecision = partialDecision("TIME_BUDGET_EXHAUSTED", rounds.length, allExecutions.flatMap((e) => e.evidenceIds).length);
       break;
     }
     if (round === maxRounds) {
       options.onProgress?.(progressEvent("research_stopped", at(), `research stopped: ${stoppedBecause ?? "ROUND_BUDGET_EXHAUSTED"}`, { reason: stoppedBecause ?? "ROUND_BUDGET_EXHAUSTED" }));
       stoppedBecause = "ROUND_BUDGET_EXHAUSTED";
-      finalDecision = { decision: "INSUFFICIENT_EVIDENCE", rationale: `round budget (${maxRounds}) exhausted; research state is preserved for later continuation`, nextTasks: [] };
+      finalDecision = partialDecision("ROUND_BUDGET_EXHAUSTED", rounds.length, allExecutions.flatMap((e) => e.evidenceIds).length);
       break;
     }
   }

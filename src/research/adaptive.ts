@@ -261,7 +261,7 @@ export async function runAdaptiveResearch(
       stoppedBecause = "MODEL_FAILURE";
       finalDecision = {
         decision: "INSUFFICIENT_EVIDENCE",
-        rationale: `loop ended on model failure: ${modelFailure.message}; no fabricated continuation`,
+        rationale: "The interpretation model became unavailable before evidence could be gathered; nothing was fabricated. The request can be retried.",
         nextTasks: [],
       };
       rounds.push({ round, executions, decision: finalDecision });
@@ -298,21 +298,13 @@ export async function runAdaptiveResearch(
     // dying mid-flight (an in-flight run can never deliver its partial truth to the trader).
     if (options.deadlineMs !== undefined && at().getTime() >= options.deadlineMs) {
       stoppedBecause = "TIME_BUDGET_EXHAUSTED";
-      finalDecision = {
-        decision: "INSUFFICIENT_EVIDENCE",
-        rationale: `time budget exhausted after ${rounds.length} round(s); evidence gathered so far is preserved`,
-        nextTasks: [],
-      };
+      finalDecision = partialDecision("TIME_BUDGET_EXHAUSTED", rounds.length, allExecutions.flatMap((e) => e.evidenceIds).length);
       options.onProgress?.(progressEvent("research_stopped", at(), `research stopped: ${stoppedBecause}`, { reason: stoppedBecause }));
       break;
     }
     if (round === maxRounds) {
       stoppedBecause = "ROUND_BUDGET_EXHAUSTED";
-      finalDecision = {
-        decision: "INSUFFICIENT_EVIDENCE",
-        rationale: `round budget (${maxRounds}) exhausted; research state is preserved for later continuation`,
-        nextTasks: [],
-      };
+      finalDecision = partialDecision("ROUND_BUDGET_EXHAUSTED", rounds.length, allExecutions.flatMap((e) => e.evidenceIds).length);
       options.onProgress?.(progressEvent("research_stopped", at(), `research stopped: ${stoppedBecause}`, { reason: stoppedBecause }));
       break;
     }
@@ -324,8 +316,12 @@ export async function runAdaptiveResearch(
   // deep-research tier ONCE with the exact objective. The model never decides this (it does
   // not know provider coverage); the engine knows when nothing was gathered. Outputs remain
   // classified by the evidence layer (agent analysis, never direct observation).
+  // Mechanical budget stops with zero evidence are also dead ends the backstop must try to
+  // recover: the loop never reached a substantive conclusion, so deep research with the exact
+  // objective is the last legitimate path before declaring genuine insufficiency (§19).
+  const budgetStopped = stoppedBecause === "TIME_BUDGET_EXHAUSTED" || stoppedBecause === "ROUND_BUDGET_EXHAUSTED";
   const deepResearchFired =
-    stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE" &&
+    (stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE" || budgetStopped) &&
     allExecutions.every((e) => e.evidenceIds.length === 0) &&
     !allExecutions.some((e) => e.capability === "CROSS_DOMAIN_SYNTHESIS") &&
     options.registry.resolve("CROSS_DOMAIN_SYNTHESIS").length > 0 &&
@@ -363,6 +359,16 @@ export async function runAdaptiveResearch(
       deepRound.push(execution);
       allExecutions.push(execution);
       rounds.push({ round: rounds.length + 1, executions: deepRound, decision: finalDecision });
+      // Deep research that DID find material evidence upgrades the conclusion (§13: after
+      // research recovery, found evidence is a substantive answer — not insufficiency).
+      const totalEvidence = allExecutions.flatMap((e) => e.evidenceIds).length;
+      if (evidenceIds.length > 0 && finalDecision.decision === "INSUFFICIENT_EVIDENCE") {
+        finalDecision = {
+          decision: "COMPLETE",
+          rationale: `Direct sources could not cover this question; deep-research agents gathered ${totalEvidence} evidence object(s) against the exact objective. Their outputs are labeled as agent analysis in the evidence below.`,
+          nextTasks: [],
+        };
+      }
     } catch {
       // A deep-research throw is recorded as a failed round, never a crash; the honest
       // insufficiency conclusion below stands.
@@ -387,6 +393,28 @@ export async function runAdaptiveResearch(
       researchRef,
       executions: allExecutions.map((e) => ({ capability: e.capability, result: e.result })),
     }),
+  };
+}
+
+/**
+ * Mechanical budget stops (round/wall-clock) are NOT model conclusions about the evidence.
+ * When evidence was actually gathered, the run is an honest partial completion: the rationale
+ * must be user-facing (never the internal "round budget exhausted" note — that string once
+ * leaked into the final answer) and the decision stays recoverable rather than declaring the
+ * question unanswerable (zero-dead-end mandate §13/§15).
+ */
+export function partialDecision(_reason: "ROUND_BUDGET_EXHAUSTED" | "TIME_BUDGET_EXHAUSTED", rounds: number, evidenceCount: number): AdaptiveDecision {
+  if (evidenceCount === 0) {
+    return {
+      decision: "INSUFFICIENT_EVIDENCE",
+      rationale: "No usable evidence was gathered before the research budget was reached; nothing was fabricated.",
+      nextTasks: [],
+    };
+  }
+  return {
+    decision: "COMPLETE",
+    rationale: `Research was completed across ${rounds} round(s) with ${evidenceCount} evidence object(s) gathered before the research budget was reached; the findings below reflect everything collected.`,
+    nextTasks: [],
   };
 }
 

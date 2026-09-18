@@ -396,6 +396,83 @@ describe("adaptive research loop (M3 §7/§8)", () => {
     expect(outcome.rounds).toHaveLength(2);
   });
 
+  // Zero-dead-end mandate §13/§15: a mechanical budget stop WITH gathered evidence is a
+  // completed partial research run — the rationale is user-facing (the internal "round
+  // budget exhausted" note once leaked into the final answer) and the decision is COMPLETE.
+  it("budget exhaustion with evidence concludes COMPLETE with a user-facing rationale", async () => {
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", responses.researchPlan()],
+      ["research.adaptive_decision", () => responses.adaptiveDecision("CONTINUE", [{ objective: "more", capabilities: ["NEWS_ANALYSIS"], completion: "c" }])],
+    ]));
+    const workspace = new Workspace();
+    const research = workspace.addResearch({ objective: "o", question: "q", flow: "WHAT_HAPPENED" }, trader);
+    workspace.transitionResearch(research.id, "ACTIVE", system, "activated");
+
+    const outcome = await runAdaptiveResearch("o", research.id, {
+      provider, registry: registryWith("NEWS_ANALYSIS"), workspace, store: newStore(), maxRounds: 2,
+    });
+    expect(outcome.stoppedBecause).toBe("ROUND_BUDGET_EXHAUSTED");
+    expect(outcome.evidence.length).toBeGreaterThan(0);
+    expect(outcome.finalDecision.decision).toBe("COMPLETE");
+    expect(outcome.finalDecision.rationale).not.toContain("round budget");
+    expect(outcome.finalDecision.rationale).not.toContain("exhaust");
+    expect(outcome.finalDecision.rationale).toContain(String(outcome.evidence.length));
+  });
+
+  // The deep-research backstop also fires when a mechanical budget stopped the loop with ZERO
+  // evidence (a dead end the loop never substantively concluded), and found material evidence
+  // upgrades the conclusion from INSUFFICIENT_EVIDENCE to COMPLETE.
+  it("deep-research backstop recovers a zero-evidence budget stop and upgrades the conclusion", async () => {
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", responses.researchPlan()],
+      ["research.adaptive_decision", () => responses.adaptiveDecision("CONTINUE", [{ objective: "more", capabilities: ["NEWS_ANALYSIS"], completion: "c" }])],
+    ]));
+    // A capability that legitimately returns no outputs (honest no-coverage, no failure).
+    const emptyCapability: ProviderAdapter = {
+      providerId: "fake/empty-news",
+      capabilities: ["NEWS_ANALYSIS"],
+      limitations: [],
+      freshnessProfile: "test:live",
+      async execute(cap) {
+        return { tool: "fake/empty-news", capability: cap, transport: "fake", outputs: [] };
+      },
+    };
+    const registry = new CapabilityRegistry();
+    registry.register(emptyCapability);
+    registry.register(fakeCapability("CROSS_DOMAIN_SYNTHESIS", "deep-research finding for the exact objective"));
+    const workspace = new Workspace();
+    const research = workspace.addResearch({ objective: "o", question: "q", flow: "WHAT_HAPPENED" }, trader);
+    workspace.transitionResearch(research.id, "ACTIVE", system, "activated");
+
+    const outcome = await runAdaptiveResearch("o", research.id, {
+      provider, registry, workspace, store: newStore(), maxRounds: 1,
+    });
+    expect(outcome.stoppedBecause).toBe("ROUND_BUDGET_EXHAUSTED");
+    const deepExec = outcome.executions.find((e) => e.capability === "CROSS_DOMAIN_SYNTHESIS");
+    expect(deepExec).toBeDefined();
+    expect(outcome.evidence.length).toBeGreaterThan(0);
+    expect(outcome.finalDecision.decision).toBe("COMPLETE");
+    expect(outcome.finalDecision.rationale).toContain("deep-research");
+  });
+
+  // A model failure with zero gathered evidence keeps a retriable, non-infrastructure rationale.
+  it("model failure rationale is user-facing and retriable", async () => {
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", responses.researchPlan()],
+      ["research.adaptive_decision", () => { throw new ModelFailure("PROVIDER_UNAVAILABLE", "upstream down", true); }],
+    ]));
+    const workspace = new Workspace();
+    const research = workspace.addResearch({ objective: "o", question: "q", flow: "WHAT_HAPPENED" }, trader);
+    workspace.transitionResearch(research.id, "ACTIVE", system, "activated");
+
+    const outcome = await runAdaptiveResearch("o", research.id, {
+      provider, registry: registryWith("NEWS_ANALYSIS"), workspace, store: newStore(), maxRounds: 2,
+    });
+    expect(outcome.stoppedBecause).toBe("MODEL_FAILURE");
+    expect(outcome.finalDecision.rationale).not.toContain("upstream down");
+    expect(outcome.finalDecision.rationale.toLowerCase()).toContain("retried");
+  });
+
   it("tool failure is a limitation, never negative evidence (M3 §9/§19)", async () => {
     const provider = new FakeModelProvider(new Map([
       ["research.plan", responses.researchPlan()],
