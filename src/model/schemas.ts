@@ -14,6 +14,7 @@
  */
 
 import { validateModelOutput, type OutputSchema } from "./provider.js";
+import { normalizePlanCapabilities } from "./capability-vocabulary.js";
 
 // ---------------------------------------------------------------------------
 // Prompt-facing schema descriptions (rendered into model prompts; mirrors the schemas)
@@ -484,10 +485,7 @@ export function parseActionPlan(text: string): ActionPlan {
       }
     }
     const capabilities = Array.isArray(s.capabilities)
-      ? s.capabilities.map((c) => {
-          if (typeof c !== "string") throw new Error("plan step capabilities must be strings");
-          return c;
-        })
+      ? normalizePlanCapabilities(s.capabilities).capabilities
       : [];
     return { action: parseLuiAction(s.action), description: s.description, capabilities, params };
   });
@@ -519,7 +517,7 @@ export function parseResearchPlan(text: string): ProposedResearchPlan {
     return {
       type: String(t.type),
       objective: String(t.objective),
-      capabilities: (t.capabilities as unknown[]).map((c) => String(c)),
+      capabilities: normalizePlanCapabilities(t.capabilities).capabilities,
       completion: String(t.completion),
     };
   });
@@ -552,7 +550,7 @@ export function parseAdaptiveDecision(text: string): AdaptiveDecision {
     }
     return {
       objective: t.objective,
-      capabilities: (t.capabilities as unknown[]).map((c) => String(c)),
+      capabilities: normalizePlanCapabilities(t.capabilities).capabilities,
       completion: t.completion,
     };
   });

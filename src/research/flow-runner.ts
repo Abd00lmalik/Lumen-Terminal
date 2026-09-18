@@ -157,9 +157,9 @@ export interface FlowOutcome {
 const BASE_PLAN_SYSTEM = [
   "You are the research planner inside a trading RESEARCH workbench. You plan; you never execute.",
   "The system executes capabilities and returns validated evidence. Plan rules:",
-  // CAUSAL_INVESTIGATION and EVENT_RECONSTRUCTION are flow-internal capabilities (flow2/flow3
-  // schedules); they are excluded from the adaptive planner's vocabulary but remain registered.
-  `- Request CAPABILITIES only (${[...PLANNER_CAPABILITIES, "CAUSAL_INVESTIGATION", "EVENT_RECONSTRUCTION"].join(", ")}). Never providers or vendor tools.`,
+  // CAUSAL_INVESTIGATION and EVENT_RECONSTRUCTION are task-type labels in flow2/flow3, never
+  // registered capabilities: inviting them only produces "no provider registered" dead ends.
+  `- Request CAPABILITIES only (${PLANNER_CAPABILITIES.join(", ")}). Never providers or vendor tools.`,
   "- Select the smallest capability set with material information value for THIS objective.",
   "- Respect trader constraints in scope.",
   "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",

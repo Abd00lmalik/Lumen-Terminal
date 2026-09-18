@@ -72,7 +72,6 @@ export const PLANNER_CAPABILITIES: readonly string[] = [
   "EQUITY_MARKET_DATA", "EQUITY_FUNDAMENTALS", "EQUITY_EARNINGS", "EARNINGS_CALENDAR", "OPTIONS_CHAIN_ANALYSIS", "EQUITY_NEWS",
   "LOCAL_KNOWLEDGE_RETRIEVAL",
 ];
-
 /**
  * The planner's capability vocabulary lives here and ONLY here; the zero-dead-end
  * conformance test imports it to prove every name below resolves to a registered provider.
