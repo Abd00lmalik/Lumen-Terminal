@@ -148,6 +148,9 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
   // ------------------------------------------------------------------
 
   app.get("/api/thesis", { handler: withErrors(async () => researchApp.listTheses()) });
+  // Contract alias: the frontend client historically calls the plural path; both resolve
+  // to the same handler so neither side's vocabulary can 404 the theses list.
+  app.get("/api/theses", { handler: withErrors(async () => researchApp.listTheses()) });
   app.get("/api/thesis/:ref", {
     handler: withErrors(async (req) => researchApp.getThesis((req.params as { ref: string }).ref)),
   });

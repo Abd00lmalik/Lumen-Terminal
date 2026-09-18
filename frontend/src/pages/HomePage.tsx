@@ -27,24 +27,42 @@ export function HomePage() {
 
   useEffect(() => {
     void (async () => {
-      try {
-        const [all, snapshot, theses] = await Promise.all([listResearch(), getWorkspace(), listTheses()]);
+      // Each load path is INDEPENDENT: one failed endpoint (e.g. a transient 404/timeout)
+      // must not blank the whole home page — previously one rejected promise in this
+      // Promise.all discarded the research history that had already loaded fine.
+      const settled = await Promise.allSettled([listResearch(), getWorkspace(), listTheses()]);
+      const all = settled[0].status === "fulfilled" ? settled[0].value : [];
+      const snapshot = settled[1].status === "fulfilled" ? settled[1].value : undefined;
+      const theses = settled[2].status === "fulfilled" ? settled[2].value : [];
+      if (settled.every((s) => s.status === "rejected")) {
+        setError(settled.find((s) => s.status === "rejected") as PromiseRejectedResult);
+        setLoaded(true);
+        return;
+      }
+      if (snapshot !== undefined) {
         setResearch(homeDataFromSnapshot(snapshot, all).research);
-        const active = theses.find((t) => t.isActive) ?? theses[theses.length - 1];
-        if (active !== undefined) {
-          const assessments = (snapshot.latestThesisAssessment !== undefined && snapshot.latestThesisAssessment.thesisRef === active.ref)
-            ? [snapshot.latestThesisAssessment]
-            : [];
-          setThesis(thesisFromDto(active, assessments));
-        }
         setCounts(homeDataFromSnapshot(snapshot, all).monitorCounts);
         setContradictions(snapshot.importantContradictions);
         setUncertainties(snapshot.unresolvedUncertainties);
-        setLoaded(true);
-      } catch (err) {
-        setError(err);
-        setLoaded(true);
+      } else if (all.length > 0) {
+        // Snapshot unavailable: still render history from the research list alone.
+        setResearch(all.map((r) => ({
+          ref: r.ref,
+          title: r.question.length > 0 ? r.question : r.objective,
+          kind: "research" as const,
+          status: r.status,
+          updatedAt: r.history.length > 0 ? r.history[r.history.length - 1]! : new Date().toISOString(),
+          meta: r.flow.replace(/_/g, " ").toLowerCase(),
+        })));
       }
+      const active = theses.find((t) => t.isActive) ?? theses[theses.length - 1];
+      if (active !== undefined && snapshot !== undefined) {
+        const assessments = (snapshot.latestThesisAssessment !== undefined && snapshot.latestThesisAssessment.thesisRef === active.ref)
+          ? [snapshot.latestThesisAssessment]
+          : [];
+        setThesis(thesisFromDto(active, assessments));
+      }
+      setLoaded(true);
     })();
   }, []);
 

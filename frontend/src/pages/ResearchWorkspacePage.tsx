@@ -156,30 +156,36 @@ export function ResearchWorkspacePage() {
   }, [stream.errorId]);
 
   const refresh = useCallback(async () => {
+    // Workspace state (history + snapshot) refresh; RESILIENT by design:
+    // - a failed history read NEVER wipes turns already on screen (the live result a user
+    //   just received must not vanish because a read hiccuped) — history is merged, not set;
+    // - the snapshot load retries once (bounded) to absorb cold-start/deploy blips before
+    //   the honest banner is shown; previous state stays visible meanwhile.
+    let historyTurns: readonly Turn[] | undefined;
     try {
-      // Research history is server-side state (issue: refresh/back used to lose finished runs
-      // because they lived only in React state). Load the history list, hydrate the most
-      // recent completed run's full response, and show everything completed. Best-effort:
-      // a history read failing never blocks the page (the ask-bar and live stream still work).
-      let historyTurns: readonly Turn[] = [];
-      try {
-        const history = await listResearch();
-        const completed = history.filter((r) => r.status === "COMPLETED").slice(-3);
-        const hydrated = await Promise.all(
-          completed.map(async (r): Promise<Turn | undefined> => {
-            try {
-              const full = await getResearch(r.ref);
-              return researchDtoToTurn(full);
-            } catch {
-              return undefined; // one unreadable run must not sink the rest
-            }
-          }),
-        );
-        historyTurns = hydrated.filter((t): t is Turn => t !== undefined);
-      } catch {
-        // History unavailable (cold store, transient fault); the page still renders.
-      }
-      setRuns(historyTurns);
+      const history = await listResearch();
+      const completed = history.filter((r) => r.status === "COMPLETED").slice(-3);
+      const hydrated = await Promise.all(
+        completed.map(async (r): Promise<Turn | undefined> => {
+          try {
+            const full = await getResearch(r.ref);
+            return researchDtoToTurn(full);
+          } catch {
+            return undefined; // one unreadable run must not sink the rest
+          }
+        }),
+      );
+      historyTurns = hydrated.filter((t): t is Turn => t !== undefined);
+    } catch {
+      // History unavailable (cold store, transient fault); existing turns stay untouched.
+    }
+    if (historyTurns !== undefined) {
+      setRuns((prev) => {
+        const seen = new Set(historyTurns!.map((t) => t.question));
+        return [...historyTurns!, ...prev.filter((t) => !seen.has(t.question))];
+      });
+    }
+    try {
       const snapshot = await getWorkspace();
       setWs({
         evidence: snapshot.recentEvidence.map(evidenceFromDto),
@@ -206,6 +212,39 @@ export function ResearchWorkspacePage() {
         loadError: undefined,
       });
     } catch (err) {
+      // One bounded retry: cold serverless instances and deploy windows produce transient
+      // failures; the banner is only honest after a confirmed double failure.
+      await new Promise((r) => setTimeout(r, 1200));
+      try {
+        const snapshot = await getWorkspace();
+        setWs({
+          evidence: snapshot.recentEvidence.map(evidenceFromDto),
+          judgment: snapshot.currentJudgment !== undefined ? judgmentFromDto(snapshot.currentJudgment) : undefined,
+          thesis: snapshot.activeThesis !== undefined
+            ? {
+                ref: snapshot.activeThesis.ref,
+                statement: snapshot.activeThesis.statement,
+                objective: snapshot.activeThesis.objective,
+                version: snapshot.activeThesis.version,
+                claims: snapshot.activeThesis.claims.map((c: { statement: string; importance?: string }) => ({ statement: c.statement, importance: "SUPPORTING" as const, invalidationConditions: [] })),
+                assumptions: snapshot.activeThesis.assumptions.map((a: { statement: string }) => ({ statement: a.statement, invalidationConditions: [] })),
+                invalidationConditions: [...snapshot.activeThesis.invalidationConditions],
+                assessments: [],
+                confidence: snapshot.activeThesis.confidence ?? "UNKNOWN",
+                researchQuality: "UNAVAILABLE",
+                supportingRefs: [],
+                contradictingRefs: [],
+                updatedAt: snapshot.activeThesis.updatedAt,
+                status: snapshot.activeThesis.status,
+              }
+            : undefined,
+          snapshot,
+          loadError: undefined,
+        });
+        return;
+      } catch {
+        // Confirmed failure: keep previous state on screen, surface the honest banner.
+      }
       setWs((prev) => ({ ...prev, loadError: err }));
     }
   }, []);
