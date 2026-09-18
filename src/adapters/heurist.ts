@@ -97,13 +97,27 @@ export class HeuristMeshTransport {
       // Heurist reports application-level failures as { detail: "..." } with HTTP 200.
       throw new TransportError("PROVIDER_ERROR", `Heurist ${agentId}.${tool} failed: ${String(detail).slice(0, 300)}`, { retriable: true });
     }
-    const result = (body as { result?: unknown }).result;
+    const payload = (body as { result?: unknown; data?: unknown });
+    let result = payload.result !== undefined && payload.result !== null ? payload.result : payload.data;
+    // Search-style tools wrap twice: {data:{status:'success', data:{results:[...]}}}
+    // (VERIFIED LIVE: DuckDuckGoSearchAgent). Unwrap exactly that wrapper shape — nothing
+    // else — so direct tool outputs (chain/tvl/fees objects) pass through untouched.
+    if (result !== null && typeof result === "object" && !Array.isArray(result)) {
+      const r = result as Record<string, unknown>;
+      const keys = Object.keys(r);
+      if (r.data !== undefined && r.data !== null && keys.length <= 2 && keys.every((k) => k === "status" || k === "data")) {
+        result = r.data;
+      }
+    }
     if (result === undefined || result === null) {
       // Distinguish honest emptiness from malformed output: agents legitimately return
       // null/absent results when they have no coverage for a subject. That is "no data",
       // NOT a protocol failure; the registry records it as an empty attempt and any
       // earlier direct provider's data still stands. Only structurally wrong payloads
       // (non-JSON, wrong types) are INVALID_RESPONSE.
+      // NOTE: Mesh wraps successful tool output in `data` (VERIFIED LIVE 2026-09-18: every
+      // agent answers {data: ...}; `result` is not part of the success envelope). Both keys
+      // are accepted; accepting `result` first keeps forward compatibility.
       throw new TransportError("EMPTY_RESULT", `Heurist ${agentId}.${tool} has no result for this subject (raw captured: ${rawReference})`, { retriable: false });
     }
     return { result, rawReference };
@@ -146,6 +160,15 @@ export function parseHeuristOutputs(result: unknown, upstreamSource: string, abo
   const push = (item: unknown): void => {
     const content = itemContent(item);
     if (content === undefined) return;
+    // Mesh success payloads nest under `data` (VERIFIED LIVE 2026-09-18); unwrap one level so
+    // the observation fields are the content, not a lone "data: {...}" object.
+    const inner = content as Record<string, unknown>;
+    if (Object.keys(inner).length === 1 && inner.data !== undefined && typeof inner.data === "object" && !Array.isArray(inner.data)) {
+      const unwrapped = itemContent(inner.data);
+      if (unwrapped === undefined) return;
+      outputs.push({ outputClass: "QUANTITATIVE_OBSERVATION" as const, content: { ...unwrapped, upstreamSource }, ...(about !== undefined ? { about } : {}) });
+      return;
+    }
     outputs.push({ outputClass: "QUANTITATIVE_OBSERVATION" as const, content: { ...content, upstreamSource }, ...(about !== undefined ? { about } : {}) });
   };
   if (Array.isArray(result)) {
@@ -210,6 +233,10 @@ export interface HeuristAgentSpec {
   readonly defaultSubject?: string;
   /** Fixed extra tool arguments for subjectless/question-agnostic tools (e.g. network scope). */
   readonly defaultSubjectParams?: Readonly<Record<string, unknown>>;
+  /** Tool substituted when the subject fell back to defaultSubject (subjectless variants). */
+  readonly fallbackTool?: string;
+  /** Extra arguments used together with fallbackTool. */
+  readonly fallbackToolParams?: Readonly<Record<string, unknown>>;
   /** Deep-research agents accept the raw question text as their subject (query/prompt). */
   readonly acceptsQuestion?: boolean;
   readonly limitations: readonly string[];
@@ -246,11 +273,14 @@ export class HeuristAgentAdapter implements ProviderAdapter {
     }
     const tool = typeof params.tool === "string" && params.tool.trim() !== "" ? params.tool : this.spec.tool;
     const toolArguments: Record<string, unknown> = {};
+    let fellBack = false;
     if (this.spec.subjectParam !== undefined) {
       const raw = [
         params[this.spec.subjectParam], params.asset, params.symbol,
         ...(this.spec.acceptsQuestion === true ? [params.question] : []),
       ].find((v) => typeof v === "string" && v.trim() !== "");
+      const fellBackSubject = raw === undefined && this.spec.defaultSubject !== undefined;
+      fellBack = fellBackSubject;
       const subject = typeof raw === "string" ? raw.trim() : this.spec.defaultSubject;
       if (subject === undefined) {
         return {
@@ -270,7 +300,11 @@ export class HeuristAgentAdapter implements ProviderAdapter {
     } else if (this.spec.acceptsQuestion === true && typeof params.question === "string" && params.question.trim() !== "") {
       toolArguments.query = params.question;
     }
-    for (const [key, value] of Object.entries(this.spec.defaultSubjectParams ?? {})) {
+    const activeTool = fellBack === true && this.spec.fallbackTool !== undefined ? this.spec.fallbackTool : tool;
+    const extraParams = fellBack === true && this.spec.fallbackToolParams !== undefined
+      ? { ...this.spec.defaultSubjectParams, ...this.spec.fallbackToolParams }
+      : this.spec.defaultSubjectParams;
+    for (const [key, value] of Object.entries(extraParams ?? {})) {
       toolArguments[key] = value;
     }
     // Pass through any explicitly requested extra arguments (bounded, scalar only).
@@ -288,12 +322,12 @@ export class HeuristAgentAdapter implements ProviderAdapter {
     }
 
     try {
-      const { result, rawReference } = await this.transport.invokeTool(this.spec.agentId, tool, toolArguments);
+      const { result, rawReference } = await this.transport.invokeTool(this.spec.agentId, activeTool, toolArguments);
       const about = typeof toolArguments[this.spec.subjectParam ?? ""] === "string" ? (toolArguments[this.spec.subjectParam ?? ""] as string) : undefined;
       const outputs = withInterpretationBasis(parseHeuristOutputs(result, this.spec.upstreamSource, about), this.spec.upstreamSource);
       if (outputs.length === 0) {
         return {
-          tool: this.providerId,
+          tool: `${this.providerId}.${activeTool}`,
           capability,
           transport: "rest:mesh.heurist.xyz",
           params: { ...params, ...toolArguments },
@@ -307,7 +341,7 @@ export class HeuristAgentAdapter implements ProviderAdapter {
         };
       }
       return {
-        tool: this.providerId,
+        tool: `${this.providerId}.${activeTool}`,
         capability,
         transport: "rest:mesh.heurist.xyz",
         params: { ...params, ...toolArguments },
@@ -583,10 +617,16 @@ export function createHeuristDefiLlamaAdapter(transport?: HeuristMeshTransport):
       upstreamSource: "defillama",
       tool: "get_protocol_metrics",
       subjectParam: "protocol",
-      acceptsQuestion: false,
+      // Subjectless DeFi questions ("how much value is locked in DeFi?") fall back to
+      // chain-level metrics instead of failing schema validation (VERIFIED LIVE:
+      // get_chain_metrics returns chain TVL/fees; zero-dead-end mandate §0/§4).
+      defaultSubject: "Ethereum",
       limitations: [
         "protocol slug resolution is heuristic; an unknown slug returns no data rather than a guess",
+        "subjectless DeFi questions default to Ethereum chain metrics (TVL/fees), not whole-industry totals",
       ],
+      fallbackTool: "get_chain_metrics",
+      fallbackToolParams: { chain: "Ethereum" },
       freshnessProfile: "defi:daily",
     },
     transport,

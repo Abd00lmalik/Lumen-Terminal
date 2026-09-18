@@ -25,6 +25,7 @@ import { CapabilityRegistry } from "../../src/adapters/capability-registry.js";
 import {
   HeuristAgentAdapter,
   HeuristMeshTransport,
+  createHeuristDefiLlamaAdapter,
   createHeuristFundingRateAdapter,
   createHeuristFredAdapter,
   createHeuristOptionsAdapter,
@@ -236,7 +237,7 @@ describe("HeuristAgentAdapter", () => {
 
     const result = await adapter.execute("OPTIONS_CHAIN_ANALYSIS", { asset: "AAPL" });
 
-    expect(result.tool).toBe("heurist/YahooFinanceAgent");
+    expect(result.tool).toBe("heurist/YahooFinanceAgent.options_chain");
     expect(result.transport).toBe("rest:mesh.heurist.xyz");
     expect(result.failure?.type ?? "NONE").toBe("NONE"); // healthy input carries no failure
     expect(result.completeness).toBe("COMPLETE");
@@ -335,7 +336,7 @@ describe("Heurist registry chains", () => {
     const result = await registry.execute("DERIVATIVES_ANALYSIS", { asset: "BTCUSDT" }, origin);
 
     expect(result.failure.type).toBe("NONE");
-    expect(result.tool).toBe("heurist/FundingRateAgent");
+    expect(result.tool).toBe("heurist/FundingRateAgent.get_symbol_oi_and_funding");
     expect(result.limitations.join(" ")).toContain("provider fallback");
     expect(result.limitations.join(" ")).toContain("fake/bitget-derivatives"); // primary failure preserved
     expect(result.attemptedProviders?.map((a) => a.provider)).toContain("fake/bitget-derivatives");
@@ -376,5 +377,45 @@ describe("Heurist registry chains", () => {
       "heurist/YahooFinanceAgent",
     ]);
     for (const id of ids) expect(forbidden.test(id)).toBe(false);
+  });
+});
+
+describe("DefiLlama subjectless fallback (zero-dead-end)", () => {
+  it("subjectless DEFI_ANALYSIS falls back to get_chain_metrics instead of SCHEMA_ERROR", async () => {
+    const { fetch, requests } = fakeFetch([
+      { result: { data: { chain: "Ethereum", tvl: { current: "52.02B USD" }, fees: 1_200_000 } } },
+    ]);
+    const adapter = createHeuristDefiLlamaAdapter(
+      new HeuristMeshTransport({ apiKey: "heu_test", fetchImpl: fetch }),
+    );
+    const result = await adapter.execute("DEFI_ANALYSIS", {});
+
+    expect(result.failure?.type ?? "NONE").toBe("NONE"); // healthy result, not a failure
+    expect(result.completeness).toBe("COMPLETE");
+    expect(result.tool).toBe("heurist/DefiLlamaAgent.get_chain_metrics");
+    const body = JSON.parse(String(requests[0]?.init.body ?? "{}")) as {
+      input: { tool: string; tool_arguments: Record<string, unknown> };
+    };
+    expect(body.input.tool).toBe("get_chain_metrics");
+    expect(body.input.tool_arguments.chain).toBe("Ethereum");
+    // Chain metrics stay quantitative observations with DefiLlama lineage (no double-count).
+    expect(result.outputs.some((o) => o.outputClass === "QUANTITATIVE_OBSERVATION")).toBe(true);
+  });
+
+  it("a resolved protocol still uses the protocol tool, never the fallback", async () => {
+    const { fetch, requests } = fakeFetch([
+      { result: { data: { protocol: "uniswap", tvl: "5.1B USD" } } },
+    ]);
+    const adapter = createHeuristDefiLlamaAdapter(
+      new HeuristMeshTransport({ apiKey: "heu_test", fetchImpl: fetch }),
+    );
+    const result = await adapter.execute("DEFI_ANALYSIS", { protocol: "uniswap" });
+
+    expect(result.failure?.type ?? "NONE").toBe("NONE");
+    const body = JSON.parse(String(requests[0]?.init.body ?? "{}")) as {
+      input: { tool: string; tool_arguments: Record<string, unknown> };
+    };
+    expect(body.input.tool).toBe("get_protocol_metrics");
+    expect(body.input.tool_arguments.protocol).toBe("uniswap");
   });
 });
