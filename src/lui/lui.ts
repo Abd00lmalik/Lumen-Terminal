@@ -503,7 +503,7 @@ export class Lui {
             await this.dispatchM4Flow(flow, step, result, origin, progress, deadlineMs);
             break;
           }
-          const research = await this.dispatchResearch(step, origin, progress, deadlineMs);
+          const research = await this.dispatchResearch(step, origin, progress, deadlineMs, target.asset);
           result.research = research.outcome;
           if (research.modelFailure !== undefined) result.modelFailure = research.modelFailure;
           break;
@@ -554,7 +554,18 @@ export class Lui {
    */
   private async dispatchM4Flow(flow: string, step: ActionPlan["steps"][number], result: LuiResult, origin: ProvenanceOrigin, onProgress?: ProgressListener, deadlineMs?: number): Promise<void> {
     const objective = step.params["objective"] ?? step.description;
-    const asset = step.params["asset"] ?? this.options.workspace.activeTheses()[0]?.scope.entities[0];
+    // Target resolution is deterministic where the model's step params omit it: the plan
+    // step may not carry the asset even though target resolution succeeded. Fallback order:
+    // step params -> the resolved target's asset -> an exact ticker-shaped token in the
+    // objective (NVDA, AAPL, BTC; 2-6 alphanumerics, NOT sentence words) -> active thesis.
+    // A ticker in the question is a fact about the question; requiring the plan to echo it
+    // back is how capability params ended up empty and every equity capability failed
+    // SCHEMA_ERROR for "no ticker symbol resolved".
+    const objectiveTicker = /\b[A-Z][A-Z0-9]{1,5}\b/.exec(objective)?.[0];
+    const asset = step.params["asset"]
+      ?? result.target.asset
+      ?? objectiveTicker
+      ?? this.options.workspace.activeTheses()[0]?.scope.entities[0];
     const constraints = step.params["constraints"] !== undefined ? step.params["constraints"].split(";").map((s) => s.trim()).filter((s) => s !== "") : undefined;
     const now = this.options.now;
     if (flow === "WHY_IT_HAPPENED") {
@@ -679,6 +690,7 @@ export class Lui {
     origin: ProvenanceOrigin,
     onProgress?: ProgressListener,
     deadlineMs?: number,
+    resolvedAsset?: string,
   ): Promise<{ outcome: AdaptiveLoopOutcome; modelFailure?: ModelFailure }> {
     const workspace = this.options.workspace;
     const objective = step.params["objective"] ?? step.description;
@@ -697,7 +709,12 @@ export class Lui {
         store: this.options.store,
         constraints: step.params["constraints"] !== undefined ? step.params["constraints"].split(";").map((s) => s.trim()).filter((s) => s !== "") : [],
         capabilityParams: {
-          ...(step.params["asset"] !== undefined ? { asset: step.params["asset"] } : {}),
+          // Same deterministic backstop as dispatchM4Flow: the resolved target (or an
+          // exact ticker in the objective) must reach capability params even when the
+          // plan step omitted the asset; equity/earnings adapters SCHEMA_ERROR otherwise.
+          ...((step.params["asset"] ?? resolvedAsset ?? /\b[A-Z][A-Z0-9]{1,5}\b/.exec(step.params["objective"] ?? step.description)?.[0]) !== undefined
+            ? { asset: (step.params["asset"] ?? resolvedAsset ?? /\b[A-Z][A-Z0-9]{1,5}\b/.exec(step.params["objective"] ?? step.description)?.[0]) as string }
+            : {}),
           // G2 DISCOVER falls back to the question text when a task carries no query:
           // the objective still bounds the investigation; never a hard schema failure.
           question: step.params["question"] ?? objective,

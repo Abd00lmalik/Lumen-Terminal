@@ -115,6 +115,79 @@ describe("six LUI actions (locked set)", () => {
     expect(result.response?.supportingReasons.length).toBeLessThanOrEqual(4);
   });
 
+  it("asset backstop: a plan step omitting the asset still resolves capability params from the resolved target (no SCHEMA_ERROR dead end)", async () => {
+    const seenParams: Record<string, unknown>[] = [];
+    const capturingCapability: ProviderAdapter = {
+      providerId: "fake/capturing",
+      capabilities: ["NEWS_ANALYSIS"],
+      limitations: ["fake"],
+      freshnessProfile: "test:live",
+      async execute(cap, params) {
+        seenParams.push(params);
+        return {
+          tool: "fake/capturing",
+          capability: cap,
+          transport: "fake",
+          outputs: [{ outputClass: "QUANTITATIVE_OBSERVATION", content: "NVDA pre-earnings vol elevated", about: "NVDA" }],
+        };
+      },
+    };
+    const registry = new CapabilityRegistry();
+    registry.register(capturingCapability);
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", responses.researchPlan()],
+      ["research.adaptive_decision", responses.adaptiveDecision("COMPLETE")],
+    ]));
+    // Target resolution DID resolve NVDA, but the plan step forgot to echo it into
+    // params (observed live: every equity capability then failed SCHEMA_ERROR).
+    scriptDefaults(provider, [{ action: "RESEARCH", description: "research NVDA earnings factors", capabilities: ["NEWS_ANALYSIS"], params: {} }], {
+      target: { asset: "NVDA", flow: "WHAT_COULD_AFFECT_IT", researchRef: "", objectRefs: [], unresolved: [] },
+      request: { objective: "What could affect NVDA around its next earnings?", primaryAction: "RESEARCH" },
+    });
+    const { lui } = buildLui(provider, registry);
+    const result = await lui.handle("What could affect NVDA around its next earnings?");
+
+    expect(result.research).toBeDefined();
+    expect(seenParams.length).toBeGreaterThan(0);
+    expect(seenParams.every((p) => p["asset"] === "NVDA")).toBe(true);
+    // The capability actually served (no honest-but-useless ticker-resolution failure).
+    expect(result.research?.evidence.length).toBeGreaterThan(0);
+  });
+
+  it("asset backstop tier 2: with no resolved target, an exact ticker in the objective reaches capability params", async () => {
+    const seenParams: Record<string, unknown>[] = [];
+    const capturingCapability: ProviderAdapter = {
+      providerId: "fake/capturing",
+      capabilities: ["NEWS_ANALYSIS"],
+      limitations: ["fake"],
+      freshnessProfile: "test:live",
+      async execute(cap, params) {
+        seenParams.push(params);
+        return {
+          tool: "fake/capturing",
+          capability: cap,
+          transport: "fake",
+          outputs: [{ outputClass: "QUANTITATIVE_OBSERVATION", content: "AAPL earnings context", about: "AAPL" }],
+        };
+      },
+    };
+    const registry = new CapabilityRegistry();
+    registry.register(capturingCapability);
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", responses.researchPlan()],
+      ["research.adaptive_decision", responses.adaptiveDecision("COMPLETE")],
+    ]));
+    scriptDefaults(provider, [{ action: "RESEARCH", description: "research AAPL earnings factors", capabilities: ["NEWS_ANALYSIS"], params: {} }], {
+      target: { asset: "", flow: "WHAT_COULD_AFFECT_IT", researchRef: "", objectRefs: [], unresolved: [] }, // not resolved
+      request: { objective: "What could affect AAPL around its next earnings?", primaryAction: "RESEARCH" },
+    });
+    const { lui } = buildLui(provider, registry);
+    await lui.handle("What could affect AAPL around its next earnings?");
+
+    expect(seenParams.length).toBeGreaterThan(0);
+    expect(seenParams.every((p) => p["asset"] === "AAPL")).toBe(true);
+  });
+
   it("ANALYZE interprets existing research with citations validated against the workspace", async () => {
     const provider = new FakeModelProvider(new Map([
       ["analysis.model_analysis", JSON.stringify({
