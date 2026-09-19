@@ -154,6 +154,24 @@ describe("six LUI actions (locked set)", () => {
     expect(result.research?.evidence.length).toBeGreaterThan(0);
   });
 
+  it("process-commentary guard: a run-description rationale is replaced by a deterministic findings answer", async () => {
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", responses.researchPlan()],
+      // The decision model wrote process commentary (observed live in production):
+      ["research.adaptive_decision", () =>
+        JSON.stringify({ decision: "COMPLETE", rationale: "Sufficient macroeconomic and market sentiment observations have been gathered to satisfy the research objective." })],
+    ]));
+    scriptDefaults(provider, [{ action: "RESEARCH", description: "research what is affecting BTC", capabilities: ["NEWS_ANALYSIS"], params: { asset: "BTC" } }]);
+    const { lui } = buildLui(provider, registryWith("NEWS_ANALYSIS", "TECHNICAL_ANALYSIS"));
+    const result = await lui.handle("What is affecting BTC right now?");
+
+    expect(result.research).toBeDefined();
+    expect(result.research?.evidence.length).toBeGreaterThan(0);
+    expect(result.response?.answer).not.toMatch(/sufficient .*(gather|collect)/i);
+    // The replacement answer carries actual evidence substance.
+    expect(result.response?.answer).toContain("BTC");
+  });
+
   it("asset backstop tier 2: with no resolved target, an exact ticker in the objective reaches capability params", async () => {
     const seenParams: Record<string, unknown>[] = [];
     const capturingCapability: ProviderAdapter = {

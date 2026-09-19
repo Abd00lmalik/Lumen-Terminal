@@ -1022,8 +1022,18 @@ export class Lui {
     // Deterministic Level-0/1 response from real outcome objects (answer-first, no CoT dump).
     if (research !== undefined && research.evidence.length > 0) {
       const cited = research.evidence.slice(0, 6).map((e) => e.id);
+      // The rationale IS the trader-facing answer. If the decision model wrote process
+      // commentary instead of findings ("sufficient observations have been gathered"),
+      // compose the answer deterministically from the strongest evidence instead: the
+      // substance the user needs is in the observations, not in a description of the run.
+      const isProcessCommentary =
+        /sufficient .*(observation|evidence|data).*(gather|collect|satisf)/i.test(research.finalDecision.rationale) ||
+        /^(the )?research (was |has )?(completed|conducted)/i.test(research.finalDecision.rationale);
+      const answer = isProcessCommentary
+        ? `What the evidence shows: ${research.evidence.slice(0, 3).map((e) => summarize(e.observation, 140)).join("; ")}.`
+        : research.finalDecision.rationale;
       const response: FinalResponse = {
-        answer: research.finalDecision.rationale,
+        answer,
         supportingReasons: research.evidence.slice(0, 4).map((e) => `${e.evidenceClass.toLowerCase()}: ${summarize(e.observation)}`),
         opposingReasons: [],
         confidence: research.evidence.length >= 3 ? "MODERATE" : research.evidence.length >= 1 ? "LOW" : "UNKNOWN",
