@@ -410,6 +410,30 @@ export function createHeuristTechnicalAdapter(transport?: HeuristMeshTransport):
   );
 }
 
+/**
+ * Heurist Yahoo equity_overview — EARNINGS_CALENDAR fallback when the direct Yahoo
+ * calendarEvents path fails. The agent has no dedicated calendar tool; its analyst
+ * section legitimately serves earnings context, and its output is classified by the
+ * normal epistemic rules (estimates stay ESTIMATE-classified, never reported results).
+ */
+export function createHeuristEarningsAdapter(transport?: HeuristMeshTransport): HeuristAgentAdapter {
+  return new HeuristAgentAdapter(
+    ["EARNINGS_CALENDAR"],
+    {
+      agentId: "YahooFinanceAgent",
+      upstreamSource: "yahoo-finance",
+      tool: "equity_overview",
+      subjectParam: "symbols",
+      limitations: [
+        "fallback earnings context via equity_overview (analyst section): no dedicated calendar tool exists, so exact announcement dates may be absent",
+        "analyst/consensus figures are ESTIMATES, never reported results; same upstream (Yahoo) as the direct earnings adapter; not independent corroboration of it",
+      ],
+      freshnessProfile: "equity:quarterly",
+    },
+    transport,
+  );
+}
+
 /** Heurist SEC EDGAR — primary-source company filings (G2-adjacent; filing URLs are the provenance). */
 export function createHeuristSecAdapter(transport?: HeuristMeshTransport): HeuristAgentAdapter {
   return new HeuristAgentAdapter(
@@ -708,6 +732,7 @@ export function registerExtendedHeuristAdapters(registry: import("./capability-r
  * Register all Heurist adapters at low priority (they serve when direct providers cannot). */
 export function registerHeuristAdapters(registry: import("./capability-registry.js").CapabilityRegistry, priority = 300): void {
   registry.register(createHeuristOptionsAdapter(), priority);
+  registry.register(createHeuristEarningsAdapter(), priority);
   registry.register(createHeuristTechnicalAdapter(), priority);
   registry.register(createHeuristSecAdapter(), priority);
   registry.register(createHeuristFredAdapter(), priority);
