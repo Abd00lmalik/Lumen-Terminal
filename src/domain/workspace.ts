@@ -690,7 +690,13 @@ export class Workspace {
   } {
     const researches = this.listResearch();
     const activeResearchTarget = researches[researches.length - 1];
-    const latestJudgment = [...this.listJudgments()].reverse()[0];
+    // CURRENT judgment = the ACTIVE research target's own judgment (scoped, honest).
+    // The previous global-latest rule leaked the PREVIOUS run's verdict into a new run's
+    // panel (observed live: a TSLA research displayed the prior BTC run's Clarity Act
+    // judgment). A run with no judgment yet shows none — never a foreign verdict.
+    const latestJudgment = activeResearchTarget?.currentJudgmentRef !== undefined
+      ? this.judgments.get(activeResearchTarget.currentJudgmentRef)
+      : undefined;
     const activeThesis = this.getActiveThesis();
     const activeFramework = [...this.listSavedArtifacts()].reverse().find((a) => a.type === "framework");
     const latestAssessment = activeThesis !== undefined ? this.latestThesisAssessment(activeThesis.id) : undefined;

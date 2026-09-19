@@ -283,8 +283,12 @@ export async function runFlow(
     allExecutions.push(...executions);
 
     // 3. Adaptive decision with the updated context (flow guidance included).
+    // relevantTo: the decision model must see THIS question's evidence, not the workspace
+    // archive (live TSLA run: the archive's crypto evidence drowned the six fresh TSLA
+    // observations and the model described its context as "exclusively cryptocurrency").
     const context = buildResearchContext(workspace, {
       researchRef,
+      relevantTo: objective,
       executions: allExecutions.map((e) => ({ capability: e.capability, result: e.result })),
     });
     let decision: AdaptiveDecision;
@@ -305,7 +309,7 @@ export async function runFlow(
       finalDecision = { decision: "INSUFFICIENT_EVIDENCE", rationale: "The interpretation model became unavailable before evidence could be gathered; nothing was fabricated. The request can be retried.", nextTasks: [] };
       rounds.push({ round, executions, decision: finalDecision });
       await options.store.save(workspace.toSnapshot()); // preserve partial state (lock §14)
-      return finish(workspace, researchRef, flow, plan, rounds, allExecutions, finalDecision, stoppedBecause, modelFailure, at);
+      return finish(workspace, researchRef, flow, objective, plan, rounds, allExecutions, finalDecision, stoppedBecause, modelFailure, at);
     }
 
     options.onProgress?.(progressEvent("research_round_completed", at(), `research round ${round} completed: ${decision.decision}`, { round, decision: decision.decision }));
@@ -329,8 +333,35 @@ export async function runFlow(
     }
   }
 
+  // 4. Deep-research backstop (engine-owned): INSUFFICIENT_EVIDENCE or a mechanical budget
+  // stop means the direct chain could not answer THIS question. Before concluding, fire the
+  // last-resort tier (Caesar/AskHeurist, then Exa) once with the EXACT objective — same law
+  // as the adaptive loop. Evidence relevance, not provider existence, decides sufficiency.
+  const budgetStopped = stoppedBecause === "TIME_BUDGET_EXHAUSTED" || stoppedBecause === "ROUND_BUDGET_EXHAUSTED";
+  if ((stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE" || budgetStopped) && !allExecutions.some((e) => e.capability === "CROSS_DOMAIN_SYNTHESIS") && options.registry.resolve("CROSS_DOMAIN_SYNTHESIS").length > 0 && (options.deadlineMs === undefined || at().getTime() < options.deadlineMs)) {
+    const deepExecutions = await executeBatch(
+      [{ capability: "CROSS_DOMAIN_SYNTHESIS" }, ...(options.registry.resolve("WEB_SEARCH").length > 0 ? [{ capability: "WEB_SEARCH" }] : [])],
+      rounds.length + 1,
+      researchRef,
+      { ...options, capabilityParams: { ...(options.capabilityParams ?? {}), question: objective } },
+      systemOrigin,
+      at,
+      ingestedSignatures,
+    );
+    allExecutions.push(...deepExecutions);
+    rounds.push({ round: rounds.length + 1, executions: deepExecutions, decision: finalDecision });
+    if (deepExecutions.some((e) => e.evidenceIds.length > 0) && finalDecision.decision === "INSUFFICIENT_EVIDENCE") {
+      finalDecision = {
+        decision: "COMPLETE",
+        rationale: `Direct sources could not cover this question; deep-research agents gathered ${allExecutions.flatMap((e) => e.evidenceIds).length} evidence object(s) against the exact objective. Their outputs are labeled as agent analysis in the evidence below.`,
+        nextTasks: [],
+      };
+      stoppedBecause = "EVIDENCE_SUFFICIENT";
+    }
+  }
+
   await options.store.save(workspace.toSnapshot());
-  return finish(workspace, researchRef, flow, plan, rounds, allExecutions, finalDecision, stoppedBecause, modelFailure, at);
+  return finish(workspace, researchRef, flow, objective, plan, rounds, allExecutions, finalDecision, stoppedBecause, modelFailure, at);
 }
 
 /** Execute a batch of capability calls with bounded concurrency; record ordering honestly. */
@@ -401,6 +432,7 @@ function finish(
   workspace: Workspace,
   researchRef: string,
   flow: FlowObjective,
+  objective: string,
   plan: ProposedResearchPlan,
   rounds: { round: number; executions: readonly FlowExecution[]; decision: AdaptiveDecision }[],
   executions: readonly FlowExecution[],
@@ -439,8 +471,11 @@ function finish(
     finalDecision,
     stoppedBecause,
     ...(modelFailure !== undefined ? { modelFailure } : {}),
+    // Target-scoped synthesis context (zero-dead-end law §4): the final synthesis receives
+    // THIS question's evidence, never the workspace archive of unrelated runs.
     context: buildResearchContext(workspace, {
       researchRef,
+      relevantTo: objective,
       executions: executions.map((e) => ({ capability: e.capability, result: e.result })),
     }),
   };

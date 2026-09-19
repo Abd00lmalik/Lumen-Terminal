@@ -154,8 +154,23 @@ function itemContent(item: unknown): Record<string, unknown> | undefined {
  * Parse a Heurist tool result into observation outputs. Handles the shapes the agents
  * actually return: arrays of objects, {content|text|summary|result} wrappers, plain objects.
  * Every output carries `upstreamSource` for lineage dedup (mandate §10).
+ *
+ * ERROR-PAYLOAD LAW: some agents return HTTP 200 with an embedded failure object — observed
+ * live: Caesar returned {error: "API request failed: 402, message='Payment Required'..."}.
+ * Such payloads are PROVIDER failures, not observations; they previously became evidence
+ * (ev_000616) and even upgraded a dead-end into a false "COMPLETE". Detect them before any
+ * other parsing and surface them as an EMPTY result so the registry records a failed tier.
  */
 export function parseHeuristOutputs(result: unknown, upstreamSource: string, about?: string): ToolOutput[] {
+  // Embedded error objects: {error: "..."} / {errorMessage: ...} / {status: "error", ...}.
+  if (result !== null && typeof result === "object" && !Array.isArray(result)) {
+    const r = result as Record<string, unknown>;
+    const errorText = typeof r.error === "string" ? r.error : typeof r.errorMessage === "string" ? r.errorMessage : undefined;
+    const statusError = r.status === "error" || r.status === "failed";
+    if (errorText !== undefined || statusError) {
+      throw new TransportError("PROVIDER_ERROR", `Heurist agent returned an embedded error: ${(errorText ?? JSON.stringify(r)).slice(0, 200)}`, { retriable: true });
+    }
+  }
   const outputs: ToolOutput[] = [];
   const push = (item: unknown): void => {
     const content = itemContent(item);

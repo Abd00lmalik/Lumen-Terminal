@@ -33,6 +33,8 @@ interface WorkspaceData {
 interface Turn {
   readonly question: string;
   readonly run: ResearchResponseDto;
+  /** True when hydrated from a bare summary (full response not retrievable right now). */
+  readonly degraded?: boolean;
 }
 
 /**
@@ -49,6 +51,7 @@ function researchDtoToTurn(dto: ResearchDto & Partial<ResearchResponseDto>): Tur
     // Bare summary (full response not archived on this instance): render honestly.
     return {
       question,
+      degraded: true,
       run: {
         requestId: dto.ref,
         action: "RESEARCH",
@@ -182,8 +185,19 @@ export function ResearchWorkspacePage() {
     }
     if (historyTurns !== undefined) {
       setRuns((prev) => {
-        const seen = new Set(historyTurns!.map((t) => t.question));
-        return [...historyTurns!, ...prev.filter((t) => !seen.has(t.question))];
+        // MERGE LAW: a degraded history turn (bare summary) never displaces a fuller turn
+        // of the same question already on screen — the live answer a user just received
+        // must survive the post-run refresh even when a stale instance serves the bare
+        // summary. Degraded only fills gaps; fresh full turns always win.
+        const prevByQuestion = new Map(prev.map((t) => [t.question, t]));
+        const seen = new Set<string>();
+        const merged: Turn[] = [];
+        for (const t of historyTurns!) {
+          seen.add(t.question);
+          const existing = prevByQuestion.get(t.question);
+          merged.push(existing !== undefined && t.degraded === true && existing.degraded !== true ? existing : t);
+        }
+        return [...merged, ...prev.filter((t) => !seen.has(t.question))];
       });
     }
     try {

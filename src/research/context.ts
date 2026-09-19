@@ -230,11 +230,22 @@ export function buildResearchContext(
   const contradictions: { supports: readonly string[]; contradicts: readonly string[] }[] = [];
 
   // --- evidence (bucketed, with freshness/provenance preserved) ---
-  // Relevance gate: when `relevantTo` is set, items sharing NO key term with the question
-  // are excluded from the primary context (a one-line count stays in the rendered header
-  // so nothing is silently hidden). Evidence accumulated from unrelated past runs must
-  // not present itself as context for the current question.
+  // Relevance gate (zero-dead-end architecture, two tiers):
+  // 1. RUN-SCOPED (primary): evidence attached to the CURRENT research object is in scope
+  //    by definition — this run ingested it against this question. Lexical filtering here
+  //    over-fired (a "Does my thesis hold?" objective shares no term with the thesis's BTC
+  //    evidence and emptied the context, killing Flow 4 evaluation).
+  // 2. LEXICAL (foreign): evidence from OTHER runs enters only when it shares a key term
+  //    with the current objective. This is the archive-contamination defense: a TSLA run
+  //    must not see 500 stale BTC items as its "available research context" (observed live:
+  //    the decision model described crypto news as its context and concluded insufficiency).
+  // Demoted items are counted in `archiveBackground` (rendered as one provenance line).
   const relevantTerms = relevanceTerms(options.relevantTo);
+  const runEvidenceRefs = new Set<string>(
+    options.researchRef !== undefined
+      ? (workspace.getResearch(options.researchRef)?.evidenceRefs ?? [])
+      : [],
+  );
   const archiveBackground = { count: 0, sampleRefs: [] as string[] };
   for (const e of workspace.listEvidence()) {
     const item: ContextItem = {
@@ -247,7 +258,7 @@ export function buildResearchContext(
       ...(e.proxyBasis !== undefined ? { proxyBasis: e.proxyBasis } : {}),
       ...(e.timestamp !== undefined ? { timestamp: e.timestamp } : {}),
     };
-    if (relevantTerms !== undefined && !isRelevant(evidenceText(e), relevantTerms)) {
+    if (!runEvidenceRefs.has(e.id) && relevantTerms !== undefined && !isRelevant(evidenceText(e), relevantTerms)) {
       archiveBackground.count += 1;
       if (archiveBackground.sampleRefs.length < 5) archiveBackground.sampleRefs.push(e.id);
       continue;

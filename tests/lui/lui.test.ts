@@ -906,6 +906,27 @@ describe("research context (M3 §9); epistemic distinctions preserved", () => {
     expect(rendered).toContain("do not treat the exclusion as evidence of absence");
   });
 
+  it("run-scoped tier: evidence ingested by THIS research stays in scope even when lexically unrelated (Flow 4 thesis law)", async () => {
+    const { buildResearchContext } = await import("../../src/research/context.js");
+    const workspace = new Workspace();
+    const run = workspace.addResearch({ objective: "Does my thesis hold?", question: "Does my thesis hold?", flow: "DOES_MY_THESIS_HOLD" }, system);
+    // Ingested against this research: shares no lexical term with the objective, but THIS
+    // run gathered it deliberately (e.g. thesis criteria demand it). It must stay visible.
+    const evidence = workspace.addEvidence(
+      { observation: "Bitcoin ETF outflows of 450 million dollars", evidenceType: "news", evidenceClass: "OBSERVATION" },
+      system,
+    );
+    workspace.ingestEvidence(evidence, run.id);
+    // Foreign archive evidence (another run's) with no lexical overlap stays excluded.
+    workspace.addEvidence(
+      { observation: "Zcash privacy upgrades stalled in review", evidenceType: "news", evidenceClass: "OBSERVATION" },
+      system,
+    );
+    const ctx = buildResearchContext(workspace, { researchRef: run.id, relevantTo: "Does my thesis hold?" });
+    expect(ctx.items.some((i) => i.text.includes("Bitcoin ETF outflows"))).toBe(true);
+    expect(ctx.items.some((i) => i.text.includes("Zcash"))).toBe(false);
+  });
+
   it("relevance gate keeps nothing out when the question genuinely spans the archive's subjects", async () => {
     const { buildResearchContext } = await import("../../src/research/context.js");
     const workspace = new Workspace();

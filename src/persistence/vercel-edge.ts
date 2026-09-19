@@ -33,8 +33,15 @@ function isAccessMismatch(error: unknown): boolean {
   return /public access on a private store|private access on a public store/i.test(message);
 }
 
+import { mergeSnapshots } from "../domain/merge.js";
+
+/** How long a loaded snapshot may serve reads before a fresh blob GET is required. */
+const LOAD_TTL_MS = 3_000;
+
 export class VercelBlobStore implements WorkspaceStore {
   private cache?: WorkspaceSnapshot;
+  /** When the cache was written (load or save); older than LOAD_TTL_MS = re-fetch. */
+  private cacheAt = 0;
   /** In-process serialization: concurrent saves must not interleave put/copy races. */
   private queue: Promise<void> = Promise.resolve();
   /** Access mode of the connected store; auto-detected on first use (private preferred). */
@@ -55,8 +62,24 @@ export class VercelBlobStore implements WorkspaceStore {
   }
 
   async save(snapshot: WorkspaceSnapshot): Promise<void> {
-    this.cache = snapshot;
-    const body = JSON.stringify(snapshot);
+    // Merge-before-write (multi-instance law): re-read the blob's CURRENT state and union
+    // it with ours before overwriting. A stale warm instance must never erase runs another
+    // instance completed while it was idle. A failed re-read (transient) degrades to a
+    // plain write of our snapshot: our own state is never lost to a read hiccup.
+    let merged = snapshot;
+    try {
+      const remoteRaw = await this.readRaw();
+      if (remoteRaw !== undefined && remoteRaw.trim() !== "") {
+        const remote = JSON.parse(remoteRaw) as WorkspaceSnapshot;
+        // The incoming snapshot IS our workspace graph's state; merge remote under it.
+        merged = mergeSnapshots(snapshot, remote);
+      }
+    } catch {
+      // Unreadable/unparseable remote: proceed with our snapshot (plain overwrite).
+    }
+    this.cache = merged;
+    this.cacheAt = Date.now(); // our own write is by definition current
+    const body = JSON.stringify(merged);
     // Serialize saves; each waits for the previous one to finish. A rejected predecessor
     // is contained so one failed save cannot silently skip every subsequent save.
     this.queue = this.queue.catch(() => {}).then(async () => {
@@ -74,15 +97,23 @@ export class VercelBlobStore implements WorkspaceStore {
   }
 
   async load(): Promise<Workspace | undefined> {
-    if (this.cache !== undefined) return Workspace.fromSnapshot(this.cache);
+    // TTL re-read (cross-instance staleness law): another serverless instance may have
+    // advanced the blob between our requests. Serving our own cache forever used to pin
+    // a stale graph for the instance's whole lifetime — a stale instance then answered
+    // history reads with bare summaries AND overwrote the blob, erasing the other
+    // instance's runs. Within the TTL window the cache serves (cheap, coherent).
+    if (this.cache !== undefined && Date.now() - this.cacheAt < LOAD_TTL_MS) {
+      return Workspace.fromSnapshot(this.cache);
+    }
     const raw = await this.readRaw();
-    if (raw === undefined) return undefined;
+    if (raw === undefined) return this.cache !== undefined ? Workspace.fromSnapshot(this.cache) : undefined;
     try {
       this.cache = JSON.parse(raw) as WorkspaceSnapshot;
+      this.cacheAt = Date.now();
       return Workspace.fromSnapshot(this.cache);
     } catch {
       // A corrupt snapshot is "no workspace yet", not a crash.
-      return undefined;
+      return this.cache !== undefined ? Workspace.fromSnapshot(this.cache) : undefined;
     }
   }
 

@@ -115,7 +115,13 @@ export class ResearchApp {
     return this.lui;
   }
 
-  /** Persist the workspace; a store failure surfaces honestly (never reported as success). */
+  /** Persist the workspace; a store failure surfaces honestly (never reported as success).
+   *  MERGE-BEFORE-WRITE (multi-instance law): our in-memory graph may be stale — another
+   *  serverless instance can have completed runs and advanced the blob since we loaded.
+   *  Overwriting blindly ERASED those runs (observed live: history shrank between reads
+   *  and fresh answers degraded to bare summaries). The store re-reads current state via
+   *  save()'s merge hook; the union wins by per-object updatedAt (last-write-wins per
+   *  object, never per snapshot). */
   private async persist(): Promise<void> {
     try {
       await this.options.store.save(this.ws().toSnapshot());
