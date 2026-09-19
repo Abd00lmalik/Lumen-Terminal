@@ -199,6 +199,8 @@ const INTERPRETER_SYSTEM = [
   "SAVE (promote a validated finding/conclusion/framework/preference into persistent reusable memory).",
   "Rules:",
   "- Compound requests list their sub-actions IN ORDER in compoundActions (primary first).",
+  "- RESEARCH is the default for any question about markets, assets, prices, events, news, macro, or risk ('why did BTC move', 'what is affecting X', 'what are the risks'). These ask about the WORLD, not about stored objects.",
+  "- ANALYZE is ONLY when the trader explicitly references existing results in this workspace ('analyze what you found', 'what does our research say', 'interpret the last run'). A market question is never ANALYZE just because research history exists.",
   "- isExplanationOnly=true when the trader only asks why/how/what-did-you-find about existing research.",
   "- disclosureLevel: 0 answer, 1 why, 2 evidence, 3 research structure, 4 source trail, 5 full history.",
   "- Copy the trader's objective verbatim; never paraphrase it into something stronger or weaker.",
@@ -512,7 +514,7 @@ export class Lui {
           if (step.params["mode"] === "thesis" || step.params["thesis"] !== undefined) {
             await this.dispatchThesisAssessment(step, result);
           } else {
-            await this.dispatchAnalyze(step, result);
+            await this.dispatchAnalyze(step, result, origin, progress, deadlineMs);
           }
           break;
         case "CHALLENGE":
@@ -741,8 +743,41 @@ export class Lui {
     }
   }
 
-  private async dispatchAnalyze(step: ActionPlan["steps"][number], result: LuiResult): Promise<void> {
-    const ctx = this.researchContext(step.params["researchRef"] !== undefined ? { researchRef: step.params["researchRef"] } : {});
+  private async dispatchAnalyze(step: ActionPlan["steps"][number], result: LuiResult, origin?: ProvenanceOrigin, onProgress?: ProgressListener, deadlineMs?: number): Promise<void> {
+    const explicitRef = step.params["researchRef"];
+    // Deterministic re-route law: ANALYZE interprets EXISTING research. When the plan gave
+    // no research ref, the context is the workspace-wide ARCHIVE (possibly all from one
+    // unrelated question); analyzing it cannot answer a market question like "Why did BTC
+    // move recently?" (observed live: the model classified such questions ANALYZE and the
+    // archived NVDA evidence was presented as the answer). When the question is NOT about
+    // the archived material, re-route to a fresh RESEARCH with the same objective.
+    if (explicitRef === undefined) {
+      const objective = step.params["objective"] ?? step.description;
+      const archive = this.researchContext();
+      // References to the stored material: explicit pronouns/possessives/demonstratives,
+      // "research/findings/results/evidence" as the object, or a subject overlap with the
+      // most recent run's question. A market question about the WORLD matches none of these.
+      const referencesStoredMaterial =
+        /\b(it|that|this|those|these|our|what we found|the findings|the results|the evidence|the research|current research|existing research|our research|our findings)\b/i.test(objective) ||
+        (archive.currentResearchQuestion !== undefined &&
+          (objective.toLowerCase().includes(archive.currentResearchQuestion.toLowerCase().slice(0, 24)) ||
+            archive.currentResearchQuestion.toLowerCase().includes(objective.toLowerCase().slice(0, 24))));
+      const aboutArchive = archive.currentResearchQuestion !== undefined && referencesStoredMaterial;
+      if (!aboutArchive) {
+        onProgress?.(progressEvent("step_started", new Date(), "no existing research answers this question; running a fresh investigation", { action: "RESEARCH" }));
+        const research = await this.dispatchResearch(
+          { ...step, action: "RESEARCH", params: { ...step.params, objective } },
+          origin ?? { kind: "agent", detail: "ANALYZE re-route: archived context does not answer this question" },
+          onProgress,
+          deadlineMs,
+          result.target.asset,
+        );
+        result.research = research.outcome;
+        if (research.modelFailure !== undefined) result.modelFailure = research.modelFailure;
+        return;
+      }
+    }
+    const ctx = this.researchContext(explicitRef !== undefined ? { researchRef: explicitRef } : {});
     try {
       const res = await this.options.provider.structured<string>({
         schemaName: "analysis.model_analysis",

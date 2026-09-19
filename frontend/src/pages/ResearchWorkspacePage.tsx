@@ -9,7 +9,7 @@
  *   recent evidence). Empty/failed/partial states render the backend's own state.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "../components/AppShell.js";
 import { BackendDownNote } from "../components/BackendDownNote.js";
 import {
@@ -102,6 +102,7 @@ const PANEL_TITLES: Record<string, string> = {
 export function ResearchWorkspacePage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const params = useParams<{ ref?: string }>();
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [runs, setRuns] = useState<readonly Turn[]>([]);
@@ -251,6 +252,35 @@ export function ResearchWorkspacePage() {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
+  // A direct link to a specific run (Research history click): fetch THAT run and show it
+  // in the thread. Every run hydrates from its own persisted object, so clicking a BTC
+  // history entry can never render an NVDA run. Unknown/deleted refs fall through to the
+  // normal workspace view with an honest inline note.
+  const [linkedNotFound, setLinkedNotFound] = useState(false);
+  useEffect(() => {
+    const ref = params.ref;
+    if (ref === undefined || ref.length === 0) {
+      setLinkedNotFound(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const full = await getResearch(ref);
+        if (cancelled) return;
+        const turn = researchDtoToTurn(full);
+        if (turn === undefined) return;
+        setLinkedNotFound(false);
+        setRuns((prev) => (prev.some((t) => t.run.requestId === ref) ? prev : [...prev, turn]));
+      } catch {
+        if (!cancelled) setLinkedNotFound(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [params.ref]);
+
   // AUTO-RECOVERY: while the banner is up, a bounded background retry keeps trying to load
   // workspace state; the moment one succeeds the banner clears itself (a user should never
   // have to know that a cold serverless instance blipped). Backs off 5s, 10s, 20s, then 30s.
@@ -389,6 +419,11 @@ export function ResearchWorkspacePage() {
         </Panel>
       )}
 
+      {linkedNotFound && (
+        <Panel kicker="history" title="That research entry is not available">
+          <div className="panel-body" style={{ paddingTop: 6 }}>The linked research run could not be loaded (it may be too old for this workspace store). Ask a new question below, or pick another entry from Research history.</div>
+        </Panel>
+      )}
       {runs.length === 0 && !stream.running && ws.loadError === undefined && (
         <Empty title="No research in this workspace yet" hint="Type a natural-language question above; the agent plans and investigates." />
       )}

@@ -59,6 +59,15 @@ export interface ContextLimitation {
 export interface ResearchContext {
   readonly researchRef?: string;
   readonly objective?: string;
+  /** Which run the context is anchored to (the archive fallback when unscoped). */
+  readonly currentResearchRef?: string;
+  readonly currentResearchQuestion?: string;
+  /**
+   * What the items represent: a single research run (researchRef given) or the
+   * workspace-wide archive of ALL past runs (no ref; may mix unrelated questions).
+   * Analysis over the archive must say so, never present it as current research.
+   */
+  readonly scope?: "single_research" | "workspace_archive";
   /** Evidence, epistemically bucketed; the model receives classes, not a "facts" list. */
   readonly items: readonly ContextItem[];
   readonly claims: readonly { ref: string; statement: string; status: string }[];
@@ -272,9 +281,16 @@ export function buildResearchContext(
     .map((t) => ({ ref: t.id, statement: t.statement, status: t.status, active: t.id === activeId }));
 
   const research = researchRef !== undefined ? workspace.getResearch(researchRef) : undefined;
+  // Provenance of the context itself: without a researchRef the items below are the
+  // workspace-wide accumulated archive (potentially from UNRELATED earlier runs), not a
+  // coherent current investigation. The renderer states this explicitly so an ANALYZE
+  // step can never present archived evidence from another question as "current research".
+  const currentResearch = research ?? [...workspace.listResearch()].reverse()[0];
   return {
     ...(researchRef !== undefined ? { researchRef } : {}),
-    ...(research !== undefined ? { objective: research.objective } : {}),
+    ...(currentResearch !== undefined ? { objective: currentResearch.objective } : {}),
+    ...(currentResearch !== undefined ? { currentResearchRef: currentResearch.id, currentResearchQuestion: currentResearch.question } : {}),
+    ...(researchRef === undefined ? { scope: "workspace_archive" as const } : { scope: "single_research" as const }),
     items,
     claims,
     hypotheses,
@@ -293,6 +309,13 @@ export function buildResearchContext(
  */
 export function renderResearchContext(ctx: ResearchContext): string {
   const lines: string[] = [];
+  if (ctx.scope === "workspace_archive") {
+    lines.push(
+      `CONTEXT SCOPE: workspace archive. The objects below were accumulated across ALL past research runs and may relate to DIFFERENT questions (most recent run: ${ctx.currentResearchQuestion ?? "unknown"}). They are background context, NOT a current investigation of the trader's new question.`,
+    );
+  } else if (ctx.researchRef !== undefined) {
+    lines.push(`CONTEXT SCOPE: research ${ctx.researchRef}.`);
+  }
   if (ctx.objective !== undefined) lines.push(`RESEARCH OBJECTIVE: ${ctx.objective}`);
 
   const byKind = new Map<string, ContextItem[]>();

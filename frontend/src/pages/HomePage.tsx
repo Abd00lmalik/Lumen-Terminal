@@ -149,7 +149,7 @@ export function HomePage() {
             {active.map((r) => (
               <button
                 className="row" style={{ width: "100%", textAlign: "left", background: "none", border: "none", borderTop: "1px solid var(--line)", color: "inherit", cursor: "pointer" }}
-                key={r.ref} onClick={() => navigate("/research")}
+                key={r.ref} onClick={() => navigate(`/research/${encodeURIComponent(r.ref)}`)}
               >
                 <div style={{ minWidth: 0 }}>
                   <div className="row-title">{r.title}</div>
@@ -167,7 +167,7 @@ export function HomePage() {
           {recent.map((r) => (
             <button
               className="row" style={{ width: "100%", textAlign: "left", background: "none", border: "none", borderTop: "1px solid var(--line)", color: "inherit", cursor: "pointer" }}
-              key={r.ref} onClick={() => navigate("/research")}
+              key={r.ref} onClick={() => navigate(`/research/${encodeURIComponent(r.ref)}`)}
             >
               <div style={{ minWidth: 0 }}>
                 <div className="row-title">{r.title}</div>

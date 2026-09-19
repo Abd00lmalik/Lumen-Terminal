@@ -235,6 +235,53 @@ describe("six LUI actions (locked set)", () => {
     expect(result.analysis?.citedObjectRefs).not.toContain("ev_999999");
   });
 
+  it("ANALYZE about a market question with no matching research re-routes to a fresh RESEARCH (archived context never answers a new question)", async () => {
+    // Workspace holds ONLY an unrelated archived NVDA-style run. The model classified
+    // the BTC market question as ANALYZE (observed live in production); the deterministic
+    // re-route must turn it into a fresh investigation instead of answering from the
+    // unrelated archive.
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", responses.researchPlan()],
+      ["research.adaptive_decision", responses.adaptiveDecision("COMPLETE")],
+    ]));
+    scriptDefaults(provider, [{ action: "ANALYZE", description: "why did BTC move recently", capabilities: [], params: {} }]);
+
+    const registry = registryWith("NEWS_ANALYSIS");
+    const workspace = new Workspace();
+    workspace.addResearch({ objective: "NVDA earnings catalysts", question: "Gather NVDA earnings date and catalysts", flow: "WHAT_COULD_AFFECT_IT" }, trader);
+    const lui = new Lui({ provider, workspace, store: newStore(), registry, now: () => new Date() });
+    const result = await lui.handle("Why did BTC move recently?");
+
+    // The re-route produced a REAL investigation, not an analysis of unrelated evidence.
+    expect(result.research).toBeDefined();
+    expect(result.research?.executions.length).toBeGreaterThan(0);
+    expect(result.analysis).toBeUndefined();
+  });
+
+  it("ANALYZE that references the archived run's subject still analyzes (no spurious re-research)", async () => {
+    const provider = new FakeModelProvider(new Map([
+      ["analysis.model_analysis", JSON.stringify({
+        findings: ["archived finding"],
+        conclusion: "archive analyzed",
+        supportingReasons: ["one observation"],
+        opposingReasons: [],
+        uncertainty: [],
+        whatWouldChange: [],
+        citedObjectRefs: [],
+      })],
+    ]));
+    scriptDefaults(provider, [{ action: "ANALYZE", description: "what does our research say about NVDA earnings catalysts", capabilities: [], params: {} }]);
+
+    const workspace = new Workspace();
+    workspace.addResearch({ objective: "NVDA earnings catalysts", question: "Gather NVDA earnings date and catalysts", flow: "WHAT_COULD_AFFECT_IT" }, trader);
+    const lui = new Lui({ provider, workspace, store: newStore(), registry: registryWith(), now: () => new Date() });
+    const result = await lui.handle("What does our research say about NVDA earnings catalysts?");
+
+    // Explicit reference to the archived material: analysis is the correct action.
+    expect(result.analysis).toBeDefined();
+    expect(result.research).toBeUndefined();
+  });
+
   it("CHALLENGE runs falsification-oriented analysis (not generic criticism)", async () => {
     const provider = new FakeModelProvider(new Map([
       ["analysis.challenge", JSON.stringify({
