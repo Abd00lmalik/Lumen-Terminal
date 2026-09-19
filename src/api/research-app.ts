@@ -21,7 +21,7 @@ import { Workspace, type WorkspaceSnapshot } from "../domain/workspace.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
 import type { ProgressListener } from "../research/progress.js";
 import {
-  evidenceToDTO, judgmentToDTO, researchToDTO, continuitySnapshotToDTO,
+  evidenceToDTO, evidenceSummaryDTO, judgmentToDTO, researchToDTO, continuitySnapshotToDTO,
   thesisToDTO, thesisAssessmentToDTO, artifactToDTO, memoryToDTO, monitorToDTO,
   toHistoricalAnalysisDTO, uiText,
   type ResearchResponseDTO, type AnswerDTO, type EvidenceDTO, type JudgmentDTO,
@@ -307,8 +307,9 @@ export class ResearchApp {
     return researchToDTO(r);
   }
 
+  /** List view: bounded count (route applies the window) + truncated observations. */
   listEvidence() {
-    return this.ws().listEvidence().map(evidenceToDTO);
+    return this.ws().listEvidence().map(evidenceSummaryDTO);
   }
 
   getEvidence(ref: string) {

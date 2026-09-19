@@ -23,6 +23,9 @@ import type { Provenance, ProvenanceOrigin } from "../domain/provenance.js";
 // Shared primitives
 // ---------------------------------------------------------------------------
 
+/** Observation chars kept in list responses before truncation (full text via /:ref). */
+const SUMMARY_OBSERVATION_CHARS = 400;
+
 /** Epistemic evidence class; exposed verbatim so the UI can badge without re-deriving. */
 export type EvidenceClassDTO = EvidenceClass; // RAW_DATA | OBSERVATION | DERIVED_OBSERVATION | INTERPRETATION | PROXY_EVIDENCE | SPECULATION
 
@@ -91,6 +94,20 @@ export function evidenceToDTO(e: Evidence): EvidenceDTO {
     supports: idRefs(e.supports),
     contradicts: idRefs(e.contradicts),
   };
+}
+
+/**
+ * List-view summary: the full observation (which can embed an entire tool-result blob,
+ * tens of KB per item) is truncated for list responses; the complete observation is
+ * always available via GET /api/evidence/:ref (which uses `evidenceToDTO`). This keeps
+ * list payloads bounded regardless of archive size — the unbounded variant reached
+ * 1.28 MB in production and degraded every client load.
+ */
+export function evidenceSummaryDTO(e: Evidence): EvidenceDTO {
+  const full = evidenceToDTO(e);
+  return full.observation.length <= SUMMARY_OBSERVATION_CHARS
+    ? full
+    : { ...full, observation: full.observation.slice(0, SUMMARY_OBSERVATION_CHARS) + " …[truncated; full observation via /api/evidence/" + e.id + "]" };
 }
 
 export interface ClaimDTO {
