@@ -81,19 +81,33 @@ describe("GroqProvider", () => {
 
   it("posts an OpenAI-compatible chat completion with json_object mode and the configured model", async () => {
     const { fetch, bodies } = groqFetch(200, okChat('{"answer":"hello"}'));
-    const provider = new GroqProvider({ env: { GROQ_API_KEY: "gsk_test", GROQ_MODEL: "llama-3.3-70b-versatile" }, fetchImpl: fetch });
+    // GROQ_MODEL is the ONLY place a model id may be pinned per-deployment; the test pins
+    // an explicit id to verify the override path (the DEFAULT moved to openai/gpt-oss-120b
+    // after Groq decommissioned llama-3.3-70b-versatile on 2026-08-16, VERIFIED LIVE).
+    const provider = new GroqProvider({ env: { GROQ_API_KEY: "gsk_test", GROQ_MODEL: "openai/gpt-oss-120b" }, fetchImpl: fetch });
 
     const response = await provider.structured<{ answer: string }>(REQUEST);
 
-    expect(response.modelId).toBe("llama-3.3-70b-versatile");
+    expect(response.modelId).toBe("openai/gpt-oss-120b");
     expect(response.raw).toBe('{"answer":"hello"}');
     expect(response.usage?.totalTokens).toBe(15);
     const body = JSON.parse(bodies[0]!);
-    expect(body.model).toBe("llama-3.3-70b-versatile");
+    expect(body.model).toBe("openai/gpt-oss-120b");
     expect(body.response_format).toEqual({ type: "json_object" });
     expect(body.messages[0]!.role).toBe("system");
     expect(body.messages[0]!.content).toContain("test.schema");
     expect(body.temperature).toBe(0.2);
+  });
+
+  it("default model is Groq's current recommended replacement (catalog-churn law: a decommissioned default 404s every call)", async () => {
+    const { fetch, bodies } = groqFetch(200, okChat('{"answer":"hello"}'));
+    const provider = new GroqProvider({ env: { GROQ_API_KEY: "gsk_test" }, fetchImpl: fetch });
+    await provider.structured(REQUEST);
+    const body = JSON.parse(bodies[0]!);
+    // llama-3.3-70b-versatile died 2026-08-16; the default must never regress to a
+    // decommissioned id (every interpretation would fail whenever Gemini rate-limits).
+    expect(body.model).not.toContain("llama-3.3-70b");
+    expect(body.model).toBe("openai/gpt-oss-120b");
   });
 
   it("maps statuses to typed failures: 401 AUTH (permanent), 429 RATE_LIMIT (retriable), 404 INVALID_OUTPUT, 5xx PROVIDER_UNAVAILABLE", async () => {

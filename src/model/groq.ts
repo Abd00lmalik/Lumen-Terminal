@@ -25,13 +25,19 @@ import {
 } from "./provider.js";
 
 /**
- * Default model: llama-3.3-70b-versatile (Groq free tier, structured JSON capable,
+ * Default model: openai/gpt-oss-120b (Groq free tier, structured JSON capable,
  * commercial use allowed). Override with GROQ_MODEL; this is the ONLY place a Groq
  * model id appears. Catalog churn is a real risk (providers prune free catalogs
  * without notice) — the model-fallback facade treats model-404 as a typed failure
  * and GROQ_MODEL lets operators repoint without code changes.
+ *
+ * HISTORY (catalog churn is real, VERIFIED LIVE 2026-09-19): llama-3.3-70b-versatile
+ * was Groq's recommended structured-JSON model when integrated; Groq decommissioned it
+ * on 2026-08-16 (deprecations page) recommending openai/gpt-oss-120b — every request
+ * 404'd and, when Gemini simultaneously rate-limits, interpretation died. The default
+ * now tracks Groq's recommended production replacement.
  */
-const DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile";
+const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
 const CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
 const DEFAULT_TIMEOUT_MS = 60_000;
 

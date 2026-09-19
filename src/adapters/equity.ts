@@ -122,39 +122,88 @@ function candleOutputs(candles: Candle[], about: string, limit: number): ToolOut
 }
 
 /**
- * One-window OHLCV summary (DERIVED_METRIC): first open -> last close with the window's
- * high/low and cumulative return. This gives the synthesis model a directly quotable
- * week-over-week fact — the live TSLA run received five daily candles yet the answer
- * claimed "lacks historical price data from the previous week" because no output stated
- * the window-level comparison. Derived from the SAME candles; no extra provider call.
+ * Window OHLCV summaries over the retrieved candles (DERIVED facts, computed locally over
+ * the SAME candles just retrieved; no extra provider call):
+ * - latestWindow: the most recent calendar week's trading sessions (Mon..Fri containing the
+ *   last candle), quoted as open -> close with high/low and window return.
+ * - previousWindow: the calendar week before it, same fields, so a "compare with last week"
+ *   question has an EXPLICIT prior-period baseline (live TSLA run: the synthesis received a
+ *   5-session window and still claimed "lacks historical price data from the previous week"
+ *   because the trailing window WAS the week and no prior-week baseline existed).
+ * - weekOverWeek: the direct comparison output (close change, pct change) when both windows
+ *   exist. All numbers derive only from the candles; nothing is estimated.
  */
-function windowSummaryOutput(candles: Candle[], about: string): ToolOutput | undefined {
-  if (candles.length < 2) return undefined;
-  const first = candles[0]!;
-  const last = candles[candles.length - 1]!;
-  const high = Math.max(...candles.map((c) => c.high));
-  const low = Math.min(...candles.map((c) => c.low));
-  const changePct = first.open !== 0 ? ((last.close - first.open) / first.open) * 100 : undefined;
-  return {
-    // QUANTITATIVE_OBSERVATION with an explicit derivation basis: computed locally over the
-    // SAME candles just retrieved (no second call), so it stays a transparent derived fact.
-    outputClass: "QUANTITATIVE_OBSERVATION" as const,
-    content: {
-      symbol: about,
-      metric: "window_ohlcv_summary",
-      windowStart: first.ts,
-      windowEnd: last.ts,
-      sessions: candles.length,
-      windowOpen: first.open,
-      windowClose: last.close,
-      windowHigh: high,
-      windowLow: low,
-      ...(changePct !== undefined ? { windowChangePct: Number(changePct.toFixed(2)) } : {}),
-      basis: `derived from ${candles.length} daily candles (${first.ts} to ${last.ts})`,
-    },
-    about,
-    timeframe: "1d",
+function windowSummaryOutputs(candles: Candle[], about: string): ToolOutput[] {
+  if (candles.length < 2) return [];
+
+  // Group candle dates into calendar weeks (Monday-based). "last" may be a partial week.
+  const weekOf = (dateIso: string): string => {
+    const d = new Date(`${dateIso}T00:00:00Z`);
+    const day = (d.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+    d.setUTCDate(d.getUTCDate() - day);
+    return d.toISOString().slice(0, 10);
   };
+  const byWeek = new Map<string, Candle[]>();
+  for (const c of candles) {
+    const wk = weekOf(c.ts);
+    const list = byWeek.get(wk);
+    if (list === undefined) byWeek.set(wk, [c]);
+    else list.push(c);
+  }
+  const weeks = [...byWeek.keys()].sort();
+  if (weeks.length === 0) return [];
+
+  const summarizeWindow = (label: "latestWeek" | "previousWeek", list: Candle[]): ToolOutput => {
+    const first = list[0]!;
+    const end = list[list.length - 1]!;
+    const high = Math.max(...list.map((c) => c.high));
+    const low = Math.min(...list.map((c) => c.low));
+    const changePct = first.open !== 0 ? ((end.close - first.open) / first.open) * 100 : undefined;
+    return {
+      // QUANTITATIVE_OBSERVATION with an explicit derivation basis: computed locally over
+      // the retrieved candles, so it stays a transparent derived fact, never invented.
+      outputClass: "QUANTITATIVE_OBSERVATION" as const,
+      content: {
+        symbol: about,
+        metric: `ohlcv_${label}`,
+        weekStart: first.ts,
+        weekEnd: end.ts,
+        sessions: list.length,
+        weekOpen: first.open,
+        weekClose: end.close,
+        weekHigh: high,
+        weekLow: low,
+        ...(changePct !== undefined ? { weekChangePct: Number(changePct.toFixed(2)) } : {}),
+        basis: `derived from ${list.length} daily candles (${first.ts} to ${end.ts})`,
+      },
+      about,
+      timeframe: "1d",
+    };
+  };
+
+  const outputs: ToolOutput[] = [summarizeWindow("latestWeek", byWeek.get(weeks[weeks.length - 1]!)!)];
+  if (weeks.length >= 2) {
+    const prev = byWeek.get(weeks[weeks.length - 2]!)!;
+    outputs.push(summarizeWindow("previousWeek", prev));
+    const latest = byWeek.get(weeks[weeks.length - 1]!)!;
+    const prevClose = prev[prev.length - 1]!.close;
+    const latestClose = latest[latest.length - 1]!.close;
+    const wowPct = prevClose !== 0 ? ((latestClose - prevClose) / prevClose) * 100 : undefined;
+    outputs.push({
+      outputClass: "QUANTITATIVE_OBSERVATION" as const,
+      content: {
+        symbol: about,
+        metric: "ohlcv_weekOverWeek",
+        previousWeekClose: prevClose,
+        latestWeekClose: latestClose,
+        ...(wowPct !== undefined ? { weekOverWeekChangePct: Number(wowPct.toFixed(2)) } : {}),
+        basis: `latest week close (${latestClose}) vs previous week close (${prevClose}); derived from retrieved daily candles`,
+      },
+      about,
+      timeframe: "1d",
+    });
+  }
+  return outputs;
 }
 
 /**
@@ -247,7 +296,9 @@ export class EquityMarketDataAdapter implements ProviderAdapter {
         limitations: [],
       };
     }
-    const range = typeof params.range === "string" ? params.range : "5d";
+    // 1mo default (was 5d): week-over-week questions need TWO calendar weeks of sessions;
+    // 5d yielded exactly one and the synthesis honestly reported the missing baseline.
+    const range = typeof params.range === "string" ? params.range : "1mo";
     const interval = typeof params.interval === "string" ? params.interval : "1d";
     const limit = typeof params.limit === "number" ? params.limit : 5;
 
@@ -276,9 +327,9 @@ export class EquityMarketDataAdapter implements ProviderAdapter {
           });
         }
         outputs.push(...candleOutputs(candles, symbol, limit));
-        // Window-level summary so synthesis can quote the period comparison directly.
-        const summary = windowSummaryOutput(candles.slice(-limit), symbol);
-        if (summary !== undefined) outputs.push(summary);
+        // Week-level summaries + week-over-week comparison so synthesis can quote the
+        // period comparison directly (limit bounds the verbose candle list only).
+        outputs.push(...windowSummaryOutputs(candles, symbol));
         return {
           tool: this.providerId,
           capability,
@@ -339,7 +390,7 @@ export class EquityMarketDataAdapter implements ProviderAdapter {
           about: symbol,
         },
         ...candleOutputs(candles, symbol, limit),
-        ...(() => { const s = windowSummaryOutput(candles.slice(-limit), symbol); return s !== undefined ? [s] : []; })(),
+        ...windowSummaryOutputs(candles, symbol),
       ],
       completeness: "COMPLETE",
       freshness: "CURRENT",

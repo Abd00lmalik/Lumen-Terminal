@@ -144,21 +144,63 @@ describe("equity capabilities through the generic registry", () => {
     expect(rest.calls.some((c) => c.url.includes("ZZTEST"))).toBe(true);
   });
 
-  it("EQUITY_MARKET_DATA: window OHLCV summary accompanies the candles (week-over-week quotable)", async () => {
-    // Live TSLA run: synthesis received 5 daily candles yet claimed "lacks historical price
-    // data from the previous week" because no output stated the window-level comparison.
+  it("EQUITY_MARKET_DATA: week summaries + week-over-week comparison accompany the candles", async () => {
+    // Live TSLA run: the synthesis received a 5-session trailing window yet claimed "lacks
+    // historical price data from the previous week" because no prior-week baseline existed.
+    // The adapter must derive latestWeek + previousWeek + the direct WoW comparison from the
+    // retrieved candles when the range spans two weeks.
     const registry = new CapabilityRegistry();
     registry.register(new EquityMarketDataAdapter(fakeRest(yahooHosts())));
     const result = await registry.execute("EQUITY_MARKET_DATA", { symbol: "TSLA", limit: 5 }, origin);
     expect(result.failure.type).toBe("NONE");
-    const summary = result.normalizedOutput.find((o) => (o.content as { metric?: string }).metric === "window_ohlcv_summary");
-    expect(summary).toBeDefined();
-    const content = summary!.content as { windowClose: number; windowOpen: number; windowChangePct: number; sessions: number; basis: string };
-    expect(content.sessions).toBe(2); // fixture provides 2 candles; the law, not the count, is pinned
-    expect(typeof content.windowOpen).toBe("number");
-    expect(typeof content.windowClose).toBe("number");
-    expect(typeof content.windowChangePct).toBe("number");
-    expect(content.basis).toContain("2 daily candles");
+    const metrics = result.normalizedOutput.map((o) => (o.content as { metric?: string }).metric);
+    const latest = result.normalizedOutput.find((o) => (o.content as { metric?: string }).metric === "ohlcv_latestWeek");
+    expect(latest).toBeDefined();
+    const lc = latest!.content as { weekOpen: number; weekClose: number; weekChangePct: number; sessions: number; basis: string };
+    expect(typeof lc.weekOpen).toBe("number");
+    expect(typeof lc.weekClose).toBe("number");
+    expect(typeof lc.weekChangePct).toBe("number");
+    // Single-week fixture (2 candles, one calendar week): latestWeek present; previousWeek/
+    // WoW appear only when the retrieved range truly spans two weeks (never fabricated).
+    expect(metrics).not.toContain("ohlcv_weekOverWeek");
+
+    // Two-week fixture: both windows + the WoW comparison must appear.
+    const chartTwoWeeks = {
+      chart: {
+        result: [{
+          meta: { symbol: "TSLA", regularMarketPrice: 364.27, chartPreviousClose: 330, currency: "USD", fullExchangeName: "NasdaqGS", regularMarketTime: 1789516800, shortName: "Tesla, Inc." },
+          // Two distinct calendar weeks in Sep 2026: Tue Sep 8, Wed Sep 9 (week 1) and
+          // Mon Sep 14, Tue Sep 15, Wed Sep 16 (week 2, the latest).
+          timestamp: [1788825600, 1788912000, 1789344000, 1789430400, 1789516800],
+          indicators: { quote: [
+            { open: [330.1, 332.0, 359.78, 358.75, 369.0], high: [331.0, 334.0, 367.73, 365.1, 370.9], low: [325.4, 328.0, 357.04, 354.85, 360.75], close: [330.5, 333.2, 366.2, 364.27, 364.27], volume: [41000000, 36632800, 51000000, 52000000, 51819200] },
+          ] },
+        }],
+      },
+    };
+    const rest2 = fakeRest({ "v8/finance/chart": () => chartTwoWeeks });
+    const registry2 = new CapabilityRegistry();
+    registry2.register(new EquityMarketDataAdapter(rest2));
+    const result2 = await registry2.execute("EQUITY_MARKET_DATA", { symbol: "TSLA", limit: 5 }, origin);
+    const metrics2 = result2.normalizedOutput.map((o) => (o.content as { metric?: string }).metric);
+    expect(metrics2).toContain("ohlcv_latestWeek");
+    expect(metrics2).toContain("ohlcv_previousWeek");
+    const wow = result2.normalizedOutput.find((o) => (o.content as { metric?: string }).metric === "ohlcv_weekOverWeek");
+    expect(wow).toBeDefined();
+    const wc = wow!.content as { previousWeekClose: number; latestWeekClose: number; weekOverWeekChangePct: number };
+    expect(wc.previousWeekClose).toBeCloseTo(333.2, 1);
+    expect(wc.latestWeekClose).toBeCloseTo(364.27, 1);
+    expect(typeof wc.weekOverWeekChangePct).toBe("number");
+  });
+
+  it("EQUITY_MARKET_DATA defaults to a 1mo range so week-over-week windows exist", async () => {
+    // 5d yielded exactly ONE calendar week; "compare with last week" had no baseline.
+    const registry = new CapabilityRegistry();
+    const rest = fakeRest(yahooHosts());
+    registry.register(new EquityMarketDataAdapter(rest));
+    await registry.execute("EQUITY_MARKET_DATA", { symbol: "TSLA" }, origin);
+    const chartCall = rest.calls.find((c) => c.url.includes("v8/finance/chart"));
+    expect((chartCall!.options.params as { range: string }).range).toBe("1mo");
   });
 
   it("EQUITY_FUNDAMENTALS: every field carries kind; estimates never presented as actuals", async () => {
