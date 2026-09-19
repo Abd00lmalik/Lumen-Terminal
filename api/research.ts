@@ -208,6 +208,14 @@ function detectTransport(): Promise<{ mode: Transport; server?: http.Server }> {
  * the access: a throwing getter means the REQUEST is malformed → typed 400.
  */
 function readRequestBody(req: VercelRequest): { ok: true; body: unknown } | { ok: false } {
+  // Bodyless methods must never touch the body getter: with no content, a declared
+  // content-type can only fail, and touching `req.body` here would misread a valid,
+  // bodyless GET/HEAD as a malformed request (the platform itself rejects such requests
+  // before this handler even runs — the frontend never declares CT without a body).
+  const method = (req.method ?? "GET").toUpperCase();
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
+    return { ok: true, body: undefined };
+  }
   try {
     return { ok: true, body: (req as { body?: unknown }).body };
   } catch {

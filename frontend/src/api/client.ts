@@ -93,7 +93,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     try {
       return await fetch(`${BASE_URL}${path}`, {
         ...init,
-        headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+        headers: {
+          // Content-Type ONLY when a body is actually sent: some platforms reject a
+          // bodyless request that declares a JSON content type (observed as an opaque,
+          // bodyless HTTP 400 from the hosting runtime that no typed handler can catch),
+          // which silently broke every state read in real browsers while curl-style
+          // probes (no CT header) succeeded. GET/HEAD carry no body.
+          ...(init?.body !== undefined ? { "Content-Type": "application/json" } : {}),
+          ...(init?.headers ?? {}),
+        },
       });
     } catch (cause) {
       throw new NetworkError(cause);

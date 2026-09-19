@@ -92,4 +92,19 @@ describe("Vercel handler delegates to the real Fastify app", () => {
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("INVALID_REQUEST");
   });
+
+  it("bodyless GET declaring Content-Type (the historical browser-400 shape) still serves state", async () => {
+    // Root cause of the production "Workspace state could not load" banner: the client
+    // declared CT on every request; bodyless GETs with CT were rejected upstream with an
+    // opaque empty 400 before any handler ran. Both halves are pinned: the client no
+    // longer sends CT without a body (frontend/tests/client-transport.test.ts), and the
+    // bridge never treats a bodyless method as a body-parse failure.
+    process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "test-not-a-real-key";
+    await startServer();
+    const res = await fetch(`${baseUrl}/api/workspace`, {
+      method: "GET",
+      headers: { "content-type": "application/json" },
+    });
+    expect(res.status).toBe(200);
+  });
 });

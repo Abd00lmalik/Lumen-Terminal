@@ -32,7 +32,9 @@ describe("canonicalCapability", () => {
     expect(canonicalCapability("SEARCH")).toBe("WEB_SEARCH");
     expect(canonicalCapability("FUNDING_RATE")).toBe("DERIVATIVES_ANALYSIS");
     expect(canonicalCapability("DEFI")).toBe("DEFI_ANALYSIS");
-    expect(canonicalCapability("EARNINGS_ESTIMATES")).toBe("EQUITY_EARNINGS");
+    expect(canonicalCapability("EARNINGS_ESTIMATES")).toBe("EARNINGS_CALENDAR");
+    // the old alias collapses onto the canonical name (one earnings fetch, never two)
+    expect(canonicalCapability("EQUITY_EARNINGS")).toBe("EARNINGS_CALENDAR");
     expect(canonicalCapability("ON_CHAIN")).toBe("ONCHAIN_ANALYSIS");
     expect(canonicalCapability("LOCAL_MEMORY")).toBe("LOCAL_KNOWLEDGE_RETRIEVAL");
   });

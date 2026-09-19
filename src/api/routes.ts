@@ -135,7 +135,18 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
   app.get("/api/research/:ref", {
     handler: withErrors(async (req) => researchApp.getResearch((req.params as { ref: string }).ref)),
   });
-  app.get("/api/evidence", { handler: withErrors(async () => researchApp.listEvidence()) });
+  app.get("/api/evidence", {
+    handler: withErrors(async (req) => {
+      // Bounded window by default: the evidence archive grows for the life of the
+      // workspace and an unbounded list response eventually breaks every client that
+      // reads it (observed at 1.28 MB in production). The default window is far beyond
+      // a page's render capacity; explicit `?limit=` overrides for full retrieval.
+      const rawLimit = (req.query as { limit?: string } | undefined)?.limit;
+      const parsed = rawLimit === undefined ? Number.NaN : Number(rawLimit);
+      const limit = Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, 2000) : 300;
+      return researchApp.listEvidence().slice(-limit).reverse(); // newest first
+    }),
+  });
   app.get("/api/evidence/:ref", {
     handler: withErrors(async (req) => researchApp.getEvidence((req.params as { ref: string }).ref)),
   });

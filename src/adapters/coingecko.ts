@@ -46,6 +46,12 @@ const COMMON_COIN_IDS: ReadonlyMap<string, string> = new Map([
   ["UNI", "uniswap"],
   ["AAVE", "aave"],
   ["PEPE", "pepe"],
+  // Full asset names (the LUI may resolve "zcash" rather than the ticker):
+  ["ZCASH", "zcash"], ["MONERO", "monero"], ["SOLANA", "solana"], ["RIPPLE", "ripple"],
+  ["CARDANO", "cardano"], ["DOGECOIN", "dogecoin"], ["CHAINLINK", "chainlink"], ["POLKADOT", "polkadot"],
+  ["LITECOIN", "litecoin"], ["TRON", "tron"], ["AVALANCHE", "avalanche-2"], ["COSMOS", "cosmos"],
+  ["UNISWAP", "uniswap"], ["FILECOIN", "filecoin"], ["SHIBAINU", "shiba-inu"], ["STELLAR", "stellar"],
+  ["HEDERA", "hedera-hashgraph"], ["ALGORAND", "algorand"], ["VECHAIN", "vechain"], ["BITCOINCASH", "bitcoin-cash"],
 ]);
 
 interface CoinGeckoSimple {
@@ -61,11 +67,23 @@ interface CoinGeckoSimple {
 /** Targets CoinGecko honestly cannot serve (commodities/FX/indexes): quiet no-coverage. */
 const NON_CRYPTO_TARGETS: ReadonlySet<string> = new Set(["GOLD", "XAU", "XAUUSD", "SILVER", "XAG", "OIL", "CRUDE", "WTI", "BRENT", "COPPER", "NATGAS", "SPX", "SP500", "NASDAQ", "DOW", "RUSSELL", "VIX", "DXY", "EURUSD", "GBPUSD", "USDJPY", "USDNGN"]);
 
+/**
+ * Corporate-ticker shape (AAPL, MSFT, TSLA, NVDA...): equities are NOT crypto assets. The
+ * blind `token.toLowerCase()` fallback once resolved "aapl" to an unrelated CoinGecko token
+ * and returned its price as the equity's (production-verified garbage). A ticker is treated
+ * as a probable equity when it is a 1-5 letter alphabetic token, NOT in the known-coin
+ * dictionary, and not a common word-like crypto name (use the dictionary for those).
+ */
+function looksLikeEquityTicker(token: string): boolean {
+  return /^[A-Z]{1,5}$/.test(token) && !COMMON_COIN_IDS.has(token);
+}
+
 function coinIdOf(params: Record<string, unknown>): string | undefined {
   const raw = [params.asset, params.symbol, params.coin].find((v) => typeof v === "string" && v.trim() !== "");
   if (typeof raw !== "string") return undefined;
   const token = raw.trim().toUpperCase().split(/[\s/:\-]/)[0] ?? "";
   if (NON_CRYPTO_TARGETS.has(token)) return undefined;
+  if (looksLikeEquityTicker(token)) return undefined;
   return COMMON_COIN_IDS.get(token) ?? token.toLowerCase();
 }
 
@@ -93,7 +111,7 @@ export class CoinGeckoMarketDataAdapter implements ProviderAdapter {
     if (coinId === undefined) {
       const requested = [params.asset, params.symbol, params.coin].find((v) => typeof v === "string" && (v as string).trim() !== "");
       const requestedToken = typeof requested === "string" ? (requested.trim().toUpperCase().split(/[\s/:\-]/)[0] ?? "") : "";
-      const notCrypto = requestedToken !== "" && NON_CRYPTO_TARGETS.has(requestedToken);
+      const notCrypto = requestedToken !== "" && (NON_CRYPTO_TARGETS.has(requestedToken) || looksLikeEquityTicker(requestedToken));
       return {
         tool: this.providerId,
         capability,
