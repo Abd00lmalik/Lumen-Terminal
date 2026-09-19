@@ -122,6 +122,42 @@ function candleOutputs(candles: Candle[], about: string, limit: number): ToolOut
 }
 
 /**
+ * One-window OHLCV summary (DERIVED_METRIC): first open -> last close with the window's
+ * high/low and cumulative return. This gives the synthesis model a directly quotable
+ * week-over-week fact — the live TSLA run received five daily candles yet the answer
+ * claimed "lacks historical price data from the previous week" because no output stated
+ * the window-level comparison. Derived from the SAME candles; no extra provider call.
+ */
+function windowSummaryOutput(candles: Candle[], about: string): ToolOutput | undefined {
+  if (candles.length < 2) return undefined;
+  const first = candles[0]!;
+  const last = candles[candles.length - 1]!;
+  const high = Math.max(...candles.map((c) => c.high));
+  const low = Math.min(...candles.map((c) => c.low));
+  const changePct = first.open !== 0 ? ((last.close - first.open) / first.open) * 100 : undefined;
+  return {
+    // QUANTITATIVE_OBSERVATION with an explicit derivation basis: computed locally over the
+    // SAME candles just retrieved (no second call), so it stays a transparent derived fact.
+    outputClass: "QUANTITATIVE_OBSERVATION" as const,
+    content: {
+      symbol: about,
+      metric: "window_ohlcv_summary",
+      windowStart: first.ts,
+      windowEnd: last.ts,
+      sessions: candles.length,
+      windowOpen: first.open,
+      windowClose: last.close,
+      windowHigh: high,
+      windowLow: low,
+      ...(changePct !== undefined ? { windowChangePct: Number(changePct.toFixed(2)) } : {}),
+      basis: `derived from ${candles.length} daily candles (${first.ts} to ${last.ts})`,
+    },
+    about,
+    timeframe: "1d",
+  };
+}
+
+/**
  * Commodity/FX/index names → tradable Yahoo Finance symbols, resolved at the adapter
  * boundary so a question about "gold" or "EUR/USD" fetches real market data instead of
  * failing ticker resolution. Crypto assets are deliberately NOT here: they belong to the
@@ -240,6 +276,9 @@ export class EquityMarketDataAdapter implements ProviderAdapter {
           });
         }
         outputs.push(...candleOutputs(candles, symbol, limit));
+        // Window-level summary so synthesis can quote the period comparison directly.
+        const summary = windowSummaryOutput(candles.slice(-limit), symbol);
+        if (summary !== undefined) outputs.push(summary);
         return {
           tool: this.providerId,
           capability,
@@ -300,6 +339,7 @@ export class EquityMarketDataAdapter implements ProviderAdapter {
           about: symbol,
         },
         ...candleOutputs(candles, symbol, limit),
+        ...(() => { const s = windowSummaryOutput(candles.slice(-limit), symbol); return s !== undefined ? [s] : []; })(),
       ],
       completeness: "COMPLETE",
       freshness: "CURRENT",

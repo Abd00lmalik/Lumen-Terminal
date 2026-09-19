@@ -144,6 +144,23 @@ describe("equity capabilities through the generic registry", () => {
     expect(rest.calls.some((c) => c.url.includes("ZZTEST"))).toBe(true);
   });
 
+  it("EQUITY_MARKET_DATA: window OHLCV summary accompanies the candles (week-over-week quotable)", async () => {
+    // Live TSLA run: synthesis received 5 daily candles yet claimed "lacks historical price
+    // data from the previous week" because no output stated the window-level comparison.
+    const registry = new CapabilityRegistry();
+    registry.register(new EquityMarketDataAdapter(fakeRest(yahooHosts())));
+    const result = await registry.execute("EQUITY_MARKET_DATA", { symbol: "TSLA", limit: 5 }, origin);
+    expect(result.failure.type).toBe("NONE");
+    const summary = result.normalizedOutput.find((o) => (o.content as { metric?: string }).metric === "window_ohlcv_summary");
+    expect(summary).toBeDefined();
+    const content = summary!.content as { windowClose: number; windowOpen: number; windowChangePct: number; sessions: number; basis: string };
+    expect(content.sessions).toBe(2); // fixture provides 2 candles; the law, not the count, is pinned
+    expect(typeof content.windowOpen).toBe("number");
+    expect(typeof content.windowClose).toBe("number");
+    expect(typeof content.windowChangePct).toBe("number");
+    expect(content.basis).toContain("2 daily candles");
+  });
+
   it("EQUITY_FUNDAMENTALS: every field carries kind; estimates never presented as actuals", async () => {
     const registry = new CapabilityRegistry();
     registry.register(new EquityFundamentalsAdapter(fakeRest(yahooHosts())));
