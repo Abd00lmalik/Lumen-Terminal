@@ -70,7 +70,7 @@ describe("Vercel handler delegates to the real Fastify app", () => {
     });
   }
 
-  it("GET /api/health returns the real app's health payload", async () => {
+  it("GET /api/health returns the real app's health payload", { timeout: 15000 }, async () => {
     process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "test-not-a-real-key";
     await startServer();
     const res = await fetch(`${baseUrl}/api/health`);

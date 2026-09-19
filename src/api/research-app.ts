@@ -183,11 +183,11 @@ export class ResearchApp {
       || result.thesisAssessment !== undefined;
     if (mutated) await this.persist();
 
-    return this.toResponseDTO(crypto.randomUUID(), result, submittedQuestion);
+    return await this.toResponseDTO(crypto.randomUUID(), result, submittedQuestion);
   }
 
   /** Map a LuiResult into the safe response DTO (epistemic status preserved as data). */
-  private toResponseDTO(requestId: string, result: LuiResult, submittedQuestion: string): ResearchResponseDTO {
+  private async toResponseDTO(requestId: string, result: LuiResult, submittedQuestion: string): Promise<ResearchResponseDTO> {
     const ws = this.ws();
     const answer: AnswerDTO = result.rejected !== undefined
       ? {
@@ -264,7 +264,9 @@ export class ResearchApp {
         ? { historicalAnalysis: toHistoricalAnalysisDTO(result.flow5.historicalAnalysis) }
         : {}),
     };
-    // Archive completed runs for history hydration (bounded to the last 25).
+    // Persist completed runs for history hydration: the response goes into the workspace
+    // graph (so the NEXT store.save round-trips it to any instance) AND the in-memory
+    // archive (so the completing instance serves it without a store read).
     if (outcome === "COMPLETED" && researchRef !== undefined) {
       this.responseArchive.set(researchRef, { response, question: submittedQuestion });
       while (this.responseArchive.size > 25) {
@@ -272,6 +274,8 @@ export class ResearchApp {
         if (oldest === undefined) break;
         this.responseArchive.delete(oldest);
       }
+      ws.saveResearchResponse(researchRef, response);
+      await this.persist();
     }
     return response;
   }
@@ -299,11 +303,15 @@ export class ResearchApp {
   getResearch(ref: string) {
     const r = this.ws().getResearch(ref);
     if (r === undefined) throw new NotFoundError("research");
-    // Full response hydration: when this instance completed the run, serve the archived
-    // response DTO (answer, reasons, evidence) so the frontend history renders past runs
-    // verbatim instead of the bare research summary.
+    // Full response hydration, three tiers: in-memory archive (this instance completed
+    // the run) -> workspace-persisted response (restored from the store: any instance can
+    // serve history verbatim) -> bare research summary (genuinely old entry).
     const archived = this.responseArchive.get(ref);
     if (archived !== undefined) return archived.response;
+    const persisted = this.ws().getResearchResponse(ref);
+    if (persisted !== undefined && typeof persisted === "object" && "answer" in (persisted as Record<string, unknown>)) {
+      return persisted as ResearchResponseDTO;
+    }
     return researchToDTO(r);
   }
 

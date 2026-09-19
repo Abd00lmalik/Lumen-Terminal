@@ -14,6 +14,18 @@ const trader = { kind: "trader" as const, detail: "test" };
 const system = { kind: "agent" as const, detail: "test" };
 
 /** Fake capability provider returning one numeric observation per call. */
+function emptyCapabilityFor(capability: string): ProviderAdapter {
+  return {
+    providerId: `fake/empty-${capability.toLowerCase()}`,
+    capabilities: [capability],
+    limitations: [],
+    freshnessProfile: "test:live",
+    async execute(cap) {
+      return { tool: `fake/empty-${capability.toLowerCase()}`, capability: cap, transport: "fake", outputs: [] };
+    },
+  };
+}
+
 function fakeCapability(capability: string, value: string): ProviderAdapter {
   return {
     providerId: `fake/${capability.toLowerCase()}`,
@@ -593,6 +605,70 @@ describe("adaptive research loop (M3 §7/§8)", () => {
     expect(outcome.finalDecision.rationale).toContain("deep-research");
   });
 
+  // The TSLA production bug: the loop gathered UNRELATED archived evidence, the model
+  // concluded INSUFFICIENT_EVIDENCE, and the old zero-evidence gate skipped the agent
+  // tier. The backstop must fire whenever the loop ends insufficient — the agent then
+  // answers the EXACT question.
+  it("deep-research backstop fires on insufficiency even with (unrelated) evidence present", async () => {
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", responses.researchPlan()],
+      ["research.adaptive_decision", responses.adaptiveDecision("INSUFFICIENT_EVIDENCE")],
+    ]));
+    const registry = new CapabilityRegistry();
+    registry.register(fakeCapability("NEWS_ANALYSIS", "Bitcoin ETF outflows of 450 million dollars")); // unrelated subject
+    registry.register(fakeCapability("CROSS_DOMAIN_SYNTHESIS", "TSLA closed at 241.50, down 3.2 percent on the week"));
+    const workspace = new Workspace();
+    const research = workspace.addResearch({ objective: "TSLA trading data for the last week", question: "q", flow: "WHAT_HAPPENED" }, trader);
+    workspace.transitionResearch(research.id, "ACTIVE", system, "activated");
+
+    const outcome = await runAdaptiveResearch("TSLA trading data for the last week", research.id, {
+      provider, registry, workspace, store: newStore(), maxRounds: 1,
+    });
+
+    expect(outcome.stoppedBecause).toBe("MODEL_INSUFFICIENT_EVIDENCE");
+    const deepExec = outcome.executions.find((e) => e.capability === "CROSS_DOMAIN_SYNTHESIS");
+    expect(deepExec).toBeDefined();
+    expect(deepExec?.evidenceIds.length).toBeGreaterThan(0);
+    expect(outcome.finalDecision.decision).toBe("COMPLETE");
+    // The ingested agent evidence mentions the actual question's subject.
+    const deepEvidence = deepExec?.evidenceIds.map((id) => workspace.getEvidence(id)?.observation ?? "").join(" ");
+    expect(deepEvidence).toContain("TSLA");
+  });
+
+  // Tier 2: when the research agents return nothing usable, bounded Exa search fires with
+  // the same exact question before insufficiency is declared (zero-dead-end §19).
+  it("deep-research tier 2: Exa search fires with the exact question when research agents return nothing", async () => {
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", responses.researchPlan()],
+      ["research.adaptive_decision", responses.adaptiveDecision("INSUFFICIENT_EVIDENCE")],
+    ]));
+    const registry = new CapabilityRegistry();
+    const emptyCapability: ProviderAdapter = {
+      providerId: "fake/empty",
+      capabilities: ["NEWS_ANALYSIS"],
+      limitations: [],
+      freshnessProfile: "test:live",
+      async execute(cap) {
+        return { tool: "fake/empty", capability: cap, transport: "fake", outputs: [] };
+      },
+    };
+    registry.register(emptyCapability);
+    registry.register(emptyCapabilityFor("CROSS_DOMAIN_SYNTHESIS"));
+    registry.register(fakeCapability("WEB_SEARCH", "Exa result: TSLA weekly close and volume data"));
+    const workspace = new Workspace();
+    const research = workspace.addResearch({ objective: "TSLA weekly data", question: "q", flow: "WHAT_HAPPENED" }, trader);
+    workspace.transitionResearch(research.id, "ACTIVE", system, "activated");
+
+    const outcome = await runAdaptiveResearch("TSLA weekly data", research.id, {
+      provider, registry, workspace, store: newStore(), maxRounds: 1,
+    });
+
+    const searchExec = outcome.executions.find((e) => e.capability === "WEB_SEARCH");
+    expect(searchExec).toBeDefined();
+    expect(searchExec?.evidenceIds.length).toBeGreaterThan(0);
+    expect(outcome.finalDecision.decision).toBe("COMPLETE");
+  });
+
   // A model failure with zero gathered evidence keeps a retriable, non-infrastructure rationale.
   it("model failure rationale is user-facing and retriable", async () => {
     const provider = new FakeModelProvider(new Map([
@@ -797,6 +873,50 @@ describe("research context (M3 §9); epistemic distinctions preserved", () => {
     expect(text).toContain("14.60M USD");
     expect(text).toContain("Lido");
     expect(text).toContain("protocol_count: 593");
+  });
+
+  it("relevance gate: archived evidence from unrelated questions is excluded from a TSLA question's context (the production cross-subject bug)", async () => {
+    const { buildResearchContext, renderResearchContext } = await import("../../src/research/context.js");
+    const workspace = new Workspace();
+    // Archive: a past BTC run left crypto evidence behind.
+    workspace.addEvidence(
+      { observation: "Bitcoin ETF outflows of 450 million dollars", evidenceType: "news", evidenceClass: "OBSERVATION" },
+      system,
+    );
+    workspace.addEvidence(
+      { observation: "BTC funding rate 0.01 percent", evidenceType: "derivatives", evidenceClass: "OBSERVATION" },
+      system,
+    );
+    // The current question is about TSLA.
+    workspace.addEvidence(
+      { observation: "TSLA closed at 241.50, down 3.2 percent on the week", evidenceType: "price", evidenceClass: "OBSERVATION" },
+      system,
+    );
+    const current = workspace.addResearch({ objective: "Gather current TSLA trading data", question: "TSLA this week", flow: "WHAT_HAPPENED" }, system);
+
+    const ctx = buildResearchContext(workspace, { researchRef: current.id, relevantTo: "Gather current TSLA trading data and historical data from last week for comparison" });
+    const texts = ctx.items.map((i) => i.text).join(" ");
+    expect(ctx.items.some((i) => i.text.includes("TSLA"))).toBe(true);
+    expect(texts).not.toContain("Bitcoin ETF outflows");
+    expect(texts).not.toContain("funding rate");
+    // The exclusion is auditable, never silent: count + samples in the render.
+    expect(ctx.archiveBackground?.count).toBe(2);
+    const rendered = renderResearchContext(ctx);
+    expect(rendered).toContain("RELEVANCE GATE: 2 archived evidence object(s)");
+    expect(rendered).toContain("do not treat the exclusion as evidence of absence");
+  });
+
+  it("relevance gate keeps nothing out when the question genuinely spans the archive's subjects", async () => {
+    const { buildResearchContext } = await import("../../src/research/context.js");
+    const workspace = new Workspace();
+    workspace.addEvidence(
+      { observation: "BTC ETF outflows accelerated as the Clarity Act failed", evidenceType: "news", evidenceClass: "OBSERVATION" },
+      system,
+    );
+    const current = workspace.addResearch({ objective: "Why did BTC move", question: "q", flow: "WHY_IT_HAPPENED" }, system);
+    const ctx = buildResearchContext(workspace, { researchRef: current.id, relevantTo: "Why did BTC move recently" });
+    expect(ctx.items).toHaveLength(1);
+    expect(ctx.archiveBackground).toBeUndefined();
   });
 });
 

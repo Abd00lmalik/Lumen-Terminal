@@ -242,6 +242,7 @@ export async function runAdaptiveResearch(
     // 3. Adaptive decision with the updated, validated context.
     const context = buildResearchContext(workspace, {
       researchRef,
+      relevantTo: objective,
       executions: allExecutions.map((e) => ({ capability: e.capability, result: e.result })),
     });
     let decision: AdaptiveDecision;
@@ -311,67 +312,84 @@ export async function runAdaptiveResearch(
   }
 
   // Deep-research fallback (engine-owned, never planner-dependent): when the loop concluded
-  // with INSUFFICIENT_EVIDENCE and produced NO usable evidence, the direct capability chain
-  // failed the question. Before concluding, fire the last-resort CROSS_DOMAIN_SYNTHESIS
-  // deep-research tier ONCE with the exact objective. The model never decides this (it does
-  // not know provider coverage); the engine knows when nothing was gathered. Outputs remain
-  // classified by the evidence layer (agent analysis, never direct observation).
-  // Mechanical budget stops with zero evidence are also dead ends the backstop must try to
-  // recover: the loop never reached a substantive conclusion, so deep research with the exact
-  // objective is the last legitimate path before declaring genuine insufficiency (§19).
+  // with INSUFFICIENT_EVIDENCE, the direct capability chain failed the question — whether or
+  // not unrelated archived evidence happened to be gathered along the way. Before concluding,
+  // fire the last-resort deep-research tier (Caesar/AskHeurist, then Exa search) ONCE with
+  // the EXACT question and await their response. The model never decides this (it does not
+  // know provider coverage); the engine knows when the direct chain could not answer. Outputs
+  // remain classified by the evidence layer (agent analysis, never direct observation).
+  // Mechanical budget stops are also dead ends the backstop must try to recover: the loop
+  // never reached a substantive conclusion, so deep research with the exact objective is the
+  // last legitimate path before declaring genuine insufficiency (§19).
   const budgetStopped = stoppedBecause === "TIME_BUDGET_EXHAUSTED" || stoppedBecause === "ROUND_BUDGET_EXHAUSTED";
   const deepResearchFired =
     (stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE" || budgetStopped) &&
-    allExecutions.every((e) => e.evidenceIds.length === 0) &&
     !allExecutions.some((e) => e.capability === "CROSS_DOMAIN_SYNTHESIS") &&
     options.registry.resolve("CROSS_DOMAIN_SYNTHESIS").length > 0 &&
     (options.deadlineMs === undefined || at().getTime() < options.deadlineMs);
   if (deepResearchFired) {
-    options.onProgress?.(progressEvent("capability_started", at(), "direct capabilities produced no coverage; invoking deep-research agents", { capability: "CROSS_DOMAIN_SYNTHESIS" }));
+    // Tier 1: research agents (Caesar -> AskHeurist via the registry's provider chain).
+    // Tier 2: bounded Exa search when the research agents returned nothing usable. The
+    // engine awaits the agent response; its findings are ingested as classified evidence
+    // (agent analysis / secondary reporting, never upgraded to direct observation).
     const deepRound: RoundExecution[] = [];
-    try {
-      const result = await options.registry.execute(
-        "CROSS_DOMAIN_SYNTHESIS",
-        { ...(options.capabilityParams ?? {}), question: objective },
-        systemOrigin,
-        at(),
-      );
-      options.onProgress?.(progressEvent("capability_completed", at(), `deep research completed: ${result.failure.type === "NONE" ? result.completeness : `failed (${result.failure.type})`}`, { capability: "CROSS_DOMAIN_SYNTHESIS" }));
-      const evidenceIds: string[] = [];
-      if (result.failure.type === "NONE" && result.validation !== "INVALID") {
-        for (const output of result.normalizedOutput) {
-          try {
-            const evidence = evidenceFromToolResult(
-              result,
-              output,
-              { kind: "tool", toolRef: result.tool, invocation: result.invocation.params },
-              {},
-              at(),
-            );
-            workspace.ingestEvidence(evidence, researchRef);
-            evidenceIds.push(evidence.id);
-          } catch {
-            // UNAVAILABLE/ERROR outputs never become evidence (evidence.ts invariant).
+    const deepCapabilities: { capability: "CROSS_DOMAIN_SYNTHESIS" | "WEB_SEARCH"; label: string }[] = [
+      { capability: "CROSS_DOMAIN_SYNTHESIS", label: "deep-research agents" },
+    ];
+    if (options.registry.resolve("WEB_SEARCH").length > 0) {
+      deepCapabilities.push({ capability: "WEB_SEARCH", label: "web search agents" });
+    }
+    for (const { capability, label } of deepCapabilities) {
+      let gathered = 0;
+      try {
+        options.onProgress?.(progressEvent("capability_started", at(), `direct capabilities could not answer the question; invoking ${label} with the exact question`, { capability }));
+        const result = await options.registry.execute(
+          capability,
+          { ...(options.capabilityParams ?? {}), question: objective },
+          systemOrigin,
+          at(),
+        );
+        options.onProgress?.(progressEvent("capability_completed", at(), `${label} completed: ${result.failure.type === "NONE" ? result.completeness : `failed (${result.failure.type})`}`, { capability }));
+        const evidenceIds: string[] = [];
+        if (result.failure.type === "NONE" && result.validation !== "INVALID") {
+          for (const output of result.normalizedOutput) {
+            try {
+              const evidence = evidenceFromToolResult(
+                result,
+                output,
+                { kind: "tool", toolRef: result.tool, invocation: result.invocation.params },
+                {},
+                at(),
+              );
+              workspace.ingestEvidence(evidence, researchRef);
+              evidenceIds.push(evidence.id);
+            } catch {
+              // UNAVAILABLE/ERROR outputs never become evidence (evidence.ts invariant).
+            }
           }
         }
+        gathered = evidenceIds.length;
+        const execution: RoundExecution = { round: rounds.length + 1, capability, result, evidenceIds };
+        deepRound.push(execution);
+        allExecutions.push(execution);
+      } catch {
+        // A deep-research throw is recorded as a failed round, never a crash.
+        continue;
       }
-      const execution: RoundExecution = { round: rounds.length + 1, capability: "CROSS_DOMAIN_SYNTHESIS", result, evidenceIds };
-      deepRound.push(execution);
-      allExecutions.push(execution);
-      rounds.push({ round: rounds.length + 1, executions: deepRound, decision: finalDecision });
-      // Deep research that DID find material evidence upgrades the conclusion (§13: after
-      // research recovery, found evidence is a substantive answer — not insufficiency).
-      const totalEvidence = allExecutions.flatMap((e) => e.evidenceIds).length;
-      if (evidenceIds.length > 0 && finalDecision.decision === "INSUFFICIENT_EVIDENCE") {
-        finalDecision = {
-          decision: "COMPLETE",
-          rationale: `Direct sources could not cover this question; deep-research agents gathered ${totalEvidence} evidence object(s) against the exact objective. Their outputs are labeled as agent analysis in the evidence below.`,
-          nextTasks: [],
-        };
-      }
-    } catch {
-      // A deep-research throw is recorded as a failed round, never a crash; the honest
-      // insufficiency conclusion below stands.
+      // A tier that found material evidence satisfies the question; only a still-empty
+      // tier falls through to the next one.
+      if (gathered > 0) break;
+    }
+    rounds.push({ round: rounds.length + 1, executions: deepRound, decision: finalDecision });
+    // Deep research that DID find material evidence upgrades the conclusion (§13: after
+    // research recovery, found evidence is a substantive answer — not insufficiency).
+    const totalEvidence = allExecutions.flatMap((e) => e.evidenceIds).length;
+    if (deepRound.some((e) => e.evidenceIds.length > 0) && finalDecision.decision === "INSUFFICIENT_EVIDENCE") {
+      finalDecision = {
+        decision: "COMPLETE",
+        rationale: `Direct sources could not cover this question; deep-research agents gathered ${totalEvidence} evidence object(s) against the exact objective. Their outputs are labeled as agent analysis in the evidence below.`,
+        nextTasks: [],
+      };
     }
   }
 
@@ -391,6 +409,7 @@ export async function runAdaptiveResearch(
     ...(modelFailure !== undefined ? { modelFailure } : {}),
     context: buildResearchContext(workspace, {
       researchRef,
+      relevantTo: objective,
       executions: allExecutions.map((e) => ({ capability: e.capability, result: e.result })),
     }),
   };

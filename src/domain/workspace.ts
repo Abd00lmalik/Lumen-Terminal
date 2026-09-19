@@ -31,6 +31,15 @@ import type { ObjectStatus } from "./lifecycle.js";
 import { appendProvenance, createProvenance, type ProvenanceOrigin } from "./provenance.js";
 import { newId, seedIdCountersFromIds } from "./ids.js";
 
+/** Persisted final responses kept per workspace (history depth for verbatim re-serving). */
+const MAX_PERSISTED_RESPONSES = 100;
+
+/** Shape of a persisted response record in the snapshot (researchResponses entries). */
+export interface ResearchResponseRecord {
+  readonly researchId: string;
+  readonly response: unknown;
+}
+
 export interface WorkspaceSnapshot {
   readonly researches: readonly Research[];
   readonly sources: readonly Source[];
@@ -49,6 +58,13 @@ export interface WorkspaceSnapshot {
   readonly thesisAssessments: readonly ThesisAssessmentRecord[];
   /** M6 (audit D1): the trader's explicit active-thesis selection (working state). */
   readonly activeThesisId?: string;
+  /**
+   * Final responses per research id (bounded to the most recent N in the API layer's
+   * persistence call): the trader-facing answer of a completed run. Persisted so ANY
+   * serverless instance can serve history verbatim — the in-memory-only archive broke
+   * exactly this on Vercel ("Full reasoning is not retained on this server instance").
+   */
+  readonly researchResponses?: readonly ResearchResponseRecord[];
 }
 
 export class Workspace {
@@ -69,6 +85,8 @@ export class Workspace {
    *  Without it, "active thesis" was inferred from updatedAt ordering; an inference, not state.
    *  Trader-owned working state must be recorded, never guessed. */
   private activeThesisId: string | undefined;
+  /** Persisted final responses per research id (see WorkspaceSnapshot.researchResponses). */
+  private readonly researchResponses = new Map<string, unknown>();
 
   // ----- theses (trader-owned; system never silently mutates; thesis.md) -----
 
@@ -84,6 +102,23 @@ export class Workspace {
 
   listResearch(): readonly Research[] {
     return [...this.researches.values()];
+  }
+
+  /**
+   * Persist the final trader-facing response of a completed run (bounded to the most
+   * recent MAX_PERSISTED_RESPONSES). Any later instance can then serve history verbatim.
+   */
+  saveResearchResponse(researchId: string, response: unknown): void {
+    this.researchResponses.set(researchId, response);
+    while (this.researchResponses.size > MAX_PERSISTED_RESPONSES) {
+      const oldest = this.researchResponses.keys().next().value;
+      if (oldest === undefined) break;
+      this.researchResponses.delete(oldest);
+    }
+  }
+
+  getResearchResponse(researchId: string): unknown {
+    return this.researchResponses.get(researchId);
   }
 
   transitionResearch(id: string, to: ObjectStatus, origin: ProvenanceOrigin, note: string, at?: Date): Research {
@@ -707,6 +742,9 @@ export class Workspace {
       thesisAssessments: this.listThesisAssessments(),
       // M6 (audit D1): the trader's explicit selection is working state and must round-trip.
       ...(this.activeThesisId !== undefined ? { activeThesisId: this.activeThesisId } : {}),
+      ...(this.researchResponses.size > 0
+        ? { researchResponses: [...this.researchResponses.entries()].map(([researchId, response]) => ({ researchId, response })) }
+        : {}),
     };
   }
 
@@ -725,6 +763,7 @@ export class Workspace {
     for (const m of snap.memories ?? []) ws.memories.set(m.id, m);
     for (const m of snap.monitors ?? []) ws.monitors.set(m.id, m);
     for (const a of snap.thesisAssessments ?? []) ws.thesisAssessments.push(a);
+    for (const r of snap.researchResponses ?? []) ws.researchResponses.set(r.researchId, r.response);
     if (snap.activeThesisId !== undefined) ws.activeThesisId = snap.activeThesisId;
     // Counter continuity (persistence law): a restored graph must never re-mint existing ids.
     // Without this, a server restart OVERWROTE persisted objects (fresh process → rs_000001 again).

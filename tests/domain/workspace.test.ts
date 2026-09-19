@@ -135,4 +135,28 @@ describe("workspace research graph (research-object-model.md §22/§17, lock §1
     expect(restored.getEvidence(evidenceId)).toBeTruthy();
     expect(restored.currentJudgment(research.id)!.statement).toBe("s");
   });
+
+  it("final responses persist through the snapshot and serve on ANY restored instance", async () => {
+    const { MemoryStore } = await import("../../src/persistence/index.js");
+    const research = ws.addResearch({ objective: "TSLA week in review", question: "q", flow: "WHAT_HAPPENED" }, origin);
+    const response = { requestId: "r1", action: "RESEARCH", outcome: "COMPLETED", answer: { answer: "TSLA fell 3.2% over the last week", supportingReasons: [], opposingReasons: [], confidence: "MODERATE", keyUncertainty: "", implication: "", citedObjectRefs: [] } };
+    ws.saveResearchResponse(research.id, response);
+
+    const store = new MemoryStore();
+    await store.save(ws.toSnapshot());
+    // A different serverless instance restores from the store:
+    const restored = (await store.load())!;
+    expect(restored.getResearchResponse(research.id)).toEqual(response);
+  });
+
+  it("persisted responses are bounded (history depth without unbounded growth)", () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 105; i += 1) {
+      const r = ws.addResearch({ objective: `o${i}`, question: `q${i}`, flow: "WHAT_HAPPENED" }, origin);
+      ids.push(r.id);
+      ws.saveResearchResponse(r.id, { i });
+    }
+    expect(ws.getResearchResponse(ids[0]!)).toBeUndefined(); // oldest evicted
+    expect(ws.getResearchResponse(ids[ids.length - 1]!)).toEqual({ i: 104 });
+  });
 });

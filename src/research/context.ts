@@ -59,6 +59,11 @@ export interface ContextLimitation {
 export interface ResearchContext {
   readonly researchRef?: string;
   readonly objective?: string;
+  /**
+   * Evidence excluded by the relevance gate (unrelated archived runs), surfaced so the
+   * exclusion is auditable and the model knows more exists behind an explicit boundary.
+   */
+  readonly archiveBackground?: { readonly count: number; readonly sampleRefs: readonly string[] };
   /** Which run the context is anchored to (the archive fallback when unscoped). */
   readonly currentResearchRef?: string;
   readonly currentResearchQuestion?: string;
@@ -83,6 +88,42 @@ export interface ResearchContext {
    *  a trader means (e.g. "the halving thesis") without inventing refs. Trader-owned objects;
    *  presented for selection only, never for silent modification. */
   readonly theses?: readonly { ref: string; statement: string; status: string; active: boolean }[];
+}
+
+// ---------------------------------------------------------------------------
+// Relevance gate (zero-dead-end architecture)
+// ---------------------------------------------------------------------------
+
+const STOP_TERMS = new Set([
+  "what", "why", "how", "when", "the", "a", "an", "is", "are", "was", "were", "did", "does",
+  "do", "could", "should", "would", "affect", "affecting", "affects", "move", "moved", "moving",
+  "happen", "happened", "right", "now", "currently", "current", "today", "recent", "recently",
+  "last", "week", "data", "price", "prices", "market", "markets", "question", "research",
+  "gather", "compare", "comparison", "explain", "about", "with", "for", "from", "and", "or",
+]);
+
+/**
+ * Key terms of a question: distinct alphanumeric tokens minus domain-neutral stopwords.
+ * A question about TSLA has TSLA as a key term; "market"/"price" alone never make two
+ * questions about different subjects relevant to each other.
+ */
+function relevanceTerms(text: string | undefined): Set<string> | undefined {
+  if (text === undefined || text.trim() === "") return undefined;
+  const terms = new Set(
+    text
+      .toUpperCase()
+      .split(/[^A-Z0-9]+/)
+      .filter((t) => t.length >= 2 && !STOP_TERMS.has(t.toLowerCase()) && !STOP_TERMS.has(t)),
+  );
+  return terms.size > 0 ? terms : undefined;
+}
+
+/** An item is relevant when it shares at least one key term with the question. */
+function isRelevant(itemText: string, terms: Set<string>): boolean {
+  const itemTerms = relevanceTerms(itemText);
+  if (itemTerms === undefined) return false;
+  for (const t of itemTerms) if (terms.has(t)) return true;
+  return false;
 }
 
 /** Map an evidence object to its context item kind; the epistemic boundary, mechanically. */
@@ -169,6 +210,15 @@ export function buildResearchContext(
   workspace: Workspace,
   options: {
     researchRef?: string;
+    /**
+     * Relevance gate (zero-dead-end architecture): when set, evidence items whose text
+     * shares no key term with this string are DEMOTED out of the primary items list (a
+     * bounded `archiveBackground` is still carried for provenance). This keeps archived
+     * evidence from UNRELATED questions (e.g. BTC runs) from masquerading as context for
+     * a TSLA question — the production failure where the decision model described crypto
+     * news as its "available research context" and concluded insufficiency.
+     */
+    readonly relevantTo?: string;
     /** TOOL_RESULTs from this session, for failure/limitation reporting. */
     readonly executions?: readonly { readonly capability: string; readonly result: ToolResult }[];
     /** Set when the caller already knows evidence is insufficient (valid completion state). */
@@ -180,8 +230,14 @@ export function buildResearchContext(
   const contradictions: { supports: readonly string[]; contradicts: readonly string[] }[] = [];
 
   // --- evidence (bucketed, with freshness/provenance preserved) ---
+  // Relevance gate: when `relevantTo` is set, items sharing NO key term with the question
+  // are excluded from the primary context (a one-line count stays in the rendered header
+  // so nothing is silently hidden). Evidence accumulated from unrelated past runs must
+  // not present itself as context for the current question.
+  const relevantTerms = relevanceTerms(options.relevantTo);
+  const archiveBackground = { count: 0, sampleRefs: [] as string[] };
   for (const e of workspace.listEvidence()) {
-    items.push({
+    const item: ContextItem = {
       ref: e.id,
       kind: e.evidenceClass === "PROXY_EVIDENCE" ? "proxy_observation" : contextKindForEvidence(e),
       text: evidenceText(e),
@@ -190,7 +246,13 @@ export function buildResearchContext(
       sourceRefs: e.sourceRefs,
       ...(e.proxyBasis !== undefined ? { proxyBasis: e.proxyBasis } : {}),
       ...(e.timestamp !== undefined ? { timestamp: e.timestamp } : {}),
-    });
+    };
+    if (relevantTerms !== undefined && !isRelevant(evidenceText(e), relevantTerms)) {
+      archiveBackground.count += 1;
+      if (archiveBackground.sampleRefs.length < 5) archiveBackground.sampleRefs.push(e.id);
+      continue;
+    }
+    items.push(item);
   }
 
   // --- claims ---
@@ -291,6 +353,7 @@ export function buildResearchContext(
     ...(currentResearch !== undefined ? { objective: currentResearch.objective } : {}),
     ...(currentResearch !== undefined ? { currentResearchRef: currentResearch.id, currentResearchQuestion: currentResearch.question } : {}),
     ...(researchRef === undefined ? { scope: "workspace_archive" as const } : { scope: "single_research" as const }),
+    ...(archiveBackground.count > 0 ? { archiveBackground } : {}),
     items,
     claims,
     hypotheses,
@@ -315,6 +378,9 @@ export function renderResearchContext(ctx: ResearchContext): string {
     );
   } else if (ctx.researchRef !== undefined) {
     lines.push(`CONTEXT SCOPE: research ${ctx.researchRef}.`);
+  }
+  if (ctx.archiveBackground !== undefined) {
+    lines.push(`RELEVANCE GATE: ${ctx.archiveBackground.count} archived evidence object(s) from unrelated past questions are EXCLUDED from this context (sample: ${ctx.archiveBackground.sampleRefs.join(", ")}). If this question needs them, research the question directly; do not treat the exclusion as evidence of absence.`);
   }
   if (ctx.objective !== undefined) lines.push(`RESEARCH OBJECTIVE: ${ctx.objective}`);
 
