@@ -124,3 +124,27 @@ export function normalizePlanCapabilities(raw: readonly unknown[]): NormalizedCa
   }
   return { capabilities, dropped };
 }
+
+/**
+ * Canonical asset names for event-episode windows (asset-name -> Yahoo-tradable symbol).
+ * Kept here (dependency-free) so the plan parser can canonicalize episode assets without an
+ * import cycle. Only the market names that appear in event-driven questions; equity tickers
+ * and crypto tickers pass through uppercased unchanged. "GOLD" maps to the gold FUTURE, not
+ * the NYSE-listed GOLD equity: a question about the metal must never resolve to a mining
+ * company's stock (live failure: the shutdown question analyzed "Gold.com (GOLD)" at $44.8).
+ */
+const CANONICAL_ASSETS: Readonly<Record<string, string>> = {
+  GOLD: "GC=F", XAU: "GC=F", XAUUSD: "GC=F",
+  SILVER: "SI=F", XAG: "SI=F",
+  OIL: "CL=F", CRUDE: "CL=F", WTI: "CL=F", BRENT: "BZ=F",
+  COPPER: "HG=F", NATGAS: "NG=F",
+  SPX: "^GSPC", SP500: "^GSPC", NASDAQ: "^IXIC", DOW: "^DJI", VIX: "^VIX", DXY: "DX-Y.NYB",
+  EURUSD: "EURUSD=X", GBPUSD: "GBPUSD=X", USDJPY: "USDJPY=X",
+  BITCOIN: "BTC", ETHEREUM: "ETH",
+};
+
+/** Canonicalize one raw asset token for window analysis; unknown tokens pass through uppercased. */
+export function canonicalAsset(raw: string): string {
+  const upper = raw.trim().toUpperCase();
+  return CANONICAL_ASSETS[upper] ?? upper;
+}

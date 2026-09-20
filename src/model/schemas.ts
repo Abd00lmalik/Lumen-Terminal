@@ -14,7 +14,7 @@
  */
 
 import { validateModelOutput, type OutputSchema } from "./provider.js";
-import { normalizePlanCapabilities } from "./capability-vocabulary.js";
+import { normalizePlanCapabilities, canonicalAsset } from "./capability-vocabulary.js";
 
 // ---------------------------------------------------------------------------
 // Prompt-facing schema descriptions (rendered into model prompts; mirrors the schemas)
@@ -197,6 +197,23 @@ export interface ProposedResearchPlan {
     readonly importance?: "CRITICAL" | "SUPPORTING";
     readonly timeSensitivity?: "CURRENT" | "RECENT" | "HISTORICAL" | "ANY";
   }[];
+  /**
+   * HISTORICAL EVENT EPISODES this question's analysis needs (event-driven research).
+   * For questions about reactions to past events the planner names the episodes whose
+   * market windows must be analyzed (e.g. "US government shutdown, Oct 2025"). The ENGINE
+   * locates each episode's dates in the retrieved record, computes window metrics from real
+   * candles deterministically, and mints derived evidence; raw candles never satisfy a
+   * reaction requirement by themselves.
+   */
+  readonly eventEpisodes?: readonly {
+    readonly event: string;
+    /** ISO start of the episode window (engine clamps to candle coverage). */
+    readonly from: string;
+    /** ISO end of the episode window. */
+    readonly to: string;
+    /** Assets whose windows must be analyzed (symbols or canonical names). */
+    readonly assets: readonly string[];
+  }[];
   readonly completionCriteria: readonly string[];
   readonly adaptationPolicy: string;
 }
@@ -209,9 +226,12 @@ export const RESEARCH_PLAN_SCHEMA: OutputSchema = {
     scopeExcluded: "string[]",
     tasks: "record[]",
     requirements: "record[]",
+    eventEpisodes: "record[]",
     completionCriteria: "string[]",
     adaptationPolicy: "string",
   },
+  // Event-episode planning is optional: only event-driven questions legitimately carry it.
+  optional: ["eventEpisodes"],
 };
 
 /** 7. Adaptive decision; continue or complete the living loop (M3 §8). */
@@ -552,12 +572,32 @@ export function parseResearchPlan(text: string): ProposedResearchPlan {
       };
     })
     .filter((r): r is NonNullable<typeof r> => r !== undefined);
+  // Event episodes: optional, validated leniently like requirement seeds. An entry needs an
+  // event name, parseable ISO bounds, and at least one asset; anything else is dropped (the
+  // loop then reports the historical requirement as uncovered rather than fabricating a
+  // window). Assets are canonicalized to tradable instruments ("gold" -> GC=F) so window
+  // analysis and subject gating use the same vocabulary as the provider chain.
+  const rawEpisodes = Array.isArray(data.eventEpisodes) ? data.eventEpisodes : [];
+  const eventEpisodes = rawEpisodes
+    .map((entry) => {
+      if (typeof entry !== "object" || entry === null) return undefined;
+      const e = entry as Record<string, unknown>;
+      if (typeof e.event !== "string" || e.event.trim() === "") return undefined;
+      const from = typeof e.from === "string" && !Number.isNaN(Date.parse(e.from)) ? new Date(Date.parse(e.from)).toISOString() : undefined;
+      const to = typeof e.to === "string" && !Number.isNaN(Date.parse(e.to)) ? new Date(Date.parse(e.to)).toISOString() : undefined;
+      if (from === undefined || to === undefined) return undefined;
+      const assets = (Array.isArray(e.assets) ? e.assets : []).map(String).map(canonicalAsset).filter((a): a is string => a !== undefined && a !== "");
+      if (assets.length === 0) return undefined;
+      return { event: e.event.trim(), from, to, assets: [...new Set(assets)] };
+    })
+    .filter((e): e is NonNullable<typeof e> => e !== undefined);
   return {
     objective: String(data.objective),
     scopeIncluded: (data.scopeIncluded as unknown[]).map(String),
     scopeExcluded: (data.scopeExcluded as unknown[]).map(String),
     tasks,
     ...(requirements.length > 0 ? { requirements } : {}),
+    ...(eventEpisodes.length > 0 ? { eventEpisodes } : {}),
     completionCriteria: (data.completionCriteria as unknown[]).map(String),
     adaptationPolicy: String(data.adaptationPolicy),
   };

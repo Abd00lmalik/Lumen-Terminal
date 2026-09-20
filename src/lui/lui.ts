@@ -1084,10 +1084,29 @@ export class Lui {
         : isProcessCommentary
           ? `What the evidence shows: ${research.evidence.slice(0, 3).map((e) => summarize(e.observation, 140)).join("; ")}.`
           : research.finalDecision.rationale;
+      // Findings follow the synthesis (question-shaped), not evidence order: each factor's
+      // strongest support, then its counterevidence. Evidence-order bullets reproduced the
+      // retrieval sequence (price, then klines, then headlines) instead of the analysis.
+      const supportingReasons = research.synthesis !== undefined
+        ? research.synthesis.keyFactors.flatMap((f) =>
+            f.evidenceRefs.slice(0, 1).map((ref) => {
+              const ev = research.evidence.find((e) => e.id === ref);
+              return ev !== undefined ? `${f.factor}: ${summarize(ev.observation, 140)}` : `${f.factor}`;
+            }),
+          ).slice(0, 6)
+        : research.evidence.slice(0, 4).map((e) => `${e.evidenceClass.toLowerCase()}: ${summarize(e.observation)}`);
+      const opposingReasons = research.synthesis !== undefined
+        ? research.synthesis.keyFactors.flatMap((f) =>
+            f.counterevidenceRefs.slice(0, 1).map((ref) => {
+              const ev = research.evidence.find((e) => e.id === ref);
+              return ev !== undefined ? `${f.factor} weakened: ${summarize(ev.observation, 140)}` : "";
+            }).filter((s) => s !== ""),
+          ).slice(0, 4)
+        : [];
       const response: FinalResponse = {
         answer,
-        supportingReasons: research.evidence.slice(0, 4).map((e) => `${e.evidenceClass.toLowerCase()}: ${summarize(e.observation)}`),
-        opposingReasons: [],
+        supportingReasons,
+        opposingReasons,
         confidence: (research.synthesis?.confidence as FinalResponse["confidence"] | undefined)
           ?? (research.evidence.length >= 3 ? "MODERATE" : research.evidence.length >= 1 ? "LOW" : "UNKNOWN"),
         keyUncertainty: research.synthesis?.uncertainty[0] ?? (research.finalDecision.decision === "COMPLETE"
@@ -1215,10 +1234,26 @@ export class Lui {
   }
 
   private validateTarget(data: ResolvedTarget): ResolvedTarget {
+    // Canonical-instrument law: a model-resolved asset for a named non-equity instrument
+    // must be the tradable instrument, not a same-ticker listing in a different domain.
+    // Live failure: "could a shutdown affect gold..." resolved asset "GOLD"; the equity
+    // chain served Gold.com (NYSE: GOLD) at $44.8 and the analysis described a mining
+    // company. resolveInstrument is a fact about the language (gold -> GC=F) and wins
+    // whenever the resolved asset text names (or equals) a canonical instrument.
+    const rawAsset = data.asset?.trim() ?? "";
+    const instrument = rawAsset !== "" ? resolveInstrument(rawAsset) : undefined;
+    const canonical =
+      instrument !== undefined && (rawAsset.toUpperCase() === instrument.name.toUpperCase() || instrument.subjectTerms.some((t) => rawAsset.toUpperCase().includes(t) || t.includes(rawAsset.toUpperCase())))
+        ? instrument.symbol
+        : rawAsset !== "" && /^[a-z]/i.test(rawAsset) && resolveInstrument(rawAsset) !== undefined
+          ? resolveInstrument(rawAsset)!.symbol
+          : rawAsset !== ""
+            ? rawAsset
+            : undefined;
     return {
       objectRefs: data.objectRefs ?? [],
       unresolved: data.unresolved ?? [],
-      ...(data.asset !== undefined && data.asset !== "" ? { asset: data.asset } : {}),
+      ...(canonical !== undefined ? { asset: canonical } : {}),
       ...(data.flow !== undefined ? { flow: data.flow } : {}),
       ...(data.researchRef !== undefined && data.researchRef !== "" ? { researchRef: data.researchRef } : {}),
     };

@@ -255,7 +255,16 @@ export class G1HistoricalDataAdapter implements HistoricalDataProvider {
   /** Fill unset query fields with capability defaults; explicit values are never overridden. */
   private withDefaults(params: Record<string, unknown>): HistoricalQuery {
     const p = params as Partial<HistoricalQuery> & { asset?: string };
-    const asset = typeof p.asset === "string" ? p.asset.toUpperCase() : undefined;
+    // Canonical-asset law: the engine's `asset` param may be a canonical instrument symbol
+    // (GC=F for gold, CL=F for crude, ^GSPC for SPX) because the same value flows to the
+    // equity/capability chain. Those are OUTSIDE this crypto venue's universe: serving them
+    // as `GC=F/USDT` would silently query a nonexistent pair and report "no history" for a
+    // real asset. They are rejected as a routing mismatch (the same law the equity adapter
+    // applies to crypto tickers) so recovery routes to the correct domain instead.
+    const asset = typeof p.asset === "string" ? p.asset.trim().toUpperCase() : undefined;
+    if (asset !== undefined && /[=^]/.test(asset)) {
+      throw new TransportError("SCHEMA_ERROR", `${asset} is not a crypto venue instrument; its history is served by the market-domain capability, not historical crypto candles`, { retriable: false });
+    }
     const symbol = p.symbol ?? (asset !== undefined ? (asset.includes("/") ? asset : `${asset}/USDT`) : "BTC/USDT");
     const nowMs = this.now().getTime();
     return {

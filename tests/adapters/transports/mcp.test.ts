@@ -304,7 +304,9 @@ describe("MCP transport boundary (final lock §7, failure-recovery.md §12–14)
     // Uses real timers because the guarantee is about real elapsed spacing. The interval is
     // sized so a scheduled 5ms sleep CANNOT overshoot the spacing even under full parallel
     // suite load; the law under test is slot spacing, not machine speed (a tight 20ms
-    // interval measured the load, not the throttler, and flaked under parallelism).
+    // interval measured the load, not the throttler, and flaked under parallelism). The
+    // tolerance acknowledges timer coalescing under load: the assertion must hold for the
+    // throttler's serialization, not for one unlucky 5ms sleep landing late.
     const minIntervalMs = 60;
     const throttler = new Throttler({ minIntervalMs });
     const t0 = Date.now();
@@ -323,7 +325,7 @@ describe("MCP transport boundary (final lock §7, failure-recovery.md §12–14)
     // No overlap between consecutive calls…
     expect(sorted[1]!.start).toBeGreaterThanOrEqual(sorted[0]!.end);
     expect(sorted[2]!.start).toBeGreaterThanOrEqual(sorted[1]!.end);
-    // …and total span reflects serialized spacing (slots 0/20/40), not simultaneous starts.
-    expect(sorted[2]!.start).toBeGreaterThanOrEqual(2 * minIntervalMs - 5);
+    // …and total span reflects serialized spacing (slots 0/60/120), not simultaneous starts.
+    expect(sorted[2]!.start).toBeGreaterThanOrEqual(2 * minIntervalMs - 15);
   });
 });

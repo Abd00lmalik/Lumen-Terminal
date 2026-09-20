@@ -23,6 +23,7 @@ import {
   type ProposedResearchPlan, type AdaptiveDecision, type PlannedStep,
 } from "../model/schemas.js";
 import { evidenceFromToolResult } from "../domain/evidence.js";
+import { normalizedResult } from "../domain/tool-result.js";
 import { subjectTermsOf } from "../domain/instruments.js";
 import { currentRun } from "../domain/run-context.js";
 import { synthesizeAnswer, renderAnswerSynthesis, type AnswerSynthesis } from "./synthesis.js";
@@ -38,6 +39,8 @@ import {
   type ResearchRequirement,
 } from "./requirements.js";
 import type { Evidence, Research } from "../domain/objects.js";
+import { createEvidence } from "../domain/objects.js";
+import { eventWindowEvidence, type EventWindowSpec } from "./event-window.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
 import type { Workspace } from "../domain/workspace.js";
 import { progressEvent, type ProgressListener } from "./progress.js";
@@ -109,6 +112,7 @@ export const PLAN_SYSTEM = [
   "- Broad synthesis questions that may span domains: CROSS_DOMAIN_SYNTHESIS is available as a deep-research capability of last resort; prefer specific capabilities first. WEB_SEARCH (bounded source discovery) is available when narrative or primary-source hunting matters.",
   "- For a company question, plan the smallest set that can answer it: market data for what happened, earnings/estimates for event context, company news for narrative, macro or index context only when the question crosses into the broader market.",
   "- REQUIREMENTS: also state the INFORMATION REQUIREMENTS that would answer the question, as a `requirements` array. Each entry is what must be KNOWN, in plain words (for example \"current policy or rates regime\", \"oil-specific supply developments\", \"the company's next earnings date and consensus estimates\", \"how similar setups resolved previously\"), with importance CRITICAL or SUPPORTING and a timeSensitivity of CURRENT, RECENT, HISTORICAL, or ANY. Requirements are the engine's coverage checklist: it re-checks each one against actual evidence and recovers the uncovered ones. State 3 to 8 requirements, each independently checkable, never a provider or tool name.",
+  "- EVENT EPISODES: when the question asks how an asset reacted to a PAST EVENT (\"how did gold and bitcoin behave around government shutdowns\", \"what happened the last time X\"), also state an `eventEpisodes` array: one entry per historical episode that would decide the question, each with the event's name, its approximate `from`/`to` ISO dates, and the `assets` (canonical names or tickers) whose market windows must be analyzed. The engine retrieves the candle history for those windows and computes the reaction metrics deterministically; name episodes only when their dates are historically well established (a recent, well-known shutdown; a named market crash; a specific policy decision).",
   "- LOCAL_KNOWLEDGE_RETRIEVAL serves the trader's own saved context (frameworks, saved research conclusions, memories, theses). When the question references our research, my framework, previous findings, or an evaluation against stored criteria, request it FIRST; live providers then supply the current-state evidence that outranks stale local claims.",
   "- Select the smallest capability set with material information value. Do not request every capability.",
   "- Respect trader constraints (e.g. exclusions) in scope.",
@@ -451,6 +455,68 @@ export async function runAdaptiveResearch(
       finalDecision = partialDecision("ROUND_BUDGET_EXHAUSTED", rounds.length, allExecutions.flatMap((e) => e.evidenceIds).length);
       options.onProgress?.(progressEvent("research_stopped", at(), `research stopped: ${stoppedBecause}`, { reason: stoppedBecause }));
       break;
+    }
+  }
+
+  // EVENT-WINDOW ANALYSIS (research contract §4/§5: raw historical data must become
+  // analytical evidence). When the planner proposed historical event episodes, the engine
+  // computes each episode's market windows DETERMINISTICALLY from this run's retrieved
+  // candles and mints one derived evidence object per asset window. Raw candles satisfy a
+  // historical-price requirement; ONLY this transformation satisfies a reaction requirement
+  // ("how did BTC behave around shutdowns"). Missing candle coverage is reported honestly
+  // (no window is computed, no data invented), and the window analysis runs BEFORE the
+  // deep-research fallback so the fallback sees the derived evidence in its context too.
+  const eventEpisodes = plan.eventEpisodes ?? [];
+  if (eventEpisodes.length > 0) {
+    // OHLCV evidence holds monthly JSON chunks; only those observations can feed a window.
+    const candleObservations = allExecutions
+      .flatMap((e) => e.evidenceIds)
+      .map((id) => workspace.getEvidence(id))
+      .filter((e): e is Evidence => e !== undefined)
+      .map((e) => e.observation)
+      .filter((obs) => obs.trim().startsWith("{"));
+    for (const episode of eventEpisodes) {
+      for (const asset of episode.assets) {
+        const spec: EventWindowSpec = { event: episode.event, from: episode.from, to: episode.to, asset };
+        const derived = eventWindowEvidence(spec, candleObservations);
+        if (derived === undefined) {
+          // The record does not cover this window: a genuine research gap, recorded on the
+          // requirement ledger's terms rather than papered over. The coverage assessment
+          // below still sees only the real evidence, so the requirement stays unsatisfied.
+          options.onProgress?.(progressEvent("capability_started", at(), `event window for ${asset} around "${episode.event}" is not covered by the retrieved history; scheduling historical retrieval`, { capability: "HISTORICAL_COMPARISON" }));
+          continue;
+        }
+        const evidence = createEvidence(
+          {
+            observation: derived.observation,
+            evidenceType: "HISTORICAL_EVENT_WINDOW",
+            evidenceClass: "DERIVED_OBSERVATION",
+            freshness: "HISTORICAL",
+            subject: asset.toUpperCase(),
+          },
+          { kind: "agent", detail: `event-window analysis: ${episode.event}` },
+          at(),
+        );
+        workspace.ingestEvidence(evidence, researchRef);
+        const windowResult = normalizedResult(
+          {
+            tool: "engine/event-window-analysis",
+            capability: "HISTORICAL_COMPARISON",
+            transport: "engine:derived",
+            params: { ...spec },
+            outputs: [],
+            completeness: "COMPLETE",
+            validation: "VALID",
+            freshness: "HISTORICAL",
+            failure: { type: "NONE", retriable: false },
+            limitations: [],
+          },
+          { kind: "agent", detail: `event-window analysis: ${episode.event}` },
+          at(),
+        );
+        allExecutions.push({ round: rounds.length + 1, capability: "HISTORICAL_COMPARISON", result: windowResult, evidenceIds: [evidence.id] });
+        options.onProgress?.(progressEvent("capability_completed", at(), `event window analyzed: ${asset} during "${episode.event}": ${derived.result.metrics.returnPct ?? "n/a"}% over ${derived.result.metrics.candles} candles`, { capability: "HISTORICAL_COMPARISON" }));
+      }
     }
   }
 

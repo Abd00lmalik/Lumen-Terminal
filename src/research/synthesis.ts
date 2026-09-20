@@ -33,6 +33,7 @@ export const ANSWER_SYNTHESIS_SCHEMA_DESC = [
   '   "mechanism": string,     // how it would act on the subject (transmission path)',
   '   "direction": string,     // which way it leans given the evidence, or "mixed"/"unclear"',
   '   "evidenceRefs": string[] // evidence ids from the context that support THIS factor',
+  '   "counterevidenceRefs": string[] // evidence ids from the context that WEAKEN or complicate this factor; [] when the context holds none (say so, never invent)',
   " }],",
   ' "whatWouldChangeTheView": string[], // observable conditions that would alter the conclusion',
   ' "implication": string,             // what the conclusion means for the trader\'s decision: one or two sentences, no process notes',
@@ -69,6 +70,7 @@ const SYNTHESIS_SYSTEM = [
   "- `implication` is decision support, not a process note: state what the conclusion means for the trader's read of the position, catalyst, risk or thesis (which factors are decisive, what to watch). Never mention evidence counts, research ids, storage, providers or disclosure levels.",
   "- Distinguish what is established from what is inferred. Never fabricate certainty, and never force a conclusion the evidence does not support.",
   "- Match the question's analytical shape: for 'what could affect X', give drivers/catalysts/risks with mechanisms and inversion conditions; for 'why did X move', give the timeline, the candidates, and the best-supported explanation; for 'does my thesis hold', judge the claims against the evidence.",
+  "- COUNTEREVIDENCE IS REQUIRED for every material factor: cite the context evidence that weakens or complicates it. When the context holds no counterevidence for a factor, return an empty array for it (the run searched and found none is a fact; a manufactured opposition is not). Do not restate the factor's own supporting evidence as opposition.",
   "Output style: plain professional prose, decision-useful for a trader. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
@@ -77,6 +79,8 @@ export interface AnswerFactor {
   readonly mechanism: string;
   readonly direction: string;
   readonly evidenceRefs: readonly string[];
+  /** Context evidence that weakens/complicates this factor; empty when none exists in context. */
+  readonly counterevidenceRefs: readonly string[];
 }
 
 export interface AnswerSynthesis {
@@ -155,6 +159,10 @@ export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promis
       mechanism: typeof rec.mechanism === "string" ? rec.mechanism : "",
       direction: typeof rec.direction === "string" ? rec.direction : "",
       evidenceRefs: keep(Array.isArray(rec.evidenceRefs) ? rec.evidenceRefs : []),
+      // Counterevidence refs must ALSO exist in the context and must not simply repeat the
+      // factor's own supporting refs (restating support as opposition is fabrication).
+      counterevidenceRefs: keep(Array.isArray(rec.counterevidenceRefs) ? rec.counterevidenceRefs : [])
+        .filter((r) => !Array.isArray(rec.evidenceRefs) || !(rec.evidenceRefs as unknown[]).map(String).includes(r)),
     });
   }
   const implication = typeof data.implication === "string" ? data.implication.trim() : "";
@@ -177,8 +185,11 @@ export function renderAnswerSynthesis(s: AnswerSynthesis): string {
   if (s.keyFactors.length > 0) {
     const factors = s.keyFactors.map((f) => {
       const refs = f.evidenceRefs.length > 0 ? ` [${f.evidenceRefs.join(", ")}]` : "";
+      const counter = f.counterevidenceRefs.length > 0
+        ? ` Counterevidence: [${f.counterevidenceRefs.join(", ")}]`
+        : " No material counterevidence was found in the retrieved evidence.";
       const dir = f.direction !== "" ? ` (${f.direction})` : "";
-      return `${f.factor}${dir}: ${f.mechanism}${refs}`;
+      return `${f.factor}${dir}: ${f.mechanism}${refs}.${counter}`;
     });
     parts.push("Factors that matter: " + factors.join("; ") + ".");
   }
