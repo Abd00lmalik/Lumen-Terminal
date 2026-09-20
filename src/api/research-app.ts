@@ -370,17 +370,35 @@ export class ResearchApp {
     // Full response hydration, three tiers: in-memory archive (this instance completed
     // the run) -> workspace-persisted response (restored from the store: any instance can
     // serve history verbatim) -> bare research summary (genuinely old entry).
-    const archived = this.responseArchive.get(ref);
-    if (archived !== undefined) return archived.response;
-    const persisted = this.ws().getResearchResponse(ref);
-    if (persisted !== undefined && typeof persisted === "object" && "answer" in (persisted as Record<string, unknown>)) {
-      return persisted as ResearchResponseDTO;
+    //
+    // RUN-AWARE: one submission creates several Research objects (plan steps), and the answer
+    // is persisted against the run's ANSWER-bearing member, which is not necessarily the ref
+    // the history entry exposes. Hydration therefore checks the whole run group, so clicking
+    // a history entry always yields the run's real answer instead of a bare summary.
+    const candidates = r.runId !== undefined
+      ? this.ws().listResearch().filter((m) => m.runId === r.runId).map((m) => m.id)
+      : [ref];
+    for (const id of candidates) {
+      const archivedHit = this.responseArchive.get(id);
+      if (archivedHit !== undefined) return archivedHit.response;
+      const persistedHit = this.ws().getResearchResponse(id);
+      if (persistedHit !== undefined && typeof persistedHit === "object" && "answer" in (persistedHit as Record<string, unknown>)) {
+        return persistedHit as ResearchResponseDTO;
+      }
     }
     // Legacy tier: runs completed before response persistence have no archived response,
     // but their judgment (statement, confidence, uncertainty, implications) WAS persisted.
     // Reconstruct the run's answer from that real persisted content — the user gets the
     // actual research conclusion, never a "reasoning not retained" refusal.
-    const j = r.currentJudgmentRef !== undefined ? this.ws().getJudgment(r.currentJudgmentRef) : undefined;
+    // Legacy tier: the run's answer-bearing member may be another object in the same run.
+    const answerMember = candidates
+      .map((id) => this.ws().getResearch(id))
+      .find((m) => m?.currentJudgmentRef !== undefined);
+    const j = answerMember?.currentJudgmentRef !== undefined
+      ? this.ws().getJudgment(answerMember.currentJudgmentRef)
+      : r.currentJudgmentRef !== undefined
+        ? this.ws().getJudgment(r.currentJudgmentRef)
+        : undefined;
     if (j !== undefined) {
       return {
         requestId: r.id,
@@ -397,9 +415,9 @@ export class ResearchApp {
         },
         limitations: [],
         researchRef: r.id,
-        evidenceRefs: [...r.evidenceRefs],
+        evidenceRefs: [...(answerMember ?? r).evidenceRefs],
         judgmentRef: j.id,
-        evidence: [...r.evidenceRefs].flatMap((er) => {
+        evidence: [...(answerMember ?? r).evidenceRefs].flatMap((er) => {
           const e = this.ws().getEvidence(er);
           return e === undefined ? [] : [evidenceToDTO(e)];
         }),
