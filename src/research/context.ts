@@ -104,6 +104,14 @@ const STOP_TERMS = new Set([
   "happen", "happened", "right", "now", "currently", "current", "today", "recent", "recently",
   "last", "week", "data", "price", "prices", "market", "markets", "question", "research",
   "gather", "compare", "comparison", "explain", "about", "with", "for", "from", "and", "or",
+  // Function words: tokens that appear in questions of ANY subject. Leaving them in made
+  // unrelated archive evidence "relevant" ("this"/"driving" matched headline prose), which
+  // is how a DeFi run's evidence reached an oil question's synthesis.
+  "this", "that", "these", "those", "there", "here", "they", "them", "their", "its", "it",
+  "in", "on", "at", "to", "of", "be", "been", "being", "has", "have", "had", "will",
+  "would", "may", "might", "can", "than", "then", "other", "others", "more", "most",
+  "much", "some", "any", "all", "not", "only", "also", "just", "very", "such", "into",
+  "over", "new", "get", "got", "make", "makes", "made", "things", "thing", "going",
 ]);
 
 /**
@@ -329,9 +337,18 @@ export function buildResearchContext(
       rejectedWrongTarget += 1;
       continue;
     }
-    // Tier 2 (lexical gate, archive evidence): evidence from OTHER runs enters only when
-    // it shares a key term with the current objective.
-    if (!isRunEvidence && relevantTerms !== undefined && !isRelevant(item.text, relevantTerms)) {
+    // Tier 2 (archive gate): evidence from OTHER runs is scoped by SUBJECT when the
+    // question's subject resolved, and by key terms otherwise. Subject scoping is the
+    // target-relevance law applied to the archive: a DeFi/TVL evidence object from an
+    // earlier crypto run must not enter an oil question merely because it shares a generic
+    // token ("this", "driving") with the question text — the live contamination where the
+    // oil synthesis cited ev_000326 (a DeFi run's evidence) as an oil-phase observation.
+    const archiveOk =
+      gateTerms !== undefined
+        ? isSubjectRelevant(item.text, gateTerms) ||
+          (e.subject !== undefined && isSubjectRelevant(e.subject, gateTerms))
+        : relevantTerms === undefined || isRelevant(item.text, relevantTerms);
+    if (!isRunEvidence && !archiveOk) {
       archiveBackground.count += 1;
       if (archiveBackground.sampleRefs.length < 5) archiveBackground.sampleRefs.push(e.id);
       continue;

@@ -283,4 +283,32 @@ describe("declared subject semantics (target-relevance law)", () => {
     expect(ctx.items.some((i) => i.ref === undeclaredEv.id)).toBe(false);
     expect(ctx.rejectedWrongTarget).toBe(1);
   });
+
+  it("archive evidence is scoped by SUBJECT, not by generic question words", () => {
+    // Live failure: an oil run's synthesis cited ev_000326 — a DeFi/TVL observation from an
+    // earlier crypto run — because the archive tier matched generic tokens ("this",
+    // "driving") in headline prose. Archive reuse is subject-scoped, not stopword-scoped.
+    const ws = new Workspace();
+    const defi = ws.addResearch({ objective: "defi tvl", question: "Research the current total value locked (TVL) in decentralized finance (DeFi).", flow: "WHAT_DID_YOU_FIND" }, origin);
+    ws.transitionResearch(defi.id, "ACTIVE", origin, "activated");
+    const staleId = ingest(
+      ws,
+      defi.id,
+      JSON.stringify({ title: "This is what is driving DeFi: TVL climbs as yields rotate into protocols", publisher: "CryptoWire" }),
+    );
+    ws.transitionResearch(defi.id, "COMPLETED", origin, "completed");
+
+    const oil = ws.addResearch({ objective: "oil drivers", question: "What is driving oil prices this week?", flow: "WHAT_COULD_AFFECT_IT" }, origin);
+    ws.transitionResearch(oil.id, "ACTIVE", origin, "activated");
+    ingest(ws, oil.id, JSON.stringify({ title: "Crude oil slips as OPEC+ weighs output", symbol: "CL=F", publisher: "Reuters" }));
+
+    const ctx = buildResearchContext(ws, {
+      researchRef: oil.id,
+      relevantTo: "What is driving oil prices this week?",
+      subjectTerms: [...subjectTermsOf("What is driving oil prices this week?") ?? []],
+    });
+    expect(ctx.items.some((i) => i.ref === staleId)).toBe(false);
+    expect(ctx.items.some((i) => i.text.includes("DeFi"))).toBe(false);
+    expect(ctx.archiveBackground?.count).toBe(1);
+  });
 });
