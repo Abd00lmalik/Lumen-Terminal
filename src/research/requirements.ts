@@ -224,8 +224,12 @@ export interface MatchOptions {
 
 export type MatchResult = "SATISFIES" | "STALE_ONLY" | "NO_MATCH";
 
-/** Whole-word subject check shared with the context gate (quote pairs included). */
-function concernsSubject(text: string, subjectTerms: ReadonlySet<string>): boolean {
+/**
+ * Whole-word subject check shared with the context gate (quote pairs included). Exported so
+ * the research loop can apply it at INGESTION: wrong-target provider output must not become
+ * this run's evidence at all (the context gate remains as defense in depth).
+ */
+export function concernsSubject(text: string, subjectTerms: ReadonlySet<string>): boolean {
   const upper = text.toUpperCase();
   const tokens = new Set(upper.split(/[^A-Z0-9]+/).filter((t) => t !== ""));
   for (const term of subjectTerms) {

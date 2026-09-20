@@ -83,6 +83,12 @@ export interface Evidence {
   readonly proxyBasis?: string;
   /** Tool-result provenance when this evidence came from a capability invocation. */
   readonly toolResultRef?: string;
+  /**
+   * Explicit subject/asset/entity the producing tool declared this output concerns (the
+   * adapter's `about`). Carried so the target-relevance gate can honor a declaration that
+   * the free-text observation never names (an indicator reading often omits its ticker).
+   */
+  readonly subject?: string;
   readonly provenance: Provenance;
 }
 
@@ -98,6 +104,7 @@ export function createEvidence(
     freshness?: Freshness;
     proxyBasis?: string;
     toolResultRef?: string;
+    subject?: string;
   },
   origin: ProvenanceOrigin,
   at = new Date(),
@@ -119,6 +126,7 @@ export function createEvidence(
     freshness: input.freshness ?? "CURRENT",
     ...(input.proxyBasis !== undefined ? { proxyBasis: input.proxyBasis } : {}),
     ...(input.toolResultRef !== undefined ? { toolResultRef: input.toolResultRef } : {}),
+    ...(input.subject !== undefined ? { subject: input.subject } : {}),
     provenance: createProvenance(origin, `evidence classified as ${input.evidenceClass}`, at),
   });
 }

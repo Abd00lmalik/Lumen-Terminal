@@ -318,7 +318,14 @@ export function buildResearchContext(
     // Tier 1.5 (subject gate, run evidence): when the question's subject resolved, even
     // THIS run's evidence must concern that subject to enter synthesis. Provider results
     // are not evidence of the question's subject merely because the run requested them.
-    if (isRunEvidence && gateTerms !== undefined && !isSubjectRelevant(item.text, gateTerms)) {
+    // The producing tool's EXPLICIT subject declaration (`about`, e.g. "BTC") is honored
+    // alongside the rendered text: a real indicator payload frequently omits its ticker, yet
+    // the adapter declared which subject it concerns. Declared subject, not free text alone.
+    const concernsSubject =
+      gateTerms === undefined ||
+      isSubjectRelevant(item.text, gateTerms) ||
+      (e.subject !== undefined && isSubjectRelevant(e.subject, gateTerms));
+    if (isRunEvidence && gateTerms !== undefined && !concernsSubject) {
       rejectedWrongTarget += 1;
       continue;
     }

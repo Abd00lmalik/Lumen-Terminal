@@ -130,6 +130,10 @@ export function evidenceFromToolResult(
       contradicts: options.claimRefs?.contradicts ?? [],
       freshness: options.freshness ?? result.freshness,
       ...(proxyBasis !== undefined ? { proxyBasis } : {}),
+      // The producing adapter's explicit subject declaration survives into the graph: the
+      // target-relevance gate must be able to honor it when the observation text itself
+      // never names the ticker (real indicator/news payloads often don't).
+      ...(output.about !== undefined && output.about.trim() !== "" ? { subject: output.about } : {}),
       toolResultRef: result.id,
     },
     origin,

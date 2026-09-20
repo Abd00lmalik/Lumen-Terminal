@@ -160,15 +160,61 @@ describe("hollow-complete guard (engine owns completion)", () => {
       capabilityParams: { asset: "CL=F" },
     });
 
-    expect(outcome.stoppedBecause).toBe("HOLLOW_COMPLETE_RECOVERY");
+    // With the ingestion gate, the wrong-domain item never becomes evidence, so the gap is
+    // detected either as a hollow completion or as unresolved requirement coverage; both
+    // roads lead to the same law: recovery fires before any answer can be produced.
+    expect(["HOLLOW_COMPLETE_RECOVERY", "REQUIREMENT_GAPS_UNRESOLVED"]).toContain(outcome.stoppedBecause);
     const deepExec = outcome.executions.find((e) => e.capability === "CROSS_DOMAIN_SYNTHESIS");
     expect(deepExec).toBeDefined(); // recovery fired with the exact question
     expect(outcome.finalDecision.decision).toBe("COMPLETE"); // upgraded after real evidence
     // The final context carries the oil finding and NOT the crypto headline.
     const texts = outcome.context.items.map((i) => i.text);
     expect(texts.some((t) => t.includes("OPEC"))).toBe(true);
+    // Wrong-target evidence never reaches synthesis — discarded at ingestion and/or gated
+    // out of the context; either way it is absent from what the answer model reads.
     expect(texts.some((t) => t.includes("BTC"))).toBe(false);
-    expect(outcome.context.rejectedWrongTarget).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("ingestion gate (wrong-target evidence never attaches to the run)", () => {
+  it("crypto provider output discarded at ingestion for an oil question; the answer's evidence is oil-only", async () => {
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", JSON.stringify({
+        objective: "oil price drivers this week",
+        scopeIncluded: [],
+        scopeExcluded: [],
+        tasks: [{ type: "GATHER", objective: "current crude oil price and oil-specific news", capabilities: ["EQUITY_MARKET_DATA", "NEWS_ANALYSIS"], completion: "c" }],
+        completionCriteria: [],
+        adaptationPolicy: "a",
+      })],
+      ["research.adaptive_decision", responses.adaptiveDecision("COMPLETE")],
+    ]));
+    const registry = new CapabilityRegistry();
+    registry.register(makeCapability("NEWS_ANALYSIS", "BTC ETF inflows hit a record as crypto markets rally"));
+    registry.register(makeCapability("EQUITY_MARKET_DATA", JSON.stringify({ symbol: "CL=F", price: 68.42, previousClose: 69.1, metric: "crude oil" })));
+
+    const ws = new Workspace();
+    const research = ws.addResearch(
+      { objective: "What is driving oil prices this week?", question: "What is driving oil prices this week?", flow: "WHY_IT_HAPPENED" },
+      origin,
+    );
+    ws.transitionResearch(research.id, "ACTIVE", origin, "activated");
+
+    const outcome = await runAdaptiveResearch("What is driving oil prices this week?", research.id, {
+      provider,
+      registry,
+      workspace: ws,
+      store: new MemoryStore(),
+      maxRounds: 1,
+      capabilityParams: { asset: "CL=F" },
+    });
+
+    // The run's evidence is oil-only: the crypto headline never became evidence, so no
+    // answer can describe it as this question's research context.
+    const texts = outcome.evidence.map((e) => e.observation);
+    expect(texts.some((t) => t.includes("CL=F") || t.toLowerCase().includes("crude"))).toBe(true);
+    expect(texts.some((t) => t.includes("BTC"))).toBe(false);
+    expect(outcome.context.items.some((i) => i.text.includes("BTC"))).toBe(false);
   });
 });
 
@@ -192,5 +238,49 @@ describe("sequential runs in one workspace stay isolated", () => {
     const texts = ctx.items.map((i) => i.text);
     expect(texts.some((t) => t.includes("Bitcoin"))).toBe(false);
     expect(texts.some((t) => t.includes("Nvidia"))).toBe(true);
+  });
+});
+
+describe("declared subject semantics (target-relevance law)", () => {
+  it("honors a tool's explicit `about` subject when the observation text never names it", () => {
+    // Real indicator payloads frequently omit their own ticker ("RSI(14) = 34.86"); the
+    // adapter declared `about: "BTC"`. The declaration is provenance, not fabrication: an
+    // undeclared subject must still be rejected.
+    const ws = new Workspace();
+    const run = ws.addResearch({ objective: "btc technicals", question: "What is the technical picture on BTC?", flow: "WHAT_HAPPENED" }, origin);
+    ws.transitionResearch(run.id, "ACTIVE", origin, "activated");
+
+    const declared: ToolResult = normalizedResult(
+      {
+        tool: "fake/ta", capability: "TECHNICAL_ANALYSIS", transport: "fake", params: {},
+        outputs: [{ outputClass: "QUANTITATIVE_OBSERVATION", content: "RSI(14) = 34.86 (last closed candle)", about: "BTC" }],
+        validation: "VALID",
+      },
+      { origin },
+    );
+    const declaredEv = evidenceFromToolResult(declared, declared.normalizedOutput[0]!, { kind: "tool", toolRef: declared.tool, invocation: declared.invocation.params }, {}, new Date());
+    expect(declaredEv.subject).toBe("BTC");
+    ws.ingestEvidence(declaredEv, run.id);
+
+    // An observation with NEITHER the subject in text NOR a declaration is still rejected.
+    const undeclared: ToolResult = normalizedResult(
+      {
+        tool: "fake/ta", capability: "TECHNICAL_ANALYSIS", transport: "fake", params: {},
+        outputs: [{ outputClass: "QUANTITATIVE_OBSERVATION", content: "RSI(14) = 61.10 (last closed candle)" }],
+        validation: "VALID",
+      },
+      { origin },
+    );
+    const undeclaredEv = evidenceFromToolResult(undeclared, undeclared.normalizedOutput[0]!, { kind: "tool", toolRef: undeclared.tool, invocation: undeclared.invocation.params }, {}, new Date());
+    ws.ingestEvidence(undeclaredEv, run.id);
+
+    const ctx = buildResearchContext(ws, {
+      researchRef: run.id,
+      relevantTo: "What is the technical picture on BTC?",
+      subjectTerms: [...subjectTermsOf("What is the technical picture on BTC?") ?? []],
+    });
+    expect(ctx.items.some((i) => i.ref === declaredEv.id)).toBe(true);
+    expect(ctx.items.some((i) => i.ref === undeclaredEv.id)).toBe(false);
+    expect(ctx.rejectedWrongTarget).toBe(1);
   });
 });

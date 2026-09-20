@@ -29,6 +29,7 @@ import {
   buildRequirements,
   coverageVerdict,
   exhaustUnresolved,
+  concernsSubject,
   recoveryCapabilities,
   requirementsFromTasks,
   type CoverageEvidence,
@@ -218,6 +219,8 @@ export async function runAdaptiveResearch(
     plan.requirements !== undefined && plan.requirements.length > 0
       ? buildRequirements(plan.requirements)
       : requirementsFromTasks(plan.tasks);
+  /** Wrong-target observations discarded at ingestion (diagnostic; never user-facing noise). */
+  let rejectedAtIngestion = 0;
   /** Capabilities for the NEXT round when it is a gap-recovery round (engine-scheduled). */
   let recoveryRoundCapabilities: readonly string[] | undefined;
   let recoveryRoundsUsed = 0;
@@ -266,6 +269,27 @@ export async function runAdaptiveResearch(
                 {},
                 at(),
               );
+              // INGESTION GATE (target-relevance law, first line of defense): when the
+              // question's subject resolved, provider output that does not concern it never
+              // becomes this run's evidence. The live failure this prevents: crypto RSS
+              // headlines attaching to an oil run, then being described as "the available
+              // research context" instead of the oil data that WAS retrieved.
+              // The declared subject (`about`) is honored as well as the observation text:
+              // a quantitative payload often never names its own ticker.
+              const concernsQuestion =
+                subjectTerms !== undefined &&
+                evidence.subject !== undefined &&
+                concernsSubject(evidence.subject, subjectTerms);
+              if (
+                subjectTerms !== undefined &&
+                subjectTerms.size > 0 &&
+                !concernsSubject(evidence.observation, subjectTerms) &&
+                !concernsQuestion
+              ) {
+                rejectedAtIngestion += 1;
+                options.onProgress?.(progressEvent("capability_completed", at(), `${capability}: ${rejectedAtIngestion} wrong-target observation(s) discarded (do not concern the question's subject)`, { capability }));
+                continue;
+              }
               workspace.ingestEvidence(evidence, researchRef);
               evidenceIds.push(evidence.id);
             } catch {
