@@ -14,7 +14,7 @@
  *   evidence beyond the underlying evidence state; same rule here for model input.
  */
 
-import type { Evidence, EvidenceClass, Freshness, Claim, Hypothesis, Judgment } from "../domain/objects.js";
+import type { Evidence, EvidenceClass, Freshness, Claim, Hypothesis } from "../domain/objects.js";
 import type { Workspace } from "../domain/workspace.js";
 import type { ToolResult } from "../domain/tool-result.js";
 
@@ -64,6 +64,8 @@ export interface ResearchContext {
    * exclusion is auditable and the model knows more exists behind an explicit boundary.
    */
   readonly archiveBackground?: { readonly count: number; readonly sampleRefs: readonly string[] };
+  /** Run-collected items demoted by the SUBJECT gate: this run ingested them but they do not concern the question's subject (wrong-target evidence; the loop's recovery reads this). */
+  readonly rejectedWrongTarget?: number;
   /** Which run the context is anchored to (the archive fallback when unscoped). */
   readonly currentResearchRef?: string;
   readonly currentResearchQuestion?: string;
@@ -126,6 +128,28 @@ function isRelevant(itemText: string, terms: Set<string>): boolean {
   return false;
 }
 
+/**
+ * Subject-term match (target-relevance law): the item concerns the question's subject.
+ * Beyond token equality, quote-pair concatenations (BTCUSDT for subject BTC) and
+ * whole-word occurrences ("BTC/USD", "oil prices" for subject OIL) count. Word-boundary
+ * matching keeps GOLD from matching GOLDMAN.
+ */
+function isSubjectRelevant(itemText: string, subjectTerms: Set<string>): boolean {
+  if (isRelevant(itemText, subjectTerms)) return true;
+  const upper = itemText.toUpperCase();
+  const itemTokens = new Set(upper.split(/[^A-Z0-9]+/).filter((t) => t !== ""));
+  for (const term of subjectTerms) {
+    for (const suffix of QUOTE_SUFFIXES) {
+      if (itemTokens.has(`${term}${suffix}`)) return true;
+    }
+    if (new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(upper)) return true;
+  }
+  return false;
+}
+
+/** Quote-asset suffixes that glue a ticker into a market symbol (BTCUSDT, EURUSD...). */
+const QUOTE_SUFFIXES = ["USDT", "USD", "USDC", "PERP"] as const;
+
 /** Map an evidence object to its context item kind; the epistemic boundary, mechanically. */
 export function contextKindForEvidence(e: Evidence): ContextItem["kind"] {
   switch (e.evidenceClass) {
@@ -154,7 +178,12 @@ function evidenceText(e: Evidence): string {
       const rec = parsed as Record<string, unknown>;
       if (typeof rec.title === "string") {
         const summary = typeof rec.summary === "string" ? `; ${String(rec.summary).slice(0, 200)}` : "";
-        return `${rec.title}${summary}`;
+        // The subject symbol MUST travel with the rendered text: the target-relevance gate
+        // matches on it, and headline text alone often never names the ticker (a headline
+        // says "Nvidia", the evidence's subject field says NVDA). Rendered verbatim from
+        // the payload; not fabrication.
+        const symbol = typeof rec.symbol === "string" ? ` [${rec.symbol}]` : "";
+        return `${rec.title}${summary}${symbol}`;
       }
       // Quantitative tool payloads arrive as one dense JSON line; models misread them as
       // "no data" (production-observed). Rendering the ACTUAL fields deterministically is not
@@ -219,6 +248,18 @@ export function buildResearchContext(
      * news as its "available research context" and concluded insufficiency.
      */
     readonly relevantTo?: string;
+    /**
+     * SUBJECT terms of the question (resolved instrument + tickers + crypto aliases;
+     * NOT generic market words). When set, the gate applies to ALL evidence — including
+     * evidence this very run collected. This is the target-relevance law: a provider
+     * returning wrong-domain items (crypto RSS during an oil question) must not enter
+     * synthesis merely because this run ingested them; wrong-target evidence is demoted
+     * with a rejection count, and the loop's recovery decides what to do about the gap.
+     * Callers pass this ONLY for independent research questions whose subject resolved;
+     * continuation flows (thesis hold, framework evaluation) keep run-scoped semantics
+     * because their objective legitimately does not name the subject.
+     */
+    readonly subjectTerms?: readonly string[];
     /** TOOL_RESULTs from this session, for failure/limitation reporting. */
     readonly executions?: readonly { readonly capability: string; readonly result: ToolResult }[];
     /** Set when the caller already knows evidence is insufficient (valid completion state). */
@@ -241,12 +282,19 @@ export function buildResearchContext(
   //    the decision model described crypto news as its context and concluded insufficiency).
   // Demoted items are counted in `archiveBackground` (rendered as one provenance line).
   const relevantTerms = relevanceTerms(options.relevantTo);
+  // Subject gate is OPT-IN: the caller (the adaptive loop for independent research
+  // questions) derives subject terms via subjectTermsOf and passes them here. When absent
+  // (continuation flows, thesis evaluation), run evidence keeps run-scoped semantics.
+  const gateTerms = options.subjectTerms !== undefined && options.subjectTerms.length > 0
+    ? new Set(options.subjectTerms.map((t) => t.toUpperCase()))
+    : undefined;
   const runEvidenceRefs = new Set<string>(
     options.researchRef !== undefined
       ? (workspace.getResearch(options.researchRef)?.evidenceRefs ?? [])
       : [],
   );
   const archiveBackground = { count: 0, sampleRefs: [] as string[] };
+  let rejectedWrongTarget = 0;
   for (const e of workspace.listEvidence()) {
     const item: ContextItem = {
       ref: e.id,
@@ -258,7 +306,17 @@ export function buildResearchContext(
       ...(e.proxyBasis !== undefined ? { proxyBasis: e.proxyBasis } : {}),
       ...(e.timestamp !== undefined ? { timestamp: e.timestamp } : {}),
     };
-    if (!runEvidenceRefs.has(e.id) && relevantTerms !== undefined && !isRelevant(evidenceText(e), relevantTerms)) {
+    const isRunEvidence = runEvidenceRefs.has(e.id);
+    // Tier 1.5 (subject gate, run evidence): when the question's subject resolved, even
+    // THIS run's evidence must concern that subject to enter synthesis. Provider results
+    // are not evidence of the question's subject merely because the run requested them.
+    if (isRunEvidence && gateTerms !== undefined && !isSubjectRelevant(item.text, gateTerms)) {
+      rejectedWrongTarget += 1;
+      continue;
+    }
+    // Tier 2 (lexical gate, archive evidence): evidence from OTHER runs enters only when
+    // it shares a key term with the current objective.
+    if (!isRunEvidence && relevantTerms !== undefined && !isRelevant(item.text, relevantTerms)) {
       archiveBackground.count += 1;
       if (archiveBackground.sampleRefs.length < 5) archiveBackground.sampleRefs.push(e.id);
       continue;
@@ -288,18 +346,10 @@ export function buildResearchContext(
       ...(current.confidence !== undefined ? { confidence: current.confidence } : {}),
       uncertainty: current.uncertainty,
     };
-  } else {
-    const fallback = workspace.listJudgments().find((j: Judgment) => j.status === "ACTIVE");
-    if (fallback !== undefined) {
-      judgment = {
-        ref: fallback.id,
-        statement: fallback.statement,
-        ...(fallback.confidence !== undefined ? { confidence: fallback.confidence } : {}),
-        uncertainty: fallback.uncertainty,
-      };
-    }
   }
-
+  // NO global judgment fallback: a run without its own judgment must not inherit another
+  // run's verdict (the stale-judgment contamination seen live). The context simply carries
+  // no judgment line; the engine mints one at completion.
   // --- failures → limitations ONLY (never negative evidence; M3 §9/§19) ---
   for (const { capability, result } of options.executions ?? []) {
     if (result.failure.type === "NONE") {
@@ -365,6 +415,7 @@ export function buildResearchContext(
     ...(currentResearch !== undefined ? { currentResearchRef: currentResearch.id, currentResearchQuestion: currentResearch.question } : {}),
     ...(researchRef === undefined ? { scope: "workspace_archive" as const } : { scope: "single_research" as const }),
     ...(archiveBackground.count > 0 ? { archiveBackground } : {}),
+    ...(rejectedWrongTarget > 0 ? { rejectedWrongTarget } : {}),
     items,
     claims,
     hypotheses,
@@ -389,6 +440,9 @@ export function renderResearchContext(ctx: ResearchContext): string {
     );
   } else if (ctx.researchRef !== undefined) {
     lines.push(`CONTEXT SCOPE: research ${ctx.researchRef}.`);
+  }
+  if (ctx.rejectedWrongTarget !== undefined && ctx.rejectedWrongTarget > 0) {
+    lines.push(`TARGET GATE: ${ctx.rejectedWrongTarget} item(s) collected during THIS run do not concern the question's subject and are EXCLUDED from synthesis (wrong-target evidence). They are recorded for provenance but are NOT research findings for this question.`);
   }
   if (ctx.archiveBackground !== undefined) {
     lines.push(`RELEVANCE GATE: ${ctx.archiveBackground.count} archived evidence object(s) from unrelated past questions are EXCLUDED from this context (sample: ${ctx.archiveBackground.sampleRefs.join(", ")}). If this question needs them, research the question directly; do not treat the exclusion as evidence of absence.`);

@@ -48,10 +48,10 @@ describe("progressive disclosure responses (M3 §11)", () => {
     ]));
 
     const registry = new CapabilityRegistry();
-    registry.register(fakeCapability("NEWS_ANALYSIS", "news item one"));
-    registry.register(fakeCapability("TECHNICAL_ANALYSIS", "price observation"));
-    registry.register(fakeCapability("MACRO_ANALYSIS", "cpi reading"));
-    registry.register(fakeCapability("SENTIMENT_ANALYSIS", "sentiment reading"));
+    registry.register(fakeCapability("NEWS_ANALYSIS", "BTC news item one"));
+    registry.register(fakeCapability("TECHNICAL_ANALYSIS", "BTC price observation"));
+    registry.register(fakeCapability("MACRO_ANALYSIS", "BTC-relevant cpi reading"));
+    registry.register(fakeCapability("SENTIMENT_ANALYSIS", "BTC sentiment reading"));
 
     const workspace = new Workspace();
     const lui = new Lui({ provider, workspace, store: newStore(), registry, now: () => new Date() });
@@ -95,7 +95,7 @@ describe("progressive disclosure responses (M3 §11)", () => {
     ]));
 
     const registry = new CapabilityRegistry();
-    registry.register(fakeCapability("NEWS_ANALYSIS", "news item one"));
+    registry.register(fakeCapability("NEWS_ANALYSIS", "BTC news item one"));
     const workspace = new Workspace();
     const lui = new Lui({ provider, workspace, store: newStore(), registry, now: () => new Date() });
     const result = await lui.handle("Show me the evidence for what happened to BTC");
@@ -125,7 +125,7 @@ describe("progressive disclosure responses (M3 §11)", () => {
     ]));
 
     const registry = new CapabilityRegistry();
-    registry.register(fakeCapability("NEWS_ANALYSIS", "news item one"));
+    registry.register(fakeCapability("NEWS_ANALYSIS", "BTC news item one"));
     const workspace = new Workspace();
     const lui = new Lui({ provider, workspace, store: newStore(), registry, now: () => new Date() });
     const result = await lui.handle("Give me the full trail");

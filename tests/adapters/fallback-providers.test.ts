@@ -53,7 +53,7 @@ describe("registry-owned provider failover (mandate §4)", () => {
       "coindesk.com": "<rss><channel><item><title>BTC ETF inflows hit record</title><pubDate>Tue, 15 Sep 2026 10:00:00 GMT</title></item></channel></rss>",
     })), 200);
 
-    const result = await registry.execute("NEWS_ANALYSIS", {}, origin);
+    const result = await registry.execute("NEWS_ANALYSIS", { question: "What is happening with BTC right now" }, origin);
     expect(result.failure.type).toBe("NONE");
     expect(result.tool).toBe("fallback/news-rss");
     // Outputs survive normalization with their epistemic class intact.
@@ -68,7 +68,7 @@ describe("registry-owned provider failover (mandate §4)", () => {
       "cointelegraph.com": "<rss><channel><item><title>Macro: rates steady</title></item></channel></rss>",
     })), 200);
 
-    const result = await registry.execute("NEWS_ANALYSIS", {}, origin);
+    const result = await registry.execute("NEWS_ANALYSIS", { question: "What is happening with BTC right now" }, origin);
     expect(result.failure.type).toBe("NONE");
     expect(result.attemptedProviders).toEqual([
       { provider: "bitget-signal/news_analysis", outcome: "threw" },
@@ -135,7 +135,7 @@ describe("registry-owned provider failover (mandate §4)", () => {
       "coindesk.com": "<rss><channel><item><title>Sentiment improves as ETF flows resume</title><pubDate>Tue, 15 Sep 2026 12:00:00 GMT</pubDate></item></channel></rss>",
     })), 200);
 
-    const result = await registry.execute("NEWS_ANALYSIS", {}, origin);
+    const result = await registry.execute("NEWS_ANALYSIS", { question: "What is happening with BTC right now" }, origin);
     expect(result.tool).toBe("fallback/news-rss");
     expect(result.failure.type).toBe("NONE");
     expect(result.normalizedOutput.length).toBeGreaterThan(0);
@@ -197,7 +197,7 @@ describe("fallback epistemic honesty (mandate §3A–3C)", () => {
       "coindesk.com": "<rss><channel><item><title>A</title><pubDate>Wed, 16 Sep 2026 01:00:00 GMT</pubDate></item></channel></rss>",
       "cointelegraph.com": "this is not xml at all",
     }));
-    const result = await adapter.execute("NEWS_ANALYSIS", {}, );
+    const result = await adapter.execute("NEWS_ANALYSIS", { question: "Bitcoin ETF flows turn positive" });
     expect(result.failure.type).toBe("NONE");
     expect(result.completeness).toBe("PARTIAL"); // one feed dead; honestly partial
     const item = result.outputs?.[0];
@@ -206,12 +206,37 @@ describe("fallback epistemic honesty (mandate §3A–3C)", () => {
     expect((item?.content as { publishedAt?: string }).publishedAt).toContain("2026");
   });
 
+  it("NEWS fallback selects feeds by SUBJECT: a non-crypto question never receives crypto feeds (target-relevance law)", async () => {
+    const adapter = new NewsFallbackAdapter(fakeFetch({
+      "feeds.finance.yahoo.com": "<rss><channel><item><title>Oil slides as OPEC+ output rises</title><pubDate>Wed, 16 Sep 2026 02:00:00 GMT</pubDate></item></channel></rss>",
+      "dj.com": "<rss><channel><item><title>Dollar strengthens on Fed remarks</title></item></channel></rss>",
+      "coindesk.com": "<rss><channel><item><title>BTC ETF inflows hit record</title></item></channel></rss>",
+    }));
+    const result = await adapter.execute("NEWS_ANALYSIS", { question: "What is driving oil prices this week" });
+    expect(result.failure.type).toBe("NONE");
+    const titles = (result.outputs ?? []).map((o) => (o.content as { title: string }).title);
+    expect(titles).toContain("Oil slides as OPEC+ output rises");
+    expect(titles.every((t) => !t.includes("BTC"))).toBe(true); // crypto feed never consulted
+  });
+
+  it("NEWS fallback keeps crypto feeds for crypto subjects", async () => {
+    const adapter = new NewsFallbackAdapter(fakeFetch({
+      "coindesk.com": "<rss><channel><item><title>BTC ETF inflows hit record</title></item></channel></rss>",
+      "feeds.finance.yahoo.com": "<rss><channel><item><title>Oil slides as OPEC+ output rises</title></item></channel></rss>",
+    }));
+    const result = await adapter.execute("NEWS_ANALYSIS", { question: "What is happening with Bitcoin today" });
+    expect(result.failure.type).toBe("NONE");
+    const titles = (result.outputs ?? []).map((o) => (o.content as { title: string }).title);
+    expect(titles).toContain("BTC ETF inflows hit record");
+    expect(titles.every((t) => !t.includes("Oil"))).toBe(true);
+  });
+
   it("NEWS fallback keyword filtering keeps only matching items", async () => {
     const adapter = new NewsFallbackAdapter(fakeFetch({
       "coindesk.com": "<rss><channel><item><title>BTC ETF approved</title></item><item><title>Altcoin news</title></item></channel></rss>",
       "cointelegraph.com": "<rss><channel><item><title>BTC halving recap</title></item></channel></rss>",
     }));
-    const result = await adapter.execute("NEWS_ANALYSIS", { keyword: "BTC" });
+    const result = await adapter.execute("NEWS_ANALYSIS", { keyword: "BTC", question: "Bitcoin ETF flows" });
     expect(result.outputs?.every((o) => ((o.content as { title: string }).title).includes("BTC"))).toBe(true);
     expect(result.outputs?.length).toBe(2);
   });

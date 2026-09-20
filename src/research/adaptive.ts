@@ -23,6 +23,7 @@ import {
   type ProposedResearchPlan, type AdaptiveDecision, type PlannedStep,
 } from "../model/schemas.js";
 import { evidenceFromToolResult } from "../domain/evidence.js";
+import { subjectTermsOf } from "../domain/instruments.js";
 import type { Evidence, Research } from "../domain/objects.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
 import type { Workspace } from "../domain/workspace.js";
@@ -51,7 +52,7 @@ export interface AdaptiveLoopOutcome {
   readonly executions: readonly RoundExecution[];
   readonly finalDecision: AdaptiveDecision;
   readonly evidence: readonly Evidence[];
-  readonly stoppedBecause: "EVIDENCE_SUFFICIENT" | "MODEL_INSUFFICIENT_EVIDENCE" | "ROUND_BUDGET_EXHAUSTED" | "TIME_BUDGET_EXHAUSTED" | "MODEL_FAILURE";
+  readonly stoppedBecause: "EVIDENCE_SUFFICIENT" | "MODEL_INSUFFICIENT_EVIDENCE" | "HOLLOW_COMPLETE_RECOVERY" | "ROUND_BUDGET_EXHAUSTED" | "TIME_BUDGET_EXHAUSTED" | "MODEL_FAILURE";
   /** Typed model failure when the loop ended that way; never fabricated around. */
   readonly modelFailure?: ModelFailure;
   readonly context: ResearchContext;
@@ -163,6 +164,13 @@ export async function runAdaptiveResearch(
   const systemOrigin: ProvenanceOrigin = { kind: "agent", detail: "adaptive research loop" };
   const workspace = options.workspace;
   const maxRounds = options.maxRounds ?? MAX_RESEARCH_ROUNDS;
+  // Subject scope (target-relevance law): derive the question's subject terms (instrument,
+  // tickers, crypto aliases) once. When they resolve, BOTH context builds gate ALL evidence
+  // — including this run's own — against the subject, so wrong-domain provider output can
+  // never become the question's findings. Continuation-style objectives (no resolvable
+  // subject) keep run-scoped semantics.
+  const resolvedAsset = typeof options.capabilityParams?.asset === "string" ? options.capabilityParams.asset : undefined;
+  const subjectTerms = subjectTermsOf(objective, resolvedAsset);
 
   // 1. Model proposes the plan (validated; invalid output = model failure, not execution).
   let plan: ProposedResearchPlan;
@@ -243,6 +251,7 @@ export async function runAdaptiveResearch(
     const context = buildResearchContext(workspace, {
       researchRef,
       relevantTo: objective,
+      ...(subjectTerms !== undefined ? { subjectTerms: [...subjectTerms] } : {}),
       executions: allExecutions.map((e) => ({ capability: e.capability, result: e.result })),
     });
     let decision: AdaptiveDecision;
@@ -286,6 +295,23 @@ export async function runAdaptiveResearch(
     rounds.push({ round, executions, decision });
 
     if (decision.decision === "COMPLETE") {
+      // HOLLOW-COMPLETE GUARD (target-relevance law): a COMPLETE with zero subject-relevant
+      // run evidence is not a completion — it is the live "crypto evidence answered an oil
+      // question" failure wearing a green checkmark. The engine (not the model) owns
+      // completion; when the subject gate rejected EVERY item this run collected, the
+      // correct next state is RECOVERY: the deep-research tier fires with the exact
+      // question instead of shipping an answer built from wrong-domain evidence.
+      const runEvidenceIds = new Set(allExecutions.flatMap((e) => e.evidenceIds));
+      const relevantRunEvidence = [...runEvidenceIds].filter((id) => context.items.some((i) => i.ref === id)).length;
+      if (subjectTerms !== undefined && runEvidenceIds.size > 0 && relevantRunEvidence === 0) {
+        stoppedBecause = "HOLLOW_COMPLETE_RECOVERY";
+        finalDecision = {
+          decision: "INSUFFICIENT_EVIDENCE",
+          rationale: "The capabilities executed for this question returned evidence that does not concern the question's subject; specialized research recovery runs before any answer.",
+          nextTasks: [],
+        };
+        break;
+      }
       stoppedBecause = "EVIDENCE_SUFFICIENT";
       finalDecision = decision;
       break;
@@ -323,7 +349,7 @@ export async function runAdaptiveResearch(
   // last legitimate path before declaring genuine insufficiency (§19).
   const budgetStopped = stoppedBecause === "TIME_BUDGET_EXHAUSTED" || stoppedBecause === "ROUND_BUDGET_EXHAUSTED";
   const deepResearchFired =
-    (stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE" || budgetStopped) &&
+    (stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE" || budgetStopped || stoppedBecause === "HOLLOW_COMPLETE_RECOVERY") &&
     !allExecutions.some((e) => e.capability === "CROSS_DOMAIN_SYNTHESIS") &&
     options.registry.resolve("CROSS_DOMAIN_SYNTHESIS").length > 0 &&
     (options.deadlineMs === undefined || at().getTime() < options.deadlineMs);
@@ -410,6 +436,7 @@ export async function runAdaptiveResearch(
     context: buildResearchContext(workspace, {
       researchRef,
       relevantTo: objective,
+      ...(subjectTerms !== undefined ? { subjectTerms: [...subjectTerms] } : {}),
       executions: allExecutions.map((e) => ({ capability: e.capability, result: e.result })),
     }),
   };

@@ -34,6 +34,7 @@ import { validateModelOutput } from "../model/provider.js";
 import type { Workspace } from "../domain/workspace.js";
 import type { SavedArtifact, Thesis } from "../domain/thesis.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
+import { resolveInstrument } from "../domain/instruments.js";
 import type { WorkspaceStore } from "../persistence/index.js";
 import { runAdaptiveResearch, type AdaptiveLoopOutcome, MAX_RESEARCH_ROUNDS } from "../research/adaptive.js";
 import { progressEvent, type ProgressListener } from "../research/progress.js";
@@ -564,10 +565,17 @@ export class Lui {
     // back is how capability params ended up empty and every equity capability failed
     // SCHEMA_ERROR for "no ticker symbol resolved".
     const objectiveTicker = /\b[A-Z][A-Z0-9]{1,5}\b/.exec(objective)?.[0];
+    // Canonical instrument resolution (target-resolution law): commodities/metals/FX/indices
+    // resolve to their Yahoo-tradable symbols (oil -> CL=F) deterministically, BEFORE any
+    // workspace fallback. The active thesis is a target source ONLY when the objective
+    // actually references the trader's own material — an independent question must never
+    // inherit the thesis's asset as its research target (live contamination path).
+    const referencesTraderMaterial = /\b(thesis|framework|my (view|position|setup|thesis|framework))\b/i.test(objective);
     const asset = step.params["asset"]
       ?? result.target.asset
+      ?? resolveInstrument(objective)?.symbol
       ?? objectiveTicker
-      ?? this.options.workspace.activeTheses()[0]?.scope.entities[0];
+      ?? (referencesTraderMaterial ? this.options.workspace.activeTheses()[0]?.scope.entities[0] : undefined);
     const constraints = step.params["constraints"] !== undefined ? step.params["constraints"].split(";").map((s) => s.trim()).filter((s) => s !== "") : undefined;
     const now = this.options.now;
     if (flow === "WHY_IT_HAPPENED") {
@@ -711,11 +719,14 @@ export class Lui {
         store: this.options.store,
         constraints: step.params["constraints"] !== undefined ? step.params["constraints"].split(";").map((s) => s.trim()).filter((s) => s !== "") : [],
         capabilityParams: {
-          // Same deterministic backstop as dispatchM4Flow: the resolved target (or an
-          // exact ticker in the objective) must reach capability params even when the
-          // plan step omitted the asset; equity/earnings adapters SCHEMA_ERROR otherwise.
-          ...((step.params["asset"] ?? resolvedAsset ?? /\b[A-Z][A-Z0-9]{1,5}\b/.exec(step.params["objective"] ?? step.description)?.[0]) !== undefined
-            ? { asset: (step.params["asset"] ?? resolvedAsset ?? /\b[A-Z][A-Z0-9]{1,5}\b/.exec(step.params["objective"] ?? step.description)?.[0]) as string }
+          // Same deterministic backstop as dispatchM4Flow: the resolved target, a canonical
+          // instrument (oil -> CL=F), or an exact ticker in the objective must reach
+          // capability params even when the plan step omitted the asset; symbol-scoped
+          // adapters SCHEMA_ERROR otherwise, and the chain would fall through to
+          // domain-wrong fallbacks. Priority: explicit step asset > LUI-resolved target >
+          // canonical instrument > ticker-shaped token.
+          ...((step.params["asset"] ?? resolvedAsset ?? resolveInstrument(step.params["objective"] ?? step.description)?.symbol ?? /\b[A-Z][A-Z0-9]{1,5}\b/.exec(step.params["objective"] ?? step.description)?.[0]) !== undefined
+            ? { asset: (step.params["asset"] ?? resolvedAsset ?? resolveInstrument(step.params["objective"] ?? step.description)?.symbol ?? /\b[A-Z][A-Z0-9]{1,5}\b/.exec(step.params["objective"] ?? step.description)?.[0]) as string }
             : {}),
           // G2 DISCOVER falls back to the question text when a task carries no query:
           // the objective still bounds the investigation; never a hard schema failure.

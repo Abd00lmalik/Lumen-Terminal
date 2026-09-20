@@ -18,6 +18,14 @@
 import type { ProviderAdapter, CapabilityName } from "./capability-registry.js";
 import type { ToolResultInput, ToolOutput } from "../domain/tool-result.js";
 import { RestTransport } from "./transports/rest.js";
+import { subjectTermsOf } from "../domain/instruments.js";
+
+/** Tickers/names that mark the question's subject as crypto (crypto feeds serve ONLY these). */
+const CRYPTO_TERMS: ReadonlySet<string> = new Set([
+  "BTC", "BITCOIN", "ETH", "ETHEREUM", "SOL", "SOLANA", "XRP", "RIPPLE", "BNB", "ADA", "CARDANO",
+  "DOGE", "DOGECOIN", "AVAX", "AVALANCHE", "LINK", "CHAINLINK", "DOT", "POLKADOT", "LTC", "LITECOIN",
+  "TRX", "TRON", "ZEC", "ZCASH", "SHIB", "TON", "MATIC", "CRYPTO", "DEFI", "ALTCOIN", "STABLECOIN",
+]);
 import { RawCapture } from "./transports/resilience.js";
 
 // ---------------------------------------------------------------------------
@@ -64,20 +72,28 @@ async function fetchFeedXml(
 }
 
 // ---------------------------------------------------------------------------
-// NEWS fallback; public crypto RSS feeds. Each item carries publisher + timestamp + url;
-// reporting is SECONDARY by default (G2's classification law applied at this layer).
+// NEWS fallback; public RSS feeds, selected by the question's subject (target-relevance
+// law): crypto feeds serve crypto subjects; general-market feeds (Yahoo Finance top
+// stories, Reuters via Yahoo) serve everything else. Serving CoinDesk for an OIL question
+// is the contamination path that produced wrong-domain answers. Each item carries
+// publisher + timestamp + url; reporting is SECONDARY by default (G2's law).
 // ---------------------------------------------------------------------------
 
-const NEWS_FEEDS = [
+const CRYPTO_FEEDS = [
   { url: "https://www.coindesk.com/arc/outboundfeeds/rss/", publisher: "CoinDesk" },
   { url: "https://cointelegraph.com/rss", publisher: "Cointelegraph" },
+] as const;
+
+const GENERAL_FEEDS = [
+  { url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=%5EGSPC&region=US&lang=en-US", publisher: "Yahoo Finance" },
+  { url: "https://feeds.a.dj.com/rss/RSSMarketsMain.xml", publisher: "WSJ Markets" },
 ] as const;
 
 export class NewsFallbackAdapter implements ProviderAdapter {
   readonly providerId = "fallback/news-rss";
   readonly capabilities: readonly CapabilityName[] = ["NEWS_ANALYSIS"];
   readonly limitations: readonly string[] = [
-    "fallback provider: public crypto RSS feeds (CoinDesk/Cointelegraph); secondary reporting, not primary sources",
+    "fallback provider: public RSS feeds selected by the question's subject (crypto feeds only for crypto subjects; general-market feeds otherwise); secondary reporting, not primary sources",
     "headline-level aggregation; per-feed errors skip that feed (completeness may be PARTIAL)",
     "retrieval failure is a technical condition, never negative evidence",
   ];
@@ -95,10 +111,16 @@ export class NewsFallbackAdapter implements ProviderAdapter {
       throw new Error(`${this.providerId} has no mapping for capability ${capability}`);
     }
     const keyword = typeof params.keyword === "string" ? params.keyword.toLowerCase() : undefined;
+    // Subject-aware feed selection: crypto assets keep the crypto feeds; every other
+    // subject (oil, gold, equities, macro, none) gets general-market feeds. A crypto feed
+    // is never a news source for a non-crypto question.
+    const subjectTerms = subjectTermsOf(typeof params.question === "string" ? params.question : undefined, typeof params.asset === "string" ? params.asset : undefined);
+    const isCryptoSubject = subjectTerms !== undefined && [...subjectTerms].some((t) => CRYPTO_TERMS.has(t));
+    const feeds = isCryptoSubject ? CRYPTO_FEEDS : GENERAL_FEEDS;
     const outputs: ToolOutput[] = [];
     const errors: string[] = [];
     let lastRawReference: string | undefined;
-    for (const feed of NEWS_FEEDS) {
+    for (const feed of feeds) {
       try {
         const xml = await fetchFeedXml(feed.url, this.rawCapture, this.fetchImpl);
         lastRawReference = `web:GET ${feed.url}`;
