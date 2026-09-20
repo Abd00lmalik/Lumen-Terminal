@@ -532,3 +532,55 @@ describe("error taxonomy regression", () => {
 });
 
 // ModelFailure imported at top (used in the typed-failure test).
+
+// ---------------------------------------------------------------------------
+// Legacy history hydration (production repair: "Full reasoning is not retained")
+// ---------------------------------------------------------------------------
+describe("legacy history hydration", () => {
+  it("serves a pre-persistence run's persisted judgment as its answer — never a refusal boilerplate", async () => {
+    const provider = new FakeModelProvider(new Map());
+    const { app } = await makeApp({
+      provider,
+      seed: (ws) => {
+        const research = ws.addResearch({ objective: "TSLA price research", question: "Fetch the current TSLA stock price", flow: "WHAT_HAPPENED" }, trader);
+        ws.transitionResearch(research.id, "ACTIVE", { kind: "agent", detail: "seed" }, "activated");
+        ws.transitionResearch(research.id, "COMPLETED", { kind: "agent", detail: "seed" }, "completed");
+        ws.addJudgment({
+          researchRef: research.id,
+          statement: "TSLA trades near 364.27 USD, down 0.32% on the session.",
+          basis: { supportingEvidence: [], opposingEvidence: [], keyClaims: [], hypotheses: [] },
+          confidence: "MODERATE", uncertainty: ["intraday drift possible"], implications: ["week-over-week comparison favors the bulls"], unresolvedQuestions: [],
+        }, trader);
+      },
+    });
+    const list = (await app.inject({ method: "GET", url: "/api/research" })).json() as { ref: string }[];
+    const ref = list[0]?.ref;
+    expect(ref).toBeDefined();
+    const dto = (await app.inject({ method: "GET", url: `/api/research/${ref}` })).json();
+    // The judgment IS the archived reasoning for legacy runs: real persisted content.
+    expect(dto.outcome).toBe("COMPLETED");
+    expect(dto.answer.answer).toBe("TSLA trades near 364.27 USD, down 0.32% on the session.");
+    expect(dto.answer.confidence).toBe("MODERATE");
+    expect(dto.answer.keyUncertainty).toBe("intraday drift possible");
+    expect(dto.answer.implication).toBe("week-over-week comparison favors the bulls");
+    expect(dto.judgmentRef).toBeDefined();
+    expect(JSON.stringify(dto)).not.toContain("Full reasoning is not retained");
+    await app.close();
+  });
+
+  it("still serves the bare research summary for a legacy run with no judgment (honest objective+status, no fabrication)", async () => {
+    const provider = new FakeModelProvider(new Map());
+    const { app } = await makeApp({
+      provider,
+      seed: (ws) => {
+        const research = ws.addResearch({ objective: "aborted objective", question: "q", flow: "WHAT_HAPPENED" }, trader);
+        ws.transitionResearch(research.id, "ACTIVE", { kind: "agent", detail: "seed" }, "activated");
+      },
+    });
+    const list = (await app.inject({ method: "GET", url: "/api/research" })).json() as { ref: string }[];
+    const dto = (await app.inject({ method: "GET", url: `/api/research/${list[0]?.ref}` })).json();
+    expect(dto.ref).toBeDefined();
+    expect(dto.answer).toBeUndefined(); // no judgment → no invented answer
+    await app.close();
+  });
+});

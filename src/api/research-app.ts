@@ -318,6 +318,36 @@ export class ResearchApp {
     if (persisted !== undefined && typeof persisted === "object" && "answer" in (persisted as Record<string, unknown>)) {
       return persisted as ResearchResponseDTO;
     }
+    // Legacy tier: runs completed before response persistence have no archived response,
+    // but their judgment (statement, confidence, uncertainty, implications) WAS persisted.
+    // Reconstruct the run's answer from that real persisted content — the user gets the
+    // actual research conclusion, never a "reasoning not retained" refusal.
+    const j = r.currentJudgmentRef !== undefined ? this.ws().getJudgment(r.currentJudgmentRef) : undefined;
+    if (j !== undefined) {
+      return {
+        requestId: r.id,
+        action: "RESEARCH",
+        outcome: "COMPLETED",
+        answer: {
+          answer: j.statement,
+          supportingReasons: [],
+          opposingReasons: [],
+          confidence: j.confidence ?? "UNKNOWN",
+          keyUncertainty: j.uncertainty[0] ?? "",
+          implication: j.implications[0] ?? "",
+          citedObjectRefs: [j.id],
+        },
+        limitations: [],
+        researchRef: r.id,
+        evidenceRefs: [...r.evidenceRefs],
+        judgmentRef: j.id,
+        evidence: [...r.evidenceRefs].flatMap((er) => {
+          const e = this.ws().getEvidence(er);
+          return e === undefined ? [] : [evidenceToDTO(e)];
+        }),
+        judgments: [judgmentToDTO(j)],
+      };
+    }
     return researchToDTO(r);
   }
 
