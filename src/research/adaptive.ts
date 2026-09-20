@@ -186,6 +186,18 @@ export async function runAdaptiveResearch(
   const resolvedAsset = typeof options.capabilityParams?.asset === "string" ? options.capabilityParams.asset : undefined;
   const subjectTerms = subjectTermsOf(objective, resolvedAsset);
 
+  // ID RESERVATION (multi-instance law): claim this run's monotonic id in the shared blob
+  // BEFORE the (long) research work. Serverless instances seed their counters from the blob;
+  // a run that only persists at conclusion is invisible to a concurrent instance, which then
+  // mints the SAME id and silently overwrites one run with the other (observed live:
+  // rs_000070 held both an oil and a gold run). Best-effort: the conclusion save (which
+  // propagates failures) stays authoritative, so a reservation hiccup cannot fail the run.
+  try {
+    await options.store.save(workspace.toSnapshot());
+  } catch {
+    // Ignored by design; see above.
+  }
+
   // 1. Model proposes the plan (validated; invalid output = model failure, not execution).
   let plan: ProposedResearchPlan;
   try {

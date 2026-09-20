@@ -340,6 +340,14 @@ export interface Research {
   readonly objective: string;
   readonly question: string;
   readonly flow: string; // one of the 8 locked flows (see research-flows.md)
+  /**
+   * The user submission this object belongs to. One trader question = one run, even when the
+   * action plan / flow phases create several internal Research objects. History groups by
+   * this id so intermediate tasks never appear as separate top-level questions.
+   */
+  readonly runId?: string;
+  /** The trader's verbatim question for the run — the text history is allowed to show. */
+  readonly userQuestion?: string;
   readonly status: ObjectStatus;
   readonly branchRefs: readonly string[];
   readonly claimRefs: readonly string[];
@@ -353,7 +361,7 @@ export interface Research {
 }
 
 export function createResearch(
-  input: { objective: string; question: string; flow: string },
+  input: { objective: string; question: string; flow: string; runId?: string; userQuestion?: string },
   origin: ProvenanceOrigin,
   at = new Date(),
 ): Research {
@@ -362,6 +370,8 @@ export function createResearch(
     objective: input.objective,
     question: input.question,
     flow: input.flow,
+    ...(input.runId !== undefined ? { runId: input.runId } : {}),
+    ...(input.userQuestion !== undefined ? { userQuestion: input.userQuestion } : {}),
     status: "DRAFT",
     branchRefs: Object.freeze([]),
     claimRefs: Object.freeze([]),

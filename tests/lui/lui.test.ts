@@ -504,6 +504,45 @@ describe("adaptive research loop (M3 §7/§8)", () => {
     expect(workspace.getEvidence(outcome.evidence[0]!.id)).toBeDefined();
   });
 
+  it("reserves the run's id in the store BEFORE executing capabilities (multi-instance id law)", async () => {
+    // Serverless instances seed their id counters from the shared blob. A run that only
+    // persists at conclusion is invisible to a concurrent instance, which then mints the
+    // SAME id and silently overwrites one run with the other (live: rs_000070 held both an
+    // oil run and a gold run). The run must therefore be persisted the moment it exists.
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", responses.researchPlan()],
+      ["research.adaptive_decision", responses.adaptiveDecision("COMPLETE")],
+    ]));
+    let saves = 0;
+    const savesAtExecution: number[] = [];
+    const store = {
+      async save(): Promise<void> { saves += 1; },
+      async load(): Promise<undefined> { return undefined; },
+    } as unknown as import("../../src/persistence/index.js").WorkspaceStore;
+    const registry = new CapabilityRegistry();
+    registry.register({
+      providerId: "fake/record",
+      capabilities: ["NEWS_ANALYSIS"],
+      limitations: [],
+      freshnessProfile: "test:live",
+      async execute(cap) {
+        savesAtExecution.push(saves);
+        return {
+          tool: "fake/record", capability: cap, transport: "fake",
+          outputs: [{ outputClass: "QUANTITATIVE_OBSERVATION", content: "BTC reading", about: "BTC" }],
+        };
+      },
+    });
+    const workspace = new Workspace();
+    const research = workspace.addResearch({ objective: "What happened to BTC?", question: "q", flow: "WHAT_HAPPENED" }, trader);
+    workspace.transitionResearch(research.id, "ACTIVE", system, "activated");
+
+    await runAdaptiveResearch("What happened to BTC?", research.id, { provider, registry, workspace, store });
+
+    expect(savesAtExecution).toHaveLength(1);
+    expect(savesAtExecution[0]).toBeGreaterThan(0); // persisted before the first capability ran
+  });
+
   it("contradiction-driven continuation: a CONTINUE decision triggers a second round with new capabilities", async () => {
     let call = 0;
     const provider = new FakeModelProvider(new Map([

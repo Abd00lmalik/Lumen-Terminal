@@ -201,6 +201,12 @@ export interface ResearchDTO {
   readonly hypothesisRefs: readonly string[];
   readonly judgmentRefs: readonly string[];
   readonly history: readonly string[];
+  /** The user submission this object belongs to (one question = one run). */
+  readonly runRef?: string;
+  /** The trader's verbatim question for the run; the text history shows. */
+  readonly userQuestion?: string;
+  /** Internal Research objects of the same run (plan steps, flow phases) — children, never top-level. */
+  readonly internalRefs?: readonly string[];
 }
 
 export function researchToDTO(r: Research): ResearchDTO {
@@ -209,6 +215,8 @@ export function researchToDTO(r: Research): ResearchDTO {
     objective: r.objective,
     question: r.question,
     flow: r.flow,
+    ...(r.runId !== undefined ? { runRef: r.runId } : {}),
+    ...(r.userQuestion !== undefined ? { userQuestion: r.userQuestion } : {}),
     status: r.status,
     ...(r.currentJudgmentRef !== undefined ? { currentJudgmentRef: r.currentJudgmentRef } : {}),
     evidenceRefs: idRefs(r.evidenceRefs),

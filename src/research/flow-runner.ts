@@ -240,6 +240,16 @@ export async function runFlow(
   const workspace = options.workspace;
   const maxRounds = options.maxRounds ?? MAX_RESEARCH_ROUNDS;
 
+  // ID RESERVATION (multi-instance law): claim this run's monotonic id in the shared blob
+  // before the long research work, so a concurrent serverless instance seeding from the blob
+  // cannot mint the same id and silently overwrite one run with the other. Best-effort: the
+  // conclusion save (which propagates failures) stays authoritative.
+  try {
+    await options.store.save(workspace.toSnapshot());
+  } catch {
+    // Ignored by design; see above.
+  }
+
   // 1. Model proposes the plan (flow guidance included; validated or it is a model failure).
   let plan: ProposedResearchPlan;
   try {

@@ -98,6 +98,38 @@ describe("request handling", () => {
     await app.close();
   });
 
+  it("one user question = ONE history entry; internal plan steps stay children", { timeout: 30_000 }, async () => {
+    // Live failure this pins: a single submission showed up in history as
+    // "Gather current market news...", "Synthesize the gathered factors..." — the action
+    // plan's internal steps, each of which creates its own workspace Research object.
+    const provider = new FakeModelProvider(new Map());
+    scriptLuiDefaults(provider, [
+      { action: "RESEARCH", description: "Gather current market news", capabilities: ["NEWS_ANALYSIS"], params: { asset: "BTC" } },
+      { action: "RESEARCH", description: "Synthesize the gathered factors", capabilities: ["NEWS_ANALYSIS"], params: { asset: "BTC" } },
+    ]);
+    provider.responses.set("research.plan", responses.researchPlan());
+    provider.responses.set("research.adaptive_decision", responses.adaptiveDecision("COMPLETE"));
+    const { app } = await makeApp({ provider });
+
+    const post = await app.inject({ method: "POST", url: "/api/research", payload: { message: "What is driving oil prices this week?" } });
+    expect(post.statusCode).toBe(200);
+
+    const history = await app.inject({ method: "GET", url: "/api/research" });
+    const list = history.json() as { ref: string; question: string; runRef?: string; internalRefs?: string[] }[];
+    // Exactly one top-level entry for the submission, under the trader's own question.
+    expect(list).toHaveLength(1);
+    expect(list[0]!.question).toBe("What is driving oil prices this week?");
+    // The internal step objects are children of the run, not entries of their own.
+    expect(list[0]!.runRef).toBeDefined();
+    expect(list[0]!.internalRefs?.length).toBeGreaterThan(0);
+    expect(list.map((x) => x.question).some((q) => /gather|synthesize/i.test(q))).toBe(false);
+
+    // The representative ref still hydrates the run's persisted answer.
+    const one = await app.inject({ method: "GET", url: `/api/research/${list[0]!.ref}` });
+    expect(one.statusCode).toBe(200);
+    await app.close();
+  });
+
   it("rejects malformed and empty requests without touching the engine", async () => {
     const provider = new FakeModelProvider(new Map());
     const { app } = await makeApp({ provider });

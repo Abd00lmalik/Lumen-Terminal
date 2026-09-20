@@ -36,6 +36,7 @@ export function newId(prefix: string): string {
 
 export const idPrefixes = {
   workspace: "ws",
+  run: "run", // one user submission = one history run (see run-context.ts)
   research: "rs",
   branch: "br",
   claim: "cl",

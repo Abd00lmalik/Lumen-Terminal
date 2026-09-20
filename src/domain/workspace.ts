@@ -30,6 +30,7 @@ import {
 import type { ObjectStatus } from "./lifecycle.js";
 import { appendProvenance, createProvenance, type ProvenanceOrigin } from "./provenance.js";
 import { newId, seedIdCountersFromIds } from "./ids.js";
+import { currentRun } from "./run-context.js";
 
 /** Persisted final responses kept per workspace (history depth for verbatim re-serving). */
 const MAX_PERSISTED_RESPONSES = 100;
@@ -91,7 +92,15 @@ export class Workspace {
   // ----- theses (trader-owned; system never silently mutates; thesis.md) -----
 
   addResearch(input: { objective: string; question: string; flow: string }, origin: ProvenanceOrigin, at?: Date): Research {
-    const research = createResearch(input, origin, at);
+    // Stamp the active user submission (run-context): every Research created during one
+    // question carries the same runId + the trader's verbatim question, so history shows one
+    // entry per question instead of one per internal plan step.
+    const run = currentRun();
+    const research = createResearch(
+      run !== undefined ? { ...input, runId: run.runId, userQuestion: run.userQuestion } : input,
+      origin,
+      at,
+    );
     this.researches.set(research.id, research);
     return research;
   }

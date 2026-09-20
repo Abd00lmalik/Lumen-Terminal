@@ -18,6 +18,8 @@ import type { ModelProvider } from "../model/provider.js";
 import type { CapabilityRegistry } from "../adapters/capability-registry.js";
 import type { WorkspaceStore } from "../persistence/index.js";
 import { Workspace, type WorkspaceSnapshot } from "../domain/workspace.js";
+import { newId, idPrefixes } from "../domain/ids.js";
+import { beginRun, endRun } from "../domain/run-context.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
 import type { ProgressListener } from "../research/progress.js";
 import {
@@ -169,6 +171,10 @@ export class ResearchApp {
         : "F0 API session (local trader identity)",
     };
     let result: LuiResult;
+    // One user submission = one research RUN: every Research object this submission creates
+    // (plan steps, flow phases) is stamped with this run id and the trader's verbatim
+    // question, so history shows ONE entry per question (run-context.ts).
+    beginRun({ runId: newId(idPrefixes.run), userQuestion: submittedQuestion });
     try {
       // Honest wall-clock budget: finish (and persist) before the caller's execution window
       // expires so a run always delivers its real state instead of dying mid-flight. Sized for
@@ -178,6 +184,8 @@ export class ResearchApp {
     } catch (cause) {
       // The engine itself failing (vs the LUI's internal typed model failures) is unexpected.
       throw new ModelFailureError({ type: "PROVIDER_UNAVAILABLE", message: cause instanceof Error ? cause.message : String(cause) });
+    } finally {
+      endRun();
     }
 
     // Persist when the request mutated the graph. The LUI does not persist; the application
@@ -313,12 +321,47 @@ export class ResearchApp {
     return continuitySnapshotToDTO(this.ws().getContinuitySnapshot());
   }
 
-  /** Research history: explicit status fields; the client never infers staleness/currentness. */
+  /**
+   * Research history: ONE entry per user submission, never one per internal plan step.
+   *
+   * A single trader question spawns several internal Research objects (action-plan steps,
+   * flow phases) whose question text is an internal objective ("Gather current market news
+   * ...", "Synthesize the gathered factors ..."). Listing those as top-level history made
+   * one question look like several. Members of a run group under the run's answer-bearing
+   * object, shown under the trader's verbatim question; the other members are exposed as
+   * `internalRefs` children. Legacy objects without a runId keep their own entry (history is
+   * never rewritten, only presented correctly). Explicit status fields; the client never
+   * infers staleness/currentness.
+   */
   listResearch() {
-    return this.ws().listResearch().map((r) => ({
-      ...researchToDTO(r),
-      isCurrent: r.id === this.ws().getContinuitySnapshot().activeResearchTarget?.id,
-    }));
+    const all = this.ws().listResearch();
+    const activeId = this.ws().getContinuitySnapshot().activeResearchTarget?.id;
+    const groups = new Map<string, (typeof all)[number][]>();
+    const order: string[] = [];
+    for (const r of all) {
+      const key = r.runId ?? `solo:${r.id}`;
+      const bucket = groups.get(key);
+      if (bucket === undefined) {
+        groups.set(key, [r]);
+        order.push(key);
+      } else {
+        bucket.push(r);
+      }
+    }
+    return order.map((key) => {
+      const members = groups.get(key)!;
+      // Representative: the member that carries the run's answer (its judgment), else the
+      // most recent member. Its ref stays hydratable through getResearch.
+      const representative = [...members].reverse().find((m) => m.currentJudgmentRef !== undefined)
+        ?? members[members.length - 1]!;
+      const internalRefs = members.filter((m) => m.id !== representative.id).map((m) => m.id);
+      return {
+        ...researchToDTO(representative),
+        ...(representative.userQuestion !== undefined ? { question: representative.userQuestion } : {}),
+        ...(internalRefs.length > 0 ? { internalRefs } : {}),
+        isCurrent: members.some((m) => m.id === activeId),
+      };
+    });
   }
 
   getResearch(ref: string) {
