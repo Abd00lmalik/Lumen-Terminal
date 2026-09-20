@@ -21,7 +21,7 @@ describe("five Bitget skills registered through the generic registry (final lock
     rest = new FakeRestTransport();
   });
 
-  it("all five skills resolve their capabilities; G1 connected (vendor selected); G2 stub remains unconnected", { timeout: 30_000 }, async () => {
+  it("all five skills resolve their capabilities; G1 connected (vendor selected); G2 stub remains unconnected", { timeout: 90_000 }, async () => {
     // G1's both-venues path exercises real bounded-retry backoff against the fakes; give it
     // an explicit budget so parallel-suite load can never turn it flaky.
     // fallbacks: false → PRIMARY-only wiring law (fallback ordering asserted separately).

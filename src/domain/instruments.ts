@@ -73,8 +73,13 @@ export function subjectTermsOf(text: string | undefined, resolvedAsset?: string)
   if (resolvedAsset !== undefined && resolvedAsset.trim() !== "") terms.add(resolvedAsset.trim().toUpperCase());
   if (text !== undefined) {
     const upper = text.toUpperCase();
-    // Ticker-shaped tokens (NVDA, AAPL, BTC): a ticker in the question is a fact about the question.
-    for (const m of upper.matchAll(/\b[A-Z][A-Z0-9]{1,5}\b/g)) {
+    // Ticker-shaped tokens (NVDA, AAPL, BTC): a ticker in the question is a fact about the
+    // question. Matched case-SENSITIVELY against the original text: uppercasing first made
+    // EVERY 2-6 letter word "ticker-shaped", so ordinary words (FAVOR, ASSETS, MACRO,
+    // RIGHT) became subject terms and the gate then rejected valid evidence for any
+    // question that named no real instrument (live: the macro risk-assets question kept
+    // 1 of 20 observations). A genuinely uppercase token is a ticker; a lowercase word is not.
+    for (const m of text.matchAll(/\b[A-Z][A-Z0-9]{1,5}\b/g)) {
       const token = m[0];
       if (!GENERIC_TOKENS.has(token)) terms.add(token);
     }
