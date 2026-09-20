@@ -543,6 +543,44 @@ describe("adaptive research loop (M3 §7/§8)", () => {
     expect(savesAtExecution[0]).toBeGreaterThan(0); // persisted before the first capability ran
   });
 
+  it("the run's ANSWER comes from the synthesis stage, not the stop-decision rationale", async () => {
+    // Live failure this pins: "What could affect AAPL around its next earnings?" returned a
+    // list of statistics (price, EPS, market cap) because the answer was the adaptive loop's
+    // DECISION rationale. The decision says whether research may stop; a separate synthesis
+    // stage must answer the trader's question.
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", responses.researchPlan()],
+      ["research.adaptive_decision", responses.adaptiveDecision("COMPLETE")],
+      ["research.answer_synthesis", JSON.stringify({
+        directAnswer: "Earnings-expectation risk is the dominant near-term driver.",
+        keyFactors: [{
+          factor: "consensus expectation",
+          mechanism: "a miss versus consensus typically reprices the stock",
+          direction: "risk",
+          evidenceRefs: [],
+        }],
+        whatWouldChangeTheView: ["guidance above consensus"],
+        uncertainty: ["historical earnings reactions unavailable"],
+        confidence: "MODERATE",
+        citedObjectRefs: [],
+      })],
+    ]));
+    const registry = registryWith("NEWS_ANALYSIS");
+    const workspace = new Workspace();
+    const research = workspace.addResearch({ objective: "What happened to BTC?", question: "q", flow: "WHAT_HAPPENED" }, trader);
+    workspace.transitionResearch(research.id, "ACTIVE", system, "activated");
+
+    const outcome = await runAdaptiveResearch("What happened to BTC?", research.id, {
+      provider, registry, workspace, store: newStore(),
+    });
+
+    expect(outcome.synthesis?.keyFactors).toHaveLength(1);
+    expect(outcome.answer).toContain("Earnings-expectation risk is the dominant near-term driver.");
+    expect(outcome.answer).toContain("What would change this view: guidance above consensus.");
+    // The synthesis is not the decision rationale (which only justifies stopping).
+    expect(outcome.answer).not.toBe(outcome.finalDecision.rationale);
+  });
+
   it("contradiction-driven continuation: a CONTINUE decision triggers a second round with new capabilities", async () => {
     let call = 0;
     const provider = new FakeModelProvider(new Map([

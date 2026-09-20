@@ -24,6 +24,8 @@ import {
 } from "../model/schemas.js";
 import { evidenceFromToolResult } from "../domain/evidence.js";
 import { subjectTermsOf } from "../domain/instruments.js";
+import { currentRun } from "../domain/run-context.js";
+import { synthesizeAnswer, renderAnswerSynthesis, type AnswerSynthesis } from "./synthesis.js";
 import {
   assessCoverage,
   buildRequirements,
@@ -66,6 +68,13 @@ export interface AdaptiveLoopOutcome {
   readonly stoppedBecause: "EVIDENCE_SUFFICIENT" | "MODEL_INSUFFICIENT_EVIDENCE" | "HOLLOW_COMPLETE_RECOVERY" | "REQUIREMENT_GAPS_UNRESOLVED" | "ROUND_BUDGET_EXHAUSTED" | "TIME_BUDGET_EXHAUSTED" | "MODEL_FAILURE";
   /** Typed model failure when the loop ended that way; never fabricated around. */
   readonly modelFailure?: ModelFailure;
+  /**
+   * The synthesized ANSWER to the trader's question (analysis of the validated evidence),
+   * distinct from `finalDecision.rationale` which only justifies stopping. Absent when no
+   * evidence was gathered or the synthesis model failed.
+   */
+  readonly answer?: string;
+  readonly synthesis?: AnswerSynthesis;
   readonly context: ResearchContext;
 }
 
@@ -532,22 +541,37 @@ export async function runAdaptiveResearch(
   workspace.transitionResearch(researchRef, "COMPLETED", { kind: "agent", detail: "adaptive research loop" }, `research concluded: ${stoppedBecause}`, at());
   // Persist the completed loop (lock §14). A store failure propagates; never reported as success.
   await options.store.save(workspace.toSnapshot());
+  const collected = allExecutions.flatMap((e) => e.evidenceIds).map((id) => workspace.getEvidence(id)).filter((e): e is Evidence => e !== undefined);
+  const finalContext = buildResearchContext(workspace, {
+    researchRef,
+    relevantTo: objective,
+    ...(subjectTerms !== undefined ? { subjectTerms: [...subjectTerms] } : {}),
+    requirements,
+    executions: allExecutions.map((e) => ({ capability: e.capability, result: e.result })),
+  });
+  // ANSWER SYNTHESIS (research contract: retrieval is not synthesis). The decision rationale
+  // answers "may research stop?", not the trader's question; asking the engine to also ANSWER
+  // is what turns validated evidence into a factor analysis. Best-effort: when the model
+  // cannot produce a schema-valid synthesis, the deterministic evidence-grounded response is
+  // used instead and nothing is fabricated.
+  let answer: string | undefined;
+  let synthesis: AnswerSynthesis | undefined;
+  if (collected.length > 0 && stoppedBecause !== "MODEL_FAILURE") {
+    synthesis = await synthesizeAnswer({ provider: options.provider, question: currentRun()?.userQuestion ?? objective, context: finalContext });
+    if (synthesis !== undefined) answer = renderAnswerSynthesis(synthesis);
+  }
   return {
     research: mustResearch(workspace, researchRef),
     plan,
     rounds,
     executions: allExecutions,
     finalDecision,
-    evidence: allExecutions.flatMap((e) => e.evidenceIds).map((id) => workspace.getEvidence(id)).filter((e): e is Evidence => e !== undefined),
+    evidence: collected,
     stoppedBecause,
     ...(modelFailure !== undefined ? { modelFailure } : {}),
-    context: buildResearchContext(workspace, {
-      researchRef,
-      relevantTo: objective,
-      ...(subjectTerms !== undefined ? { subjectTerms: [...subjectTerms] } : {}),
-      requirements,
-      executions: allExecutions.map((e) => ({ capability: e.capability, result: e.result })),
-    }),
+    ...(answer !== undefined ? { answer } : {}),
+    ...(synthesis !== undefined ? { synthesis } : {}),
+    context: finalContext,
   };
 }
 

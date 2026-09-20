@@ -1075,17 +1075,24 @@ export class Lui {
       const isProcessCommentary =
         /sufficient .*(observation|evidence|data).*(gather|collect|satisf)/i.test(research.finalDecision.rationale) ||
         /^(the )?research (was |has )?(completed|conducted)/i.test(research.finalDecision.rationale);
-      const answer = isProcessCommentary
-        ? `What the evidence shows: ${research.evidence.slice(0, 3).map((e) => summarize(e.observation, 140)).join("; ")}.`
-        : research.finalDecision.rationale;
+      // The run's synthesized ANSWER (analysis of the validated evidence against the trader's
+      // question) outranks the stop-decision rationale, which only says whether research could
+      // end. Falling back keeps the deterministic evidence-grounded response when synthesis
+      // was impossible; nothing is fabricated either way.
+      const answer = research.answer !== undefined
+        ? research.answer
+        : isProcessCommentary
+          ? `What the evidence shows: ${research.evidence.slice(0, 3).map((e) => summarize(e.observation, 140)).join("; ")}.`
+          : research.finalDecision.rationale;
       const response: FinalResponse = {
         answer,
         supportingReasons: research.evidence.slice(0, 4).map((e) => `${e.evidenceClass.toLowerCase()}: ${summarize(e.observation)}`),
         opposingReasons: [],
-        confidence: research.evidence.length >= 3 ? "MODERATE" : research.evidence.length >= 1 ? "LOW" : "UNKNOWN",
-        keyUncertainty: research.finalDecision.decision === "COMPLETE"
+        confidence: (research.synthesis?.confidence as FinalResponse["confidence"] | undefined)
+          ?? (research.evidence.length >= 3 ? "MODERATE" : research.evidence.length >= 1 ? "LOW" : "UNKNOWN"),
+        keyUncertainty: research.synthesis?.uncertainty[0] ?? (research.finalDecision.decision === "COMPLETE"
           ? "review the cited evidence for freshness and interpretation class before acting"
-          : research.finalDecision.rationale,
+          : research.finalDecision.rationale),
         implication: `Research ${research.research.id} preserved ${research.evidence.length} evidence object(s); deeper levels available on request.`,
         citedObjectRefs: cited,
       };
