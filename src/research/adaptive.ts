@@ -79,6 +79,13 @@ export interface AdaptiveLoopOutcome {
   readonly answer?: string;
   readonly synthesis?: AnswerSynthesis;
   readonly context: ResearchContext;
+  /**
+   * The engine's final requirement ledger: the coverage state the completion verdict was
+   * computed from. The API layer turns UNRESOLVED CRITICAL entries into the response's
+   * researchGaps (material research gaps), which is what may appear in the answer's
+   * coverage panel; capability/provider notes never do.
+   */
+  readonly requirements?: readonly ResearchRequirement[];
 }
 
 /** Schemas as prompt fragments; the model must answer in one of these shapes. */
@@ -376,6 +383,7 @@ export async function runAdaptiveResearch(
         stoppedBecause,
         ...(modelFailure !== undefined ? { modelFailure } : {}),
         context,
+        requirements,
       };
     }
 
@@ -638,6 +646,7 @@ export async function runAdaptiveResearch(
     ...(answer !== undefined ? { answer } : {}),
     ...(synthesis !== undefined ? { synthesis } : {}),
     context: finalContext,
+    requirements,
   };
 }
 

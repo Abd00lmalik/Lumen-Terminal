@@ -250,6 +250,20 @@ export class ResearchApp {
     }
 
     const limitations = collectLimitations(result).map(uiText);
+    // GAP SEPARATION (research contract §3): capability gaps (provider outages, fallbacks,
+    // schema notes) are diagnostics; RESEARCH GAPS (a CRITICAL requirement the run could not
+    // satisfy after recovery) are the only material coverage information a trader needs.
+    // Engine-assessed, phrased as the requirement, never as provider accounting.
+    const researchGaps = (result.research?.requirements ?? [])
+      .filter((r) => r.importance === "CRITICAL" && r.status !== "SATISFIED")
+      .map((r) =>
+        r.status === "PARTIALLY_SATISFIED"
+          ? `${r.description}: only evidence outside the required time horizon was found`
+          : r.status === "EXHAUSTED" || r.status === "UNAVAILABLE"
+            ? `${r.description}: could not be established after the available research paths were exhausted`
+            : `${r.description}: not established by the collected evidence`,
+      )
+      .slice(0, 5);
     // Honest outcome mapping: a pure interpretation failure (no research ran) is a MODEL_FAILURE;
     // a run that completed research but ended on a model failure is a partial COMPLETED with the
     // typed failure attached (the LUI's law: failure ≠ fabricated evidence, partial ≠ false success).
@@ -282,6 +296,7 @@ export class ResearchApp {
       answer,
       ...(result.modelFailure !== undefined ? { modelFailure: { type: result.modelFailure.type, message: result.modelFailure.message } } : {}),
       limitations,
+      researchGaps,
       ...(researchRef !== undefined ? { researchRef } : {}),
       evidenceRefs: evidence.map((e) => e.ref),
       ...(judgments.length > 0 ? { judgmentRef: judgments[judgments.length - 1]!.ref } : {}),

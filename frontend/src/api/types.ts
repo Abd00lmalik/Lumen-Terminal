@@ -257,6 +257,8 @@ export interface ResearchResponseDto {
   readonly answer: AnswerDto;
   readonly modelFailure?: { readonly type: string; readonly message: string };
   readonly limitations: readonly string[];
+  /** Material research gaps (engine-assessed); the only user-facing coverage items. */
+  readonly researchGaps?: readonly string[];
   readonly researchRef?: string;
   readonly evidenceRefs: readonly string[];
   readonly judgmentRef?: string;

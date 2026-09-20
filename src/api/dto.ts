@@ -552,6 +552,13 @@ export interface ResearchResponseDTO {
   readonly modelFailure?: { readonly type: string; readonly message: string };
   /** Limitations preserved verbatim from the research loop (partial results, provider outages). */
   readonly limitations: readonly string[];
+  /**
+   * MATERIAL research gaps (gap separation law): the engine-assessed CRITICAL requirements
+   * this run could not satisfy after recovery, phrased as the requirement. These are the
+   * only items allowed in the user-facing coverage panel; capability/provider notes stay in
+   * the collapsed traceability detail.
+   */
+  readonly researchGaps: readonly string[];
   /** The research object created by this request, when research ran. */
   readonly researchRef?: string;
   readonly evidenceRefs: readonly string[];

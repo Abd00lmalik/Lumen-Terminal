@@ -590,23 +590,20 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
         </Panel>
       )}
 
-      {run.limitations.length > 0 && (() => {
-        // Limitation hierarchy (capability-expansion mandate §35): show only what is
-        // materially MISSING for THIS question. Provider-fallback trails ("research
-        // continued using ...") are SUCCESS stories, not failures: they belong in the
-        // collapsed data-source notes, never in the visible wall. Only true capability
-        // gaps (no provider at all, explicit UNAVAILABLE data dimensions) stay visible.
+      {(() => {
+        // GAP SEPARATION (final-judgment contract): the visible coverage panel shows only
+        // MATERIAL RESEARCH GAPS the engine assessed (a CRITICAL requirement the run could
+        // not satisfy). Provider notes, evidence laws, fallback trails, and provenance
+        // caveats are capability diagnostics: they belong in the collapsed detail, never in
+        // the wall a trader reads.
+        const gaps = [...new Set(run.researchGaps ?? [])];
         const all = [...new Set(run.limitations)];
-        const isFallbackNote = /provider fallback:|research continued using|fallback provider:|served by|attempted/i;
-        const isProvenanceNote = /FINDINGS\.md|final lock|§|failure is a technical condition|must not|never |law|prox|aggregat|headline-level|secondary reporting|freshness|retrieval failure|proxy/i;
-        const material = all.filter((l) =>
-          (/UNAVAILABLE|no provider registered|insufficient|not available|unreachable|ConnectTimeout|timeout/i.test(l))
-          && !isFallbackNote.test(l)
-          && !isProvenanceNote.test(l)
-        ).slice(0, 5);
+        // Capability notes never promoted to the visible wall: research gaps own it.
+        const material = gaps.slice(0, 5);
         const detail = all.filter((l) => !material.includes(l));
+        if (material.length === 0 && detail.length === 0) return null;
         return (
-          <Panel kicker="coverage notes" title="What this run could not do">
+          <Panel kicker="coverage notes" title={material.length > 0 ? "What this research could not establish" : "What this run could not do"}>
             <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {material.map((l, i) => <UnavailableNote key={`m${i}`} note={l} />)}
               {detail.length > 0 && (

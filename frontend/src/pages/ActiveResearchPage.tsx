@@ -162,14 +162,30 @@ function ResultView({ result, onInspectEvidence }: { result: ResearchResponseDto
         </div>
       </Panel>
 
-      {result.limitations.length > 0 && (
-        <Panel kicker="limitations" title="What this run could not do">
-          <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {/* Defensive dedupe, matching the workspace rendering. */}
-            {[...new Set(result.limitations)].map((l, i) => <UnavailableNote key={i} note={l} />)}
-          </div>
-        </Panel>
-      )}
+      {(() => {
+        // Gap separation: research gaps (engine-assessed) are the visible coverage story;
+        // capability/provider notes stay in the collapsed detail.
+        const gaps = [...new Set(result.researchGaps ?? [])];
+        const notes = [...new Set(result.limitations)].filter((l) => !gaps.includes(l));
+        if (gaps.length === 0 && notes.length === 0) return null;
+        return (
+          <Panel kicker="limitations" title={gaps.length > 0 ? "What this research could not establish" : "What this run could not do"}>
+            <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {gaps.map((l, i) => <UnavailableNote key={`g${i}`} note={l} />)}
+              {notes.length > 0 && (
+                <details style={{ marginTop: 2 }}>
+                  <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--text-3)" }}>
+                    {notes.length} data-source note{notes.length === 1 ? "" : "s"} (sources, provenance, evidence laws)
+                  </summary>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                    {notes.map((l, i) => <UnavailableNote key={`n${i}`} note={l} />)}
+                  </div>
+                </details>
+              )}
+            </div>
+          </Panel>
+        );
+      })()}
 
       {result.evidence.length > 0 && (
         <Panel kicker="traceability" title="Evidence" right={<button className="btn sm ghost" onClick={onInspectEvidence}>Inspect all evidence →</button>}>

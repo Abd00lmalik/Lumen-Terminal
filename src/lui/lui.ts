@@ -1074,7 +1074,10 @@ export class Lui {
       // substance the user needs is in the observations, not in a description of the run.
       const isProcessCommentary =
         /sufficient .*(observation|evidence|data).*(gather|collect|satisf)/i.test(research.finalDecision.rationale) ||
-        /^(the )?research (was |has )?(completed|conducted)/i.test(research.finalDecision.rationale);
+        /^(the )?research (was |has )?(completed|conducted)/i.test(research.finalDecision.rationale) ||
+        // Final-judgment contract: a stats-led or bookkeeping opener is scene-setting, not
+        // an answer ("Current macroeconomic conditions show...", "Comprehensive evidence...").
+        /^(current (market|macroeconomic)? ?conditions|comprehensive evidence|evidence (indicates|suggests|shows|has been)|market data shows?|based on (the )?(evidence|research))/i.test(research.finalDecision.rationale);
       // The run's synthesized ANSWER (analysis of the validated evidence against the trader's
       // question) outranks the stop-decision rationale, which only says whether research could
       // end. Falling back keeps the deterministic evidence-grounded response when synthesis
@@ -1109,9 +1112,14 @@ export class Lui {
         opposingReasons,
         confidence: (research.synthesis?.confidence as FinalResponse["confidence"] | undefined)
           ?? (research.evidence.length >= 3 ? "MODERATE" : research.evidence.length >= 1 ? "LOW" : "UNKNOWN"),
-        keyUncertainty: research.synthesis?.uncertainty[0] ?? (research.finalDecision.decision === "COMPLETE"
-          ? "review the cited evidence for freshness and interpretation class before acting"
-          : research.finalDecision.rationale),
+        // Uncertainty rule: the fallback must name what is unresolved (the engine's own
+        // research gaps when present), never the "monitoring required" filler. When nothing
+        // is unresolved, say what the conclusion rests on instead of manufacturing a doubt.
+        keyUncertainty: research.synthesis?.uncertainty[0]
+          ?? firstUnresolvedRequirement(research.requirements ?? [])
+          ?? (research.finalDecision.decision === "COMPLETE"
+            ? "The collected evidence covered the research requirements; the conclusion rests on the cited observations."
+            : research.finalDecision.rationale),
         implication: research.synthesis?.implication
           ?? `This run ended with decision ${research.finalDecision.decision}; the cited evidence is the basis for your own call.`,
         citedObjectRefs: (research.synthesis?.citedObjectRefs.length ?? 0) > 0 ? [...research.synthesis!.citedObjectRefs] : cited,
@@ -1323,6 +1331,12 @@ function toModelFailure(error: unknown): ModelFailure {
   return error instanceof ModelFailure
     ? error
     : new ModelFailure("INVALID_OUTPUT", error instanceof Error ? error.message : String(error), false);
+}
+
+/** First CRITICAL requirement not satisfied: the honest fallback uncertainty source. */
+function firstUnresolvedRequirement(requirements: readonly { readonly importance: string; readonly status: string; readonly description: string }[]): string | undefined {
+  const gap = requirements.find((r) => r.importance === "CRITICAL" && r.status !== "SATISFIED");
+  return gap?.description;
 }
 
 function summarize(text: string, max = 160): string {

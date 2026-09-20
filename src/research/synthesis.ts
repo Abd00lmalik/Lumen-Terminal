@@ -25,6 +25,21 @@ import { renderResearchContext } from "./context.js";
 /** Storage/process language: an implication phrased as run accounting is not decision support. */
 const PROCESS_NOTE = /preserved|evidence object|research id|rs_\d|deeper level|disclosure|provider|storage/i;
 
+/**
+ * Banned opener shapes (final-judgment contract): the first sentence must BE the answer,
+ * never scene-setting, evidence bookkeeping, or a market-data summary. "The evidence
+ * supports the thesis because" is an ANSWER (it states the verdict) and stays allowed; the
+ * ban targets evidence-as-subject openers ("Evidence indicates...", "The available evidence...")
+ * and conditions/summary openers.
+ */
+const BANNED_OPENERS =
+  /^(current (market|macroeconomic)? ?(conditions|conditions show)|comprehensive evidence|evidence (indicates|suggests|shows|has been|is)|the (available |retrieved |gathered |collected )evidence|market data shows?|based on (the )?(evidence|research)|after (research|analysis)|the research (shows|indicates|found)|here (is|are))/i;
+
+/** Does the direct answer obey the question-first law? */
+export function opensWithTheAnswer(directAnswer: string): boolean {
+  return !BANNED_OPENERS.test(directAnswer.trim());
+}
+
 export const ANSWER_SYNTHESIS_SCHEMA_DESC = [
   "{",
   ' "directAnswer": string, // 2 to 5 sentences that DIRECTLY answer the question',
@@ -68,8 +83,11 @@ const SYNTHESIS_SYSTEM = [
   "- LIMITATIONS and provider failures are data-availability conditions, never negative evidence, and never belong in the answer. Mention only uncertainties that change how the trader should read the conclusion.",
   "- If the context cannot support a material part of the question, say so ONCE, plainly, inside `uncertainty`; do not let it become the whole answer.",
   "- `implication` is decision support, not a process note: state what the conclusion means for the trader's read of the position, catalyst, risk or thesis (which factors are decisive, what to watch). Never mention evidence counts, research ids, storage, providers or disclosure levels.",
+  "- UNCERTAINTY RULE: every uncertainty entry names WHAT is unresolved and HOW it affects the conclusion's reliability (which reading of the evidence it would change). 'Further monitoring is required' and 'the regime requires close monitoring' are NOT uncertainties; delete such filler. If nothing material is unresolved, return an empty array.",
   "- Distinguish what is established from what is inferred. Never fabricate certainty, and never force a conclusion the evidence does not support.",
   "- Match the question's analytical shape: for 'what could affect X', give drivers/catalysts/risks with mechanisms and inversion conditions; for 'why did X move', give the timeline, the candidates, and the best-supported explanation; for 'does my thesis hold', judge the claims against the evidence.",
+  "- QUESTION-FIRST LAW: the FIRST sentence of directAnswer must BE the answer to the question, never a scene-setting opener. Never begin with 'Current market conditions show', 'Comprehensive evidence has been gathered', 'Evidence indicates', 'Market data shows', or a restatement of the question. Begin with the conclusion in the question's own terms: 'What favors risk assets right now is', 'The main factors that could affect AAPL are', 'The evidence supports the thesis because'.",
+  "- CONVERT OBSERVATIONS TO IMPLICATIONS: for every important observation state what it MEANS for the question (support, oppose, or condition the conclusion, through which mechanism). 'VIX is 14.81' is a fact; 'compressed volatility signals reduced near-term hedging demand, which supports risk appetite' is analysis. Numbers appear as supporting evidence after the answer, not as the answer.",
   "- COUNTEREVIDENCE IS REQUIRED for every material factor: cite the context evidence that weakens or complicates it. When the context holds no counterevidence for a factor, return an empty array for it (the run searched and found none is a fact; a manufactured opposition is not). Do not restate the factor's own supporting evidence as opposition.",
   "Output style: plain professional prose, decision-useful for a trader. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
@@ -135,8 +153,42 @@ export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promis
   } catch {
     return undefined; // invalid synthesis = no synthesis; the caller keeps its fallback
   }
-  const direct = typeof data.directAnswer === "string" ? data.directAnswer.trim() : "";
+  let direct = typeof data.directAnswer === "string" ? data.directAnswer.trim() : "";
   if (direct === "") return undefined;
+  // Question-first enforcement (deterministic, not prompt-hopeful): a draft that opens with
+  // a banned scene-setting shape gets ONE bounded corrective retry with the violation named;
+  // if the retry still violates (or fails), the draft is rejected and the caller keeps its
+  // deterministic evidence-grounded fallback. The law is enforced by the engine, not wished
+  // into the model.
+  if (!opensWithTheAnswer(direct)) {
+    try {
+      const retry = await provider.structured<string>({
+        schemaName: "research.answer_synthesis",
+        schemaDescription: ANSWER_SYNTHESIS_SCHEMA_DESC,
+        system: SYNTHESIS_SYSTEM,
+        prompt: [
+          `Trader question (answer THIS): "${question}"`,
+          "Your previous draft violated the QUESTION-FIRST LAW: it opened with scene-setting instead of the answer.",
+          `Rejected draft: "${direct.slice(0, 600)}"`,
+          "Rewrite it: the FIRST sentence must be the direct answer to the question in the question's own terms (for example 'What favors risk assets right now is ...', 'The main factors that could affect X are ...'), then the reasoning. Same JSON schema.",
+          "Validated research context follows. Evidence ids in brackets are the ONLY citable refs.",
+          "---",
+          renderResearchContext(context),
+          "---",
+          'Respond as JSON conforming to schema "research.answer_synthesis".',
+          ANSWER_SYNTHESIS_SCHEMA_DESC,
+        ].join("\n"),
+        preferJson: true,
+      });
+      const retried = validateModelOutput<AnswerSynthesis>(ANSWER_SYNTHESIS_SCHEMA, retry.raw).data;
+      const retryDirect = typeof retried.directAnswer === "string" ? retried.directAnswer.trim() : "";
+      if (retryDirect === "" || !opensWithTheAnswer(retryDirect)) return undefined;
+      data = retried;
+      direct = retryDirect; // the retry's answer replaces the rejected draft everywhere below
+    } catch {
+      return undefined;
+    }
+  }
   // Citation integrity: keep only refs that exist in the context (an off-context id is a
   // citation error, not a finding).
   const known = new Set<string>([
