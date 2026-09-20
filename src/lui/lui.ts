@@ -1093,8 +1093,9 @@ export class Lui {
         keyUncertainty: research.synthesis?.uncertainty[0] ?? (research.finalDecision.decision === "COMPLETE"
           ? "review the cited evidence for freshness and interpretation class before acting"
           : research.finalDecision.rationale),
-        implication: `Research ${research.research.id} preserved ${research.evidence.length} evidence object(s); deeper levels available on request.`,
-        citedObjectRefs: cited,
+        implication: research.synthesis?.implication
+          ?? `This run ended with decision ${research.finalDecision.decision}; the cited evidence is the basis for your own call.`,
+        citedObjectRefs: (research.synthesis?.citedObjectRefs.length ?? 0) > 0 ? [...research.synthesis!.citedObjectRefs] : cited,
       };
       // Model-polished response only when the disclosure level requests more than the default
       // and even then from the validated context only.
