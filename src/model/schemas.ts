@@ -186,6 +186,17 @@ export interface ProposedResearchPlan {
     readonly capabilities: readonly string[];
     readonly completion: string;
   }[];
+  /**
+   * INFORMATION REQUIREMENTS this question needs answered (requirement-coverage engine).
+   * The planner states what must be KNOWN ("current policy/rates regime", "10-year yield
+   * level", "oil-specific supply developments"), not which provider to call. Optional: when
+   * absent the engine derives requirements from the tasks, so coverage is always assessed.
+   */
+  readonly requirements?: readonly {
+    readonly description: string;
+    readonly importance?: "CRITICAL" | "SUPPORTING";
+    readonly timeSensitivity?: "CURRENT" | "RECENT" | "HISTORICAL" | "ANY";
+  }[];
   readonly completionCriteria: readonly string[];
   readonly adaptationPolicy: string;
 }
@@ -197,6 +208,7 @@ export const RESEARCH_PLAN_SCHEMA: OutputSchema = {
     scopeIncluded: "string[]",
     scopeExcluded: "string[]",
     tasks: "record[]",
+    requirements: "record[]",
     completionCriteria: "string[]",
     adaptationPolicy: "string",
   },
@@ -521,11 +533,31 @@ export function parseResearchPlan(text: string): ProposedResearchPlan {
       completion: String(t.completion),
     };
   });
+  // Requirement seeds are OPTIONAL and validated leniently: a malformed entry is dropped
+  // (the engine falls back to task-derived requirements) rather than failing the whole plan.
+  const rawRequirements = Array.isArray(data.requirements) ? data.requirements : [];
+  const requirements = rawRequirements
+    .map((entry) => {
+      if (typeof entry !== "object" || entry === null) return undefined;
+      const r = entry as Record<string, unknown>;
+      if (typeof r.description !== "string" || r.description.trim() === "") return undefined;
+      const importance = r.importance === "SUPPORTING" ? ("SUPPORTING" as const) : ("CRITICAL" as const);
+      const ts = r.timeSensitivity;
+      const timeSensitivity: "CURRENT" | "RECENT" | "HISTORICAL" | "ANY" | undefined =
+        ts === "CURRENT" || ts === "RECENT" || ts === "HISTORICAL" || ts === "ANY" ? ts : undefined;
+      return {
+        description: r.description.trim(),
+        importance,
+        ...(timeSensitivity !== undefined ? { timeSensitivity } : {}),
+      };
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== undefined);
   return {
     objective: String(data.objective),
     scopeIncluded: (data.scopeIncluded as unknown[]).map(String),
     scopeExcluded: (data.scopeExcluded as unknown[]).map(String),
     tasks,
+    ...(requirements.length > 0 ? { requirements } : {}),
     completionCriteria: (data.completionCriteria as unknown[]).map(String),
     adaptationPolicy: String(data.adaptationPolicy),
   };

@@ -13,6 +13,7 @@ import { G2WebRetrievalAdapter } from "./g2-web-retrieval.js";
 import { NewsFallbackAdapter, SentimentFallbackAdapter, MacroFallbackAdapter } from "./fallback-providers.js";
 import { BitgetSkillAdapter, type SkillDescriptor, type OutputMapping } from "./bitget-skill-adapter.js";
 import { registerEquityAdapters } from "./equity.js";
+import { MarketRegimeAdapter } from "./market-regime.js";
 import { registerHeuristAdapters } from "./heurist.js";
 import { CoinGeckoMarketDataAdapter } from "./coingecko.js";
 import { LocalKnowledgeAdapter } from "./local-knowledge.js";
@@ -583,6 +584,14 @@ export function createBitgetAdapterSet(options: BitgetAdapterSetOptions = {}): {
   // earnings calendar, per-ticker news) with Stooq CSV as the market-data fallback inside
   // the adapter. Same registry mechanism; no Flow→provider hardcoding.
   registerEquityAdapters(registry);
+  // Current market-regime observables (2026-09-20): keyless index/yield/volatility/dollar
+  // quotes that serve ANY MACRO_ANALYSIS or MARKET_DATA_ANALYSIS requirement. Priority 150:
+  // after the direct Bitget primaries (100), before the low-frequency statistical fallbacks
+  // (200) — a CURRENT macro requirement must be answerable with current market observations,
+  // never with annual statistical releases. Reusable capability, not question routing.
+  if (options.fallbacks !== false) {
+    registry.register(new MarketRegimeAdapter(), 150);
+  }
   // Heurist Mesh (2026-09-18): specialized agent/data-provider fallbacks at priority 300 —
   // options chains (the only working source), technical snapshots, SEC filings, FRED macro,
   // funding/OI. Credit-based service: serves only when the direct chain cannot; lineage

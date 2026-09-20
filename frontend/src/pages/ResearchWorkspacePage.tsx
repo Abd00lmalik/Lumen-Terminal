@@ -17,6 +17,7 @@ import {
   ProxyNote, UnavailableNote, KV, Note, Empty, timeAgo,
 } from "../components/ui.js";
 import { evidenceFromDto, judgmentFromDto } from "../data/adapters.js";
+import { isExpandedTurn, railBelongsToActive, selectActiveTurnRef } from "./researchView.js";
 import { getWorkspace, listResearch, getResearch } from "../api/index.js";
 import type { EvidenceItem, JudgmentView, ThesisView } from "../data/types.js";
 import type { ResearchResponseDto, ResearchDto, ContinuitySnapshotDto, HistoricalAnalysisDto } from "../api/index.js";
@@ -271,10 +272,14 @@ export function ResearchWorkspacePage() {
   // history entry can never render an NVDA run. Unknown/deleted refs fall through to the
   // normal workspace view with an honest inline note.
   const [linkedNotFound, setLinkedNotFound] = useState(false);
+  // EXPLICIT user selection of a research run (history click / linked URL). This is the ONLY
+  // way a non-live run becomes the active result; it is cleared when a new question starts.
+  const [viewedRef, setViewedRef] = useState<string | undefined>(undefined);
   useEffect(() => {
     const ref = params.ref;
     if (ref === undefined || ref.length === 0) {
       setLinkedNotFound(false);
+      setViewedRef(undefined);
       return;
     }
     let cancelled = false;
@@ -285,6 +290,7 @@ export function ResearchWorkspacePage() {
         const turn = researchDtoToTurn(full);
         if (turn === undefined) return;
         setLinkedNotFound(false);
+        setViewedRef(ref);
         setRuns((prev) => (prev.some((t) => t.run.requestId === ref) ? prev : [...prev, turn]));
       } catch {
         if (!cancelled) setLinkedNotFound(true);
@@ -345,6 +351,10 @@ export function ResearchWorkspacePage() {
     const q = question.trim();
     if (q.length === 0 || stream.running || submitting) return;
     setInput("");
+    // STATE ISOLATION (researchId-scoped active view): a new question immediately detaches
+    // any previously selected/displayed research. The previous result stays in history and
+    // its row, but it can never render as the answer to the new question.
+    setViewedRef(undefined);
     setSubmitting(true);
     void submit(q, { confirmed })
       .catch((err: unknown) => {
@@ -355,6 +365,26 @@ export function ResearchWorkspacePage() {
   }, [stream.running, submitting, submit]);
 
   const evidenceById = new Map(ws.evidence.map((e) => [e.ref, e]));
+  // Active-result selection (state-isolation law): while a run is in flight NOTHING from a
+  // previous research is expanded; otherwise the user's explicit selection or the newest
+  // identified run is the one active result. The rail renders state/judgment only for it.
+  const identifiedTurns = runs.map((t) => ({
+    question: t.question,
+    requestId: t.run.requestId,
+    ...(t.run.researchRef !== undefined ? { researchRef: t.run.researchRef } : {}),
+    ...(t.degraded === true ? { degraded: true } : {}),
+  }));
+  const activeRef = selectActiveTurnRef({
+    turns: identifiedTurns,
+    ...(viewedRef !== undefined ? { viewedRef } : {}),
+    ...(stream.result?.researchRef !== undefined ? { liveRef: stream.result.researchRef } : {}),
+    running: stream.running,
+  });
+  const railScoped = railBelongsToActive({
+    running: stream.running,
+    ...(ws.snapshot?.activeResearch?.ref !== undefined ? { snapshotRef: ws.snapshot.activeResearch.ref } : {}),
+    ...(activeRef !== undefined ? { activeRef } : {}),
+  });
 
   return (
     <AppShell
@@ -363,7 +393,13 @@ export function ResearchWorkspacePage() {
         <>
           <div className="rail-section">
             <div className="rail-title">Research state</div>
-            {ws.snapshot?.activeResearch !== undefined ? (
+            {stream.running ? (
+              <>
+                <KV k="research" v="running" />
+                <div style={{ fontSize: 12, lineHeight: 1.5, color: "var(--text-3)", margin: "6px 0" }}>{stream.question}</div>
+                <KV k="stage" v={stream.stages[stream.stages.length - 1]?.name ?? "starting"} />
+              </>
+            ) : ws.snapshot?.activeResearch !== undefined && railScoped ? (
               <>
                 <KV k="research" v={ws.snapshot.activeResearch.ref} />
                 <KV k="flow" v={ws.snapshot.activeResearch.flow.replace(/_/g, " ").toLowerCase()} />
@@ -386,7 +422,10 @@ export function ResearchWorkspacePage() {
               <button className="btn sm" style={{ marginTop: 8 }} onClick={() => navigate("/thesis")}>Open thesis workspace</button>
             </div>
           )}
-          {ws.judgment !== undefined && (
+          {/* Rail judgment is scoped to the ACTIVE research: during a new run, and whenever
+              the snapshot describes a different research, the previous verdict is NOT shown
+              as current (the "new question displayed the old judgment" production bug). */}
+          {ws.judgment !== undefined && railScoped && (
             <div className="rail-section">
               <div className="rail-title">Current judgment</div>
               <div style={{ fontSize: 12.5, lineHeight: 1.5, color: "var(--text-2)", marginBottom: 8 }}>{ws.judgment.statement}</div>
@@ -442,7 +481,33 @@ export function ResearchWorkspacePage() {
         <Empty title="No research in this workspace yet" hint="Type a natural-language question above; the agent plans and investigates." />
       )}
 
-      {runs.map((turn) => <RunView key={turn.run.requestId} turn={turn} evidenceById={evidenceById} onInspectEvidence={() => navigate("/evidence")} onConfirm={() => void ask(turn.question, true)} />)}
+      {runs.map((turn) => {
+        const turnIdentified = {
+          question: turn.question,
+          requestId: turn.run.requestId,
+          ...(turn.run.researchRef !== undefined ? { researchRef: turn.run.researchRef } : {}),
+          ...(turn.degraded === true ? { degraded: true } : {}),
+        };
+        if (isExpandedTurn(turnIdentified, activeRef, stream.running)) {
+          return <RunView key={turn.run.requestId} turn={turn} evidenceById={evidenceById} onInspectEvidence={() => navigate("/evidence")} onConfirm={() => void ask(turn.question, true)} />;
+        }
+        // Archival row: a previous research stays reachable, but never occupies the active
+        // area while a new question is being researched.
+        return (
+          <div className="chat-user" key={turn.run.requestId}>
+            <div className="bubble" style={{ opacity: 0.75 }}>
+              {turn.question}
+              <button
+                className="btn sm ghost"
+                style={{ marginLeft: 10 }}
+                onClick={() => navigate(`/research/${turn.run.requestId}`)}
+              >
+                open
+              </button>
+            </div>
+          </div>
+        );
+      })}
     </AppShell>
   );
 }

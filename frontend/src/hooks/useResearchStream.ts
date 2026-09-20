@@ -72,6 +72,10 @@ export function useResearchStream() {
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const capsRef = useRef<Map<string, { status: "RUNNING" | "COMPLETE" | "FAILED"; detail: string }>>(new Map());
   const stagesRef = useRef<StageView[]>([]);
+  // RUN TOKEN (state-isolation law): every submission increments this. Callbacks from an
+  // older submission check the token before patching state, so a late event, late final
+  // result, or a reconnecting stream from run A can NEVER write into run B's state.
+  const runToken = useRef(0);
 
   const stopTimer = useCallback(() => {
     if (timer.current !== null) {
@@ -85,6 +89,8 @@ export function useResearchStream() {
   const submit = useCallback(
     (question: string, options?: { confirmed?: boolean }) => {
       stopTimer();
+      runToken.current += 1;
+      const token = runToken.current;
       capsRef.current = new Map();
       stagesRef.current = [];
       startedAt.current = Date.now();
@@ -107,6 +113,7 @@ export function useResearchStream() {
         question,
         {
           onProgress: (event) => {
+            if (token !== runToken.current) return; // stale run: ignore entirely
             const label = STAGE_LABELS[event.stage] ?? event.stage;
             // Mark previous stages done, append this one as active.
             stagesRef.current = [
@@ -134,15 +141,18 @@ export function useResearchStream() {
             }));
           },
           onFinal: (result) => {
+            if (token !== runToken.current) return; // a superseded run's result never becomes the active result
             stopTimer();
             stagesRef.current = stagesRef.current.map((s) => ({ ...s, status: "done" as const }));
             patch((prev) => ({ ...prev, running: false, stages: [...stagesRef.current], result }));
           },
           onError: (error) => {
+            if (token !== runToken.current) return;
             stopTimer();
             patch((prev) => ({ ...prev, running: false, error, errorId: prev.errorId + 1 }));
           },
           onConnectionLost: () => {
+            if (token !== runToken.current) return;
             stopTimer();
             patch((prev) => ({
               ...prev,

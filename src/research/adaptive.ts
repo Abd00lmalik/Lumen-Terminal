@@ -24,6 +24,16 @@ import {
 } from "../model/schemas.js";
 import { evidenceFromToolResult } from "../domain/evidence.js";
 import { subjectTermsOf } from "../domain/instruments.js";
+import {
+  assessCoverage,
+  buildRequirements,
+  coverageVerdict,
+  exhaustUnresolved,
+  recoveryCapabilities,
+  requirementsFromTasks,
+  type CoverageEvidence,
+  type ResearchRequirement,
+} from "./requirements.js";
 import type { Evidence, Research } from "../domain/objects.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
 import type { Workspace } from "../domain/workspace.js";
@@ -52,7 +62,7 @@ export interface AdaptiveLoopOutcome {
   readonly executions: readonly RoundExecution[];
   readonly finalDecision: AdaptiveDecision;
   readonly evidence: readonly Evidence[];
-  readonly stoppedBecause: "EVIDENCE_SUFFICIENT" | "MODEL_INSUFFICIENT_EVIDENCE" | "HOLLOW_COMPLETE_RECOVERY" | "ROUND_BUDGET_EXHAUSTED" | "TIME_BUDGET_EXHAUSTED" | "MODEL_FAILURE";
+  readonly stoppedBecause: "EVIDENCE_SUFFICIENT" | "MODEL_INSUFFICIENT_EVIDENCE" | "HOLLOW_COMPLETE_RECOVERY" | "REQUIREMENT_GAPS_UNRESOLVED" | "ROUND_BUDGET_EXHAUSTED" | "TIME_BUDGET_EXHAUSTED" | "MODEL_FAILURE";
   /** Typed model failure when the loop ended that way; never fabricated around. */
   readonly modelFailure?: ModelFailure;
   readonly context: ResearchContext;
@@ -88,6 +98,7 @@ export const PLAN_SYSTEM = [
   "- On-chain and DeFi questions (wallet/token activity, protocol TVL, L2 metrics, DEX structure): ONCHAIN_ANALYSIS (address/holder/trade observations where an address is resolvable) and DEFI_ANALYSIS (protocol/chain/L2 metrics); PROJECT_RESEARCH covers project descriptions, DEX pair discovery, and narrative/trending context.",
   "- Broad synthesis questions that may span domains: CROSS_DOMAIN_SYNTHESIS is available as a deep-research capability of last resort; prefer specific capabilities first. WEB_SEARCH (bounded source discovery) is available when narrative or primary-source hunting matters.",
   "- For a company question, plan the smallest set that can answer it: market data for what happened, earnings/estimates for event context, company news for narrative, macro or index context only when the question crosses into the broader market.",
+  "- REQUIREMENTS: also state the INFORMATION REQUIREMENTS that would answer the question, as a `requirements` array. Each entry is what must be KNOWN, in plain words (for example \"current policy or rates regime\", \"oil-specific supply developments\", \"the company's next earnings date and consensus estimates\", \"how similar setups resolved previously\"), with importance CRITICAL or SUPPORTING and a timeSensitivity of CURRENT, RECENT, HISTORICAL, or ANY. Requirements are the engine's coverage checklist: it re-checks each one against actual evidence and recovers the uncovered ones. State 3 to 8 requirements, each independently checkable, never a provider or tool name.",
   "- LOCAL_KNOWLEDGE_RETRIEVAL serves the trader's own saved context (frameworks, saved research conclusions, memories, theses). When the question references our research, my framework, previous findings, or an evaluation against stored criteria, request it FIRST; live providers then supply the current-state evidence that outranks stale local claims.",
   "- Select the smallest capability set with material information value. Do not request every capability.",
   "- Respect trader constraints (e.g. exclusions) in scope.",
@@ -139,6 +150,8 @@ export interface AdaptiveLoopOptions {
   /** Fixed news-style capability params (asset etc.) merged into every capability call. */
   readonly capabilityParams?: Readonly<Record<string, unknown>>;
   readonly maxRounds?: number;
+  /** Bounded gap-recovery rounds the engine may schedule beyond the planner's rounds. */
+  readonly maxRecoveryRounds?: number;
   /**
    * Wall-clock deadline for the whole loop (epoch ms). When crossed, the loop stops with the
    * honest TIME_BUDGET_EXHAUSTED reason and the evidence gathered so far is preserved; it is
@@ -197,12 +210,31 @@ export async function runAdaptiveResearch(
   let finalDecision!: AdaptiveDecision;
   let stoppedBecause!: AdaptiveLoopOutcome["stoppedBecause"];
   let modelFailure: ModelFailure | undefined;
+  // REQUIREMENT COVERAGE (engine-owned completion law): the planner declares what must be
+  // KNOWN; when it does not, requirements derive from its tasks. Coverage is re-assessed
+  // after every round from this run's actual evidence, and the ENGINE (never the model)
+  // decides completion. Gaps drive bounded recovery rounds, then honest insufficiency.
+  let requirements: readonly ResearchRequirement[] =
+    plan.requirements !== undefined && plan.requirements.length > 0
+      ? buildRequirements(plan.requirements)
+      : requirementsFromTasks(plan.tasks);
+  /** Capabilities for the NEXT round when it is a gap-recovery round (engine-scheduled). */
+  let recoveryRoundCapabilities: readonly string[] | undefined;
+  let recoveryRoundsUsed = 0;
+  const MAX_RECOVERY_ROUNDS = options.maxRecoveryRounds ?? 2;
 
   for (let round = 1; round <= maxRounds; round += 1) {
-    // Determine this round's tasks: round 1 = the plan; later rounds = the decision's nextTasks.
-    const roundTasks = round === 1
-      ? plan.tasks.map((t) => ({ objective: t.objective, capabilities: t.capabilities, completion: t.completion }))
-      : (rounds[rounds.length - 1]?.decision.nextTasks ?? []);
+    // Determine this round's tasks: round 1 = the plan; a gap-recovery round = the engine's
+    // recovery capabilities; later rounds = the decision's nextTasks.
+    const roundTasks = recoveryRoundCapabilities !== undefined
+      ? [{ objective, capabilities: [...recoveryRoundCapabilities], completion: "recover the uncovered research requirements" }]
+      : round === 1
+        ? plan.tasks.map((t) => ({ objective: t.objective, capabilities: t.capabilities, completion: t.completion }))
+        : (rounds[rounds.length - 1]?.decision.nextTasks ?? []);
+    if (recoveryRoundCapabilities !== undefined) {
+      recoveryRoundsUsed += 1;
+      recoveryRoundCapabilities = undefined;
+    }
 
     const executions: RoundExecution[] = [];
     for (const task of roundTasks) {
@@ -247,11 +279,18 @@ export async function runAdaptiveResearch(
       }
     }
 
-    // 3. Adaptive decision with the updated, validated context.
+    // 2b. Requirement coverage from THIS run's evidence (engine-assessed; never the model).
+    requirements = assessCoverage(requirements, coverageEvidenceOf(workspace, researchRef), {
+      ...(subjectTerms !== undefined ? { subjectTerms } : {}),
+      now: at(),
+    });
+
+    // 3. Adaptive decision with the updated, validated context (coverage included).
     const context = buildResearchContext(workspace, {
       researchRef,
       relevantTo: objective,
       ...(subjectTerms !== undefined ? { subjectTerms: [...subjectTerms] } : {}),
+      requirements,
       executions: allExecutions.map((e) => ({ capability: e.capability, result: e.result })),
     });
     let decision: AdaptiveDecision;
@@ -299,8 +338,7 @@ export async function runAdaptiveResearch(
       // run evidence is not a completion — it is the live "crypto evidence answered an oil
       // question" failure wearing a green checkmark. The engine (not the model) owns
       // completion; when the subject gate rejected EVERY item this run collected, the
-      // correct next state is RECOVERY: the deep-research tier fires with the exact
-      // question instead of shipping an answer built from wrong-domain evidence.
+      // correct next state is RECOVERY.
       const runEvidenceIds = new Set(allExecutions.flatMap((e) => e.evidenceIds));
       const relevantRunEvidence = [...runEvidenceIds].filter((id) => context.items.some((i) => i.ref === id)).length;
       if (subjectTerms !== undefined && runEvidenceIds.size > 0 && relevantRunEvidence === 0) {
@@ -312,8 +350,42 @@ export async function runAdaptiveResearch(
         };
         break;
       }
-      stoppedBecause = "EVIDENCE_SUFFICIENT";
-      finalDecision = decision;
+      // REQUIREMENT-COVERAGE GATE: the model may only conclude COMPLETE when the engine's
+      // coverage assessment agrees. Blocking CRITICAL requirements (missing, or satisfied
+      // only by STALE observations for a CURRENT question) trigger bounded recovery rounds
+      // driven by the gap's CAPABILITIES; only after recovery is spent does the run end
+      // honestly insufficient, naming the requirement it could not satisfy.
+      const verdict = coverageVerdict(requirements);
+      if (verdict.complete) {
+        stoppedBecause = "EVIDENCE_SUFFICIENT";
+        finalDecision = decision;
+        break;
+      }
+      const recoveryCaps = recoveryCapabilities(verdict.blocking, {
+        // Availability comes from the registry (does any provider serve this capability), so
+        // recovery never schedules a capability the deployment cannot execute.
+        isAvailable: (cap) => options.registry.resolve(cap as Parameters<typeof options.registry.resolve>[0]).length > 0,
+        // Recovery must try NEW paths: a capability that already ran this round cannot
+        // satisfy a gap it just failed (re-running it only duplicates evidence).
+        exclude: allExecutions.map((e) => e.capability),
+      });
+      if (recoveryRoundsUsed < MAX_RECOVERY_ROUNDS && recoveryCaps.length > 0 && round < maxRounds) {
+        requirements = requirements.map((r) =>
+          verdict.blocking.some((b) => b.id === r.id) ? { ...r, recoveryAttempts: r.recoveryAttempts + 1 } : r,
+        );
+        recoveryRoundCapabilities = recoveryCaps;
+        options.onProgress?.(
+          progressEvent("capability_started", at(), `recovering uncovered requirements via ${recoveryCaps.join(", ")}`, { capability: recoveryCaps[0] ?? "recovery" }),
+        );
+        continue; // engine-scheduled recovery round
+      }
+      requirements = exhaustUnresolved(requirements, recoveryCaps.length > 0 ? recoveryCaps : ["direct capabilities"]);
+      stoppedBecause = "REQUIREMENT_GAPS_UNRESOLVED";
+      finalDecision = {
+        decision: "INSUFFICIENT_EVIDENCE",
+        rationale: coverageGapRationale(requirements),
+        nextTasks: [],
+      };
       break;
     }
     if (decision.decision === "INSUFFICIENT_EVIDENCE") {
@@ -349,7 +421,7 @@ export async function runAdaptiveResearch(
   // last legitimate path before declaring genuine insufficiency (§19).
   const budgetStopped = stoppedBecause === "TIME_BUDGET_EXHAUSTED" || stoppedBecause === "ROUND_BUDGET_EXHAUSTED";
   const deepResearchFired =
-    (stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE" || budgetStopped || stoppedBecause === "HOLLOW_COMPLETE_RECOVERY") &&
+    (stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE" || budgetStopped || stoppedBecause === "HOLLOW_COMPLETE_RECOVERY" || stoppedBecause === "REQUIREMENT_GAPS_UNRESOLVED") &&
     !allExecutions.some((e) => e.capability === "CROSS_DOMAIN_SYNTHESIS") &&
     options.registry.resolve("CROSS_DOMAIN_SYNTHESIS").length > 0 &&
     (options.deadlineMs === undefined || at().getTime() < options.deadlineMs);
@@ -437,6 +509,7 @@ export async function runAdaptiveResearch(
       researchRef,
       relevantTo: objective,
       ...(subjectTerms !== undefined ? { subjectTerms: [...subjectTerms] } : {}),
+      requirements,
       executions: allExecutions.map((e) => ({ capability: e.capability, result: e.result })),
     }),
   };
@@ -462,6 +535,42 @@ export function partialDecision(_reason: "ROUND_BUDGET_EXHAUSTED" | "TIME_BUDGET
     rationale: `Research was completed across ${rounds} round(s) with ${evidenceCount} evidence object(s) gathered before the research budget was reached; the findings below reflect everything collected.`,
     nextTasks: [],
   };
+}
+
+/**
+ * This run's evidence as coverage items (text + domain tag + freshness + event time).
+ * Minimized view: coverage matching is deterministic and never needs full provenance.
+ */
+function coverageEvidenceOf(workspace: Workspace, researchRef: string): readonly CoverageEvidence[] {
+  const research = workspace.getResearch(researchRef);
+  if (research === undefined) return [];
+  const items: CoverageEvidence[] = [];
+  for (const ref of research.evidenceRefs) {
+    const e = workspace.getEvidence(ref);
+    if (e === undefined) continue;
+    items.push({
+      ref: e.id,
+      text: e.observation,
+      evidenceType: e.evidenceType,
+      freshness: e.freshness,
+      ...(e.timestamp !== undefined ? { observedAt: e.timestamp } : {}),
+    });
+  }
+  return items;
+}
+
+/**
+ * Honest insufficiency rationale: names the requirements the engine could not cover and why
+ * (missing vs stale-only). The user gets the requirement, never a provider dump.
+ */
+function coverageGapRationale(requirements: readonly ResearchRequirement[]): string {
+  const unresolved = requirements.filter((r) => r.status !== "SATISFIED");
+  if (unresolved.length === 0) return "Research concluded without uncovered requirements.";
+  const names = unresolved
+    .slice(0, 4)
+    .map((r) => `${r.description}${r.staleOnlyRefs.length > 0 ? " (only stale evidence found)" : ""}`)
+    .join("; ");
+  return `Relevant evidence could not be obtained for: ${names}. Nothing was fabricated; the remaining gap is recorded per requirement.`;
 }
 
 function mustResearch(workspace: Workspace, researchRef: string): Research {

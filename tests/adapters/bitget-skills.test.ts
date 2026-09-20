@@ -212,6 +212,7 @@ describe("five Bitget skills registered through the generic registry (final lock
       "heurist/FredMacroAgent",
       "heurist/SecEdgarAgent",
       "heurist/YahooFinanceAgent",
+      "market/yahoo-regime-observables",
     ]);
   });
 

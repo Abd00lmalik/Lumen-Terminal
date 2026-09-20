@@ -66,6 +66,8 @@ export interface ResearchContext {
   readonly archiveBackground?: { readonly count: number; readonly sampleRefs: readonly string[] };
   /** Run-collected items demoted by the SUBJECT gate: this run ingested them but they do not concern the question's subject (wrong-target evidence; the loop's recovery reads this). */
   readonly rejectedWrongTarget?: number;
+  /** Requirement-coverage report (rendered text) when the engine assessed requirements. */
+  readonly requirementCoverage?: string;
   /** Which run the context is anchored to (the archive fallback when unscoped). */
   readonly currentResearchRef?: string;
   readonly currentResearchQuestion?: string;
@@ -260,6 +262,12 @@ export function buildResearchContext(
      * because their objective legitimately does not name the subject.
      */
     readonly subjectTerms?: readonly string[];
+    /**
+     * Requirement coverage (engine-assessed): rendered into the context so the decision and
+     * synthesis models SEE which requirements are covered, which are stale-only, and which
+     * are exhausted. The model cannot upgrade an uncovered requirement to satisfied.
+     */
+    readonly requirements?: readonly { readonly id: string; readonly description: string; readonly importance: string; readonly timeSensitivity: string; readonly status: string; readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[]; readonly missingReason?: string }[];
     /** TOOL_RESULTs from this session, for failure/limitation reporting. */
     readonly executions?: readonly { readonly capability: string; readonly result: ToolResult }[];
     /** Set when the caller already knows evidence is insufficient (valid completion state). */
@@ -416,6 +424,7 @@ export function buildResearchContext(
     ...(researchRef === undefined ? { scope: "workspace_archive" as const } : { scope: "single_research" as const }),
     ...(archiveBackground.count > 0 ? { archiveBackground } : {}),
     ...(rejectedWrongTarget > 0 ? { rejectedWrongTarget } : {}),
+    ...(options.requirements !== undefined && options.requirements.length > 0 ? { requirementCoverage: renderRequirementCoverage(options.requirements) } : {}),
     items,
     claims,
     hypotheses,
@@ -425,6 +434,30 @@ export function buildResearchContext(
     ...(thesis !== undefined ? { thesis } : {}),
     ...(theses.length > 0 ? { theses } : {}),
   };
+}
+
+/**
+ * Requirement coverage as the model sees it: engine-assessed status per requirement. A
+ * provider returning data is NOT coverage; stale-only and exhausted requirement state is
+ * stated explicitly so no answer can present an uncovered requirement as answered.
+ */
+function renderRequirementCoverage(requirements: readonly { readonly id: string; readonly description: string; readonly importance: string; readonly timeSensitivity: string; readonly status: string; readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[]; readonly missingReason?: string }[]): string {
+  const lines = requirements.map((r) => {
+    const detail =
+      r.status === "SATISFIED" ? `${r.evidenceRefs.length} relevant observation(s)`
+      : r.status === "PARTIALLY_SATISFIED" ? `ONLY STALE evidence (${r.staleOnlyRefs.length}) for a ${r.timeSensitivity} requirement`
+      : r.status === "EXHAUSTED" ? `EXHAUSTED: ${r.missingReason ?? "no relevant evidence after recovery"}`
+      : `${r.status}: no relevant evidence yet`;
+    return `- [${r.id}] (${r.importance}, ${r.timeSensitivity}) ${r.description}: ${r.status} (${detail})`;
+  });
+  const blocking = requirements.filter((r) => r.importance === "CRITICAL" && r.status !== "SATISFIED");
+  return [
+    "REQUIREMENT COVERAGE (engine-assessed; a provider returning data is NOT coverage):",
+    ...lines,
+    blocking.length === 0
+      ? "VERDICT: all CRITICAL requirements are covered by relevant, fresh-enough evidence."
+      : `VERDICT: ${blocking.length} CRITICAL requirement(s) remain UNCOVERED (${blocking.map((b) => b.id).join(", ")}). Do NOT present them as answered; if recovery failed, state exactly which requirement could not be satisfied.`,
+  ].join("\n");
 }
 
 /**
@@ -448,6 +481,7 @@ export function renderResearchContext(ctx: ResearchContext): string {
     lines.push(`RELEVANCE GATE: ${ctx.archiveBackground.count} archived evidence object(s) from unrelated past questions are EXCLUDED from this context (sample: ${ctx.archiveBackground.sampleRefs.join(", ")}). If this question needs them, research the question directly; do not treat the exclusion as evidence of absence.`);
   }
   if (ctx.objective !== undefined) lines.push(`RESEARCH OBJECTIVE: ${ctx.objective}`);
+  if (ctx.requirementCoverage !== undefined) lines.push(ctx.requirementCoverage);
 
   const byKind = new Map<string, ContextItem[]>();
   for (const item of ctx.items) {
