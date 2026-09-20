@@ -252,6 +252,21 @@ export class ResearchApp {
       : result.modelFailure !== undefined && !ranResearch ? "MODEL_FAILURE"
       : "COMPLETED";
 
+    // JUDGMENT BACKSTOP (completion law): a completed run is not complete until its
+    // conclusion exists as a judgment. Flows normally mint one; if none was linked
+    // (flow path skipped it, or a prior instance's write was lost in a merge), the
+    // run's validated answer IS the judgment — mint it deterministically. Without this
+    // a completed run later hydrates as a judgmentless bare summary.
+    if (outcome === "COMPLETED" && researchRef !== undefined && answer !== undefined) {
+      const minted = ensureRunJudgment(
+        ws,
+        researchRef,
+        answer,
+        { kind: "agent", detail: "completion backstop: validated answer recorded as the run judgment" },
+      );
+      if (minted !== undefined && !judgments.some((d) => d.ref === minted.ref)) judgments.push(minted);
+    }
+
     const response: ResearchResponseDTO = {
       requestId,
       action: result.request.primaryAction,
@@ -457,6 +472,43 @@ export class ResearchApp {
 // ---------------------------------------------------------------------------
 // Helpers (pure)
 // ---------------------------------------------------------------------------
+
+/**
+ * Judgment backstop (completion law): a completed research run MUST carry a judgment.
+ * Flows mint one during synthesis; if the run ended without any linked judgment, the
+ * run's validated answer (already schema-checked, citations dropped if invented) is the
+ * conclusion and is recorded as the judgment deterministically. Idempotent: if an ACTIVE
+ * judgment already exists for the run, nothing is minted. Returns the minted judgment,
+ * or undefined when one already exists.
+ */
+export function ensureRunJudgment(
+  ws: Workspace,
+  researchRef: string,
+  answer: AnswerDTO,
+  origin: ProvenanceOrigin,
+): ReturnType<typeof judgmentToDTO> | undefined {
+  const research = ws.getResearch(researchRef);
+  if (research === undefined) return undefined;
+  if (research.currentJudgmentRef !== undefined || research.judgmentRefs.length > 0) return undefined;
+  const minted = ws.addJudgment(
+    {
+      researchRef,
+      statement: answer.answer,
+      basis: {
+        supportingEvidence: [...answer.citedObjectRefs],
+        opposingEvidence: [...answer.opposingReasons],
+        keyClaims: [...answer.supportingReasons],
+        hypotheses: [],
+      },
+      confidence: answer.confidence === "UNKNOWN" ? "LOW" : answer.confidence,
+      uncertainty: answer.keyUncertainty === "" ? [] : [answer.keyUncertainty],
+      implications: answer.implication === "" ? [] : [answer.implication],
+      unresolvedQuestions: [],
+    },
+    origin,
+  );
+  return judgmentToDTO(minted);
+}
 
 function judgmentsForResearch(ws: Workspace, researchRef: string): ReturnType<typeof judgmentToDTO>[] {
   const research = ws.getResearch(researchRef);

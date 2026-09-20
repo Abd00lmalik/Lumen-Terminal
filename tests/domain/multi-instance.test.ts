@@ -159,3 +159,17 @@ describe("Heurist error-payload law", () => {
     expect(outputs[0]!.outputClass).toBe("ANALYST_INTERPRETATION");
   });
 });
+
+describe("snapshot restoration is total (never throws on malformed persisted entries)", () => {
+  it("tolerates a malformed id in a persisted collection instead of bricking fromSnapshot", () => {
+    const healthy = new Workspace();
+    const research = healthy.addResearch({ objective: "r", question: "q", flow: "WHAT_HAPPENED" }, origin);
+    const snap = healthy.toSnapshot() as Record<string, unknown>;
+    const researches = snap.researches as Array<Record<string, unknown>>;
+    researches.push({ ...researches[0]!, id: undefined }); // corrupted persisted entry
+    expect(() => Workspace.fromSnapshot(snap as never)).not.toThrow();
+    // Restoration still seeds counters past the healthy ids (no id re-minting).
+    const restored = Workspace.fromSnapshot(snap as never);
+    expect(restored.getResearch(research.id)?.id).toBe(research.id);
+  });
+});

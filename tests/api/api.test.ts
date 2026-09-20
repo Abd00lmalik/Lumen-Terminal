@@ -9,6 +9,7 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildApi } from "../../src/api/server.js";
+import { ensureRunJudgment } from "../../src/api/research-app.js";
 import { CapabilityRegistry } from "../../src/adapters/capability-registry.js";
 import { resetIdCounters } from "../../src/domain/ids.js";
 import { MemoryStore } from "../../src/persistence/index.js";
@@ -240,6 +241,78 @@ describe("workspace exposure", () => {
     expect(statuses).toContain("CURRENT");
     expect(statuses).toContain("HISTORICAL"); // explicit status field; client never infers
     await app.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Judgment backstop (completion law): a completed run ALWAYS carries a judgment
+// ---------------------------------------------------------------------------
+
+describe("judgment backstop", () => {
+  const answer = {
+    answer: "TSLA closed at $364.27; the week-over-week comparison is inconclusive.",
+    supportingReasons: ["TSLA current price is recorded at $364.27 USD."],
+    opposingReasons: ["no weekly OHLCV was retrieved"],
+    confidence: "MODERATE" as const,
+    keyUncertainty: "weekly range was provider-limited",
+    implication: "monitor the next weekly close before judging momentum",
+    citedObjectRefs: ["ev_000001"],
+  };
+
+  it("mints a judgment from the validated answer when a completed run has none (no run left judgmentless)", () => {
+    const ws = new Workspace();
+    const research = ws.addResearch({ objective: "TSLA week comparison", question: "TSLA price last week", flow: "WHAT_DOES_ALL_INFORMATION_SAY" }, trader);
+    ws.transitionResearch(research.id, "ACTIVE", trader, "seed active");
+    ws.transitionResearch(research.id, "COMPLETED", trader, "seed completed");
+
+    const minted = ensureRunJudgment(ws, research.id, answer, { kind: "agent", detail: "backstop" });
+    expect(minted).toBeDefined();
+    expect(minted?.ref).toMatch(/^jd_/);
+    expect(minted?.statement).toBe(answer.answer);
+    expect(minted?.confidence).toBe("MODERATE");
+
+    const after = ws.getResearch(research.id);
+    expect(after?.currentJudgmentRef ?? after?.judgmentRefs[0]).toBe(minted?.ref);
+    // Uncertainty and implication flow through; the run is fully represented.
+    const judgment = ws.getJudgment(minted?.ref ?? "");
+    expect(judgment?.uncertainty).toContain("weekly range was provider-limited");
+    expect(judgment?.implications).toContain("monitor the next weekly close before judging momentum");
+  });
+
+  it("is idempotent: a run that already has a judgment is never re-judged", () => {
+    const ws = new Workspace();
+    const research = ws.addResearch({ objective: "BTC move", question: "why did BTC move", flow: "WHY_DID_IT_HAPPEN" }, trader);
+    ws.transitionResearch(research.id, "ACTIVE", trader, "seed active");
+    ws.transitionResearch(research.id, "COMPLETED", trader, "seed completed");
+
+    const first = ensureRunJudgment(ws, research.id, answer, { kind: "agent", detail: "backstop" });
+    const second = ensureRunJudgment(ws, research.id, answer, { kind: "agent", detail: "backstop again" });
+    expect(first).toBeDefined();
+    expect(second).toBeUndefined(); // existing ACTIVE judgment for the run wins
+    const after = ws.getResearch(research.id);
+    expect(after?.judgmentRefs).toHaveLength(1);
+  });
+
+  it("is idempotent across re-add: the SAME statement re-added for the same research reuses the judgment object", () => {
+    const ws = new Workspace();
+    const research = ws.addResearch({ objective: "BTC move", question: "why did BTC move", flow: "WHY_DID_IT_HAPPEN" }, trader);
+    ws.transitionResearch(research.id, "ACTIVE", trader, "seed active");
+    ws.transitionResearch(research.id, "COMPLETED", trader, "seed completed");
+    const first = ws.addJudgment(
+      { researchRef: research.id, statement: answer.answer, basis: { supportingEvidence: [], opposingEvidence: [], keyClaims: [], hypotheses: [] } },
+      trader,
+    );
+    const again = ws.addJudgment(
+      { researchRef: research.id, statement: answer.answer, basis: { supportingEvidence: [], opposingEvidence: [], keyClaims: [], hypotheses: [] } },
+      { kind: "agent", detail: "backstop after merge" },
+    );
+    expect(again.id).toBe(first.id); // no duplicate mint
+    expect(ws.getResearch(research.id)?.judgmentRefs).toHaveLength(1);
+  });
+
+  it("never touches runs with unknown refs", () => {
+    const ws = new Workspace();
+    expect(ensureRunJudgment(ws, "rs_999999", answer, { kind: "agent", detail: "backstop" })).toBeUndefined();
   });
 });
 

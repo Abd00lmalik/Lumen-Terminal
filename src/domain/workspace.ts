@@ -343,6 +343,15 @@ export class Workspace {
     const { researchRef, ...rest } = input;
     const research = this.mustResearch(researchRef);
 
+    // Idempotent re-add (multi-instance law): the SAME statement re-arriving for the same
+    // research (e.g. the completion backstop running after a merge restored the flow's
+    // judgment) must reuse the existing judgment — minting a second identical judgment
+    // object would corrupt judgment counts and dedupe downstream.
+    for (const existingId of research.judgmentRefs) {
+      const existing = this.judgments.get(existingId);
+      if (existing && existing.status === "ACTIVE" && existing.statement === rest.statement) return existing;
+    }
+
     for (const existingId of research.judgmentRefs) {
       const existing = this.judgments.get(existingId);
       if (existing && existing.status === "ACTIVE") {
@@ -777,7 +786,7 @@ export class Workspace {
       ...snap.researches, ...snap.sources, ...snap.evidence, ...snap.claims, ...snap.hypotheses,
       ...snap.analyses, ...snap.judgments, ...snap.branches, ...(snap.theses ?? []),
       ...(snap.savedArtifacts ?? []), ...(snap.memories ?? []), ...(snap.monitors ?? []),
-    ].map((o) => o.id));
+    ].map((o) => o?.id).filter((id): id is string => typeof id === "string"));
     return ws;
   }
 

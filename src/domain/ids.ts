@@ -59,6 +59,7 @@ export const idPrefixes = {
  */
 export function seedIdCountersFromIds(ids: readonly string[]): void {
   for (const id of ids) {
+    if (typeof id !== "string" || id === "") continue; // tolerate malformed persisted entries — restoration must never throw
     const prefix = id.slice(0, id.lastIndexOf("_"));
     if (!prefix) continue;
     const n = numericSuffix(id);
