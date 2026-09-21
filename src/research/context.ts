@@ -272,10 +272,14 @@ export function buildResearchContext(
      * synthesis models SEE which requirements are covered, which are stale-only, and which
      * are exhausted. The model cannot upgrade an uncovered requirement to satisfied.
      */
-    readonly requirements?: readonly { readonly id: string; readonly description: string; readonly role?: string; readonly engineRequired?: boolean; readonly evidenceClasses?: readonly string[]; readonly importance: string; readonly timeSensitivity: string; readonly status: string; readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[]; readonly missingReason?: string }[];    /** TOOL_RESULTs from this session, for failure/limitation reporting. */
+    readonly requirements?: readonly { readonly id: string; readonly description: string; readonly role?: string; readonly engineRequired?: boolean; readonly evidenceClasses?: readonly string[]; readonly importance: string; readonly timeSensitivity: string; readonly status: string; readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[]; readonly missingReason?: string }[];
     readonly executions?: readonly { readonly capability: string; readonly result: ToolResult }[];
     /** Set when the caller already knows evidence is insufficient (valid completion state). */
     readonly insufficientEvidence?: string;
+    /** When true, bypasses the requirement-admission gate for run-scoped evidence (continuation flows
+     *  like thesis hold / framework evaluation collect evidence against their own objective, which
+     *  legitimately does not match the upstream requirements). */
+    readonly continuationFlow?: boolean;
   } = {},
 ): ResearchContext {
   const items: ContextItem[] = [];
@@ -363,8 +367,12 @@ export function buildResearchContext(
     }
     // Tier 1.6 (requirement-admission gate, run evidence): relevance to the QUESTION is
     // decided by the requirement matcher, not by "a provider returned it during this run".
+    // For continuation flows (thesis hold, framework evaluation), the flag bypasses this gate:
+    // their evidence was collected for THIS continuation and legitimately concerns the topic,
+    // even if it doesn't match the upstream requirements. Without this, the gate empties their
+    // context (live: flow4 evaluation returned empty context, skipped recording entirely).
     const matchesAnyRequirement =
-      !isRunEvidence ||
+      (isRunEvidence && options.continuationFlow === true) ||
       admissionRequirements.length === 0 ||
       admissionRequirements.some((req) => {
         const probe: ResearchRequirement = {

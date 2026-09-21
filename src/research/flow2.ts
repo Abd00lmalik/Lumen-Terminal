@@ -152,6 +152,7 @@ export async function runFlow2(objective: string, options: Flow2Options): Promis
         researchId: research.id, flow: "WHY_IT_HAPPENED", mode: "CAUSAL",
         plan: { objective, scopeIncluded: [], scopeExcluded: [], tasks: [], completionCriteria: [], adaptationPolicy: "n/a; planning failed" },
         rounds: [], executions: [], hypotheses: [], evidence: [],
+        requirements: [], floorCapabilities: [], recoveryRounds: 0,
         finalDecision: { decision: "INSUFFICIENT_EVIDENCE", rationale: `research could not start: ${outcome.modelFailure.message}`, nextTasks: [] },
         stoppedBecause: "MODEL_FAILURE",
         ...(outcome.modelFailure !== undefined ? { modelFailure: outcome.modelFailure } : {}),

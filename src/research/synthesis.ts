@@ -8,8 +8,23 @@
  *
  * This stage is the explicit ANALYSIS step between validated evidence and the final answer:
  * it receives the trader's verbatim question, the engine-assessed requirement coverage, and
- * the validated context, and must return the answer to the QUESTION — factors, mechanisms,
- * evidence refs, what would change the view — never a restatement of the evidence.
+ * the validated context, and must return the answer to the QUESTION - factors, mechanisms,
+ * evidence refs, what would change the view - never a restatement of the evidence.
+ *
+ * CAUSAL CHAIN OUTPUT (research contract): for causal/macro questions, the engine requires
+ * a structured representation that distinguishes:
+ * 1. OBSERVATION: What actually happened?
+ * 2. DRIVER: What directly explains the observed move?
+ * 3. MECHANISM: Through what economic/market mechanism could that driver produce the move?
+ * 4. TRANSMISSION: Where did that effect propagate?
+ * 5. CROSS-ASSET RESPONSE: What happened in related markets?
+ * 6. TRADER IMPLICATION: What does the combined evidence imply for the research question?
+ * 7. COUNTER-EVIDENCE / INVALIDATION: What evidence would weaken or overturn the interpretation?
+ * 8. UNCERTAINTY: Which links are directly evidenced and which are analytical inference?
+ *
+ * The model must NEVER silently turn correlation into causation. Every causal relationship
+ * should carry an evidence status such as DIRECT_EVIDENCE, SUPPORTED_INFERENCE,
+ * CORRELATIONAL, or UNRESOLVED.
  *
  * Hard rules carried from the existing architecture: evidence-only facts (no background
  * knowledge presented as research), no provider/process notes in the answer, epistemic
@@ -28,6 +43,106 @@ import {
   type ContractState,
   type ContractViolation,
 } from "./contract-checks.js";
+import type { EvidenceQuality } from "./requirements.js";
+
+/**
+ * CAUSAL CHAIN LINK (research contract): one link in the causal chain. Each link carries
+ * evidence quality to prevent correlation-causation confusion.
+ */
+export interface CausalChainLink {
+  /** What this link represents in the causal chain. */
+  readonly type: "observation" | "driver" | "mechanism" | "transmission" | "cross_asset" | "implication";
+  /** Description of this link. */
+  readonly description: string;
+  /** Evidence supporting this link. */
+  readonly evidenceRefs: readonly string[];
+  /** Evidence quality for this link. */
+  readonly evidenceQuality: EvidenceQuality;
+  /** Whether the evidence is direct or inferred. */
+  readonly evidenceDirectness: "DIRECT" | "INFERRED";
+  /** Confidence in this link based on evidence. */
+  readonly confidence: "HIGH" | "MODERATE" | "LOW";
+  /** Limitations or uncertainties for this link. */
+  readonly limitations?: readonly string[];
+}
+
+/**
+ * TRANSMISSION MECHANISM (research contract): how one market/asset affects another.
+ * Each mechanism carries evidence to support or contradict the transmission.
+ */
+export interface TransmissionMechanism {
+  /** The source market/asset. */
+  readonly source: string;
+  /** The target market/asset. */
+  readonly target: string;
+  /** The mechanism through which source affects target. */
+  readonly mechanism: string;
+  /** Evidence supporting this transmission. */
+  readonly supportingEvidence: readonly string[];
+  /** Evidence contradicting this transmission. */
+  readonly contradictingEvidence: readonly string[];
+  /** Evidence quality for this transmission. */
+  readonly evidenceQuality: EvidenceQuality;
+  /** Whether the transmission is currently active based on evidence. */
+  readonly active: boolean;
+}
+
+/**
+ * FORWARD WATCH CONDITION (research contract): observable conditions to monitor that would
+ * strengthen or weaken the thesis. These are derived from evidence, not invented.
+ */
+export interface ForwardWatchCondition {
+  /** What to watch. */
+  readonly condition: string;
+  /** How it would affect the thesis if it occurs. */
+  readonly effect: "strengthens" | "weakens" | "invalidates";
+  /** Evidence this condition is derived from. */
+  readonly evidenceRefs: readonly string[];
+  /** Current status of this condition. */
+  readonly currentStatus: "met" | "not_met" | "partially_met" | "unknown";
+}
+
+/**
+ * COUNTER-EVIDENCE (research contract): evidence that would weaken or overturn the
+ * leading conclusion. Every major thesis should include at least one attempt to falsify.
+ */
+export interface CounterEvidence {
+  /** What the counter-evidence would show. */
+  readonly description: string;
+  /** Evidence supporting this counter-claim. */
+  readonly evidenceRefs: readonly string[];
+  /** How it would affect the thesis. */
+  readonly impact: "weakens" | "invalidates" | "complicates";
+  /** Current status. */
+  readonly status: "present" | "absent" | "searched_not_found";
+}
+
+/**
+ * CAUSAL CHAIN OUTPUT (research contract): structured representation for causal/macro
+ * questions. Prevents correlation-causation confusion and ensures complete evidence chain.
+ */
+export interface CausalChainOutput {
+  /** The observed move or event. */
+  readonly observation: CausalChainLink;
+  /** Direct drivers behind the observation. */
+  readonly drivers: readonly CausalChainLink[];
+  /** Economic/market mechanisms. */
+  readonly mechanisms: readonly CausalChainLink[];
+  /** Transmission into related markets. */
+  readonly transmission: readonly TransmissionMechanism[];
+  /** Cross-asset response confirming or contradicting the chain. */
+  readonly crossAssetResponse: readonly CausalChainLink[];
+  /** Implications for the trader. */
+  readonly implications: readonly CausalChainLink[];
+  /** Counter-evidence that would weaken the thesis. */
+  readonly counterEvidence: readonly CounterEvidence[];
+  /** Forward-looking conditions to watch. */
+  readonly forwardWatchConditions: readonly ForwardWatchCondition[];
+  /** Overall confidence in the causal chain. */
+  readonly overallConfidence: "HIGH" | "MODERATE" | "LOW";
+  /** Material uncertainties in the chain. */
+  readonly uncertainties: readonly string[];
+}
 
 /** Storage/process language: an implication phrased as run accounting is not decision support. */
 const PROCESS_NOTE = /preserved|evidence object|research id|rs_\d|deeper level|disclosure|provider|storage/i;
@@ -54,14 +169,29 @@ export const ANSWER_SYNTHESIS_SCHEMA_DESC = [
   '   "factor": string,        // what it is, in the question\'s own terms',
   '   "mechanism": string,     // how it would act on the subject (transmission path)',
   '   "direction": string,     // which way it leans given the evidence, or "mixed"/"unclear"',
-  '   "evidenceRefs": string[] // evidence ids from the context that support THIS factor',
-  '   "counterevidenceRefs": string[] // evidence ids from the context that WEAKEN or complicate this factor; [] when the context holds none (say so, never invent)',
+  '   "evidenceRefs": string[], // evidence ids from the context that support THIS factor',
+  '   "counterevidenceRefs": string[], // evidence ids from the context that WEAKEN or complicate this factor; [] when the context holds none (say so, never invent)',
+  '   "evidenceQuality": "DIRECT_EVIDENCE"|"SUPPORTED_INFERENCE"|"CORRELATIONAL"|"UNRESOLVED",',
+  '   "evidenceDirectness": "DIRECT"|"INFERRED"',
   " }],",
   ' "whatWouldChangeTheView": string[], // observable conditions that would alter the conclusion',
   ' "implication": string,             // what the conclusion means for the trader\'s decision: one or two sentences, no process notes',
   ' "uncertainty": string[],            // material gaps only; never provider notes',
   ' "confidence": "HIGH"|"MODERATE"|"LOW",',
-  ' "citedObjectRefs": string[]         // evidence ids from the context only',
+  ' "citedObjectRefs": string[],        // evidence ids from the context only',
+  // CAUSAL CHAIN OUTPUT (research contract): for causal/macro questions, structured representation
+  ' "causalChain": {                    // optional; required for CAUSAL/MACRO_REGIME questions',
+  '   "observation": { "description": string, "evidenceRefs": string[], "evidenceQuality": string, "evidenceDirectness": string },',
+  '   "drivers": [{ "description": string, "evidenceRefs": string[], "evidenceQuality": string, "evidenceDirectness": string }],',
+  '   "mechanisms": [{ "description": string, "evidenceRefs": string[], "evidenceQuality": string, "evidenceDirectness": string }],',
+  '   "transmission": [{ "source": string, "target": string, "mechanism": string, "supportingEvidence": string[], "contradictingEvidence": string[], "evidenceQuality": string, "active": boolean }],',
+  '   "crossAssetResponse": [{ "description": string, "evidenceRefs": string[], "evidenceQuality": string, "evidenceDirectness": string }],',
+  '   "implications": [{ "description": string, "evidenceRefs": string[], "evidenceQuality": string, "evidenceDirectness": string }],',
+  '   "counterEvidence": [{ "description": string, "evidenceRefs": string[], "impact": string, "status": string }],',
+  '   "forwardWatchConditions": [{ "condition": string, "effect": string, "evidenceRefs": string[], "currentStatus": string }],',
+  '   "overallConfidence": "HIGH"|"MODERATE"|"LOW",',
+  '   "uncertainties": string[]',
+  " }",
   "}",
 ].join("\n");
 
@@ -75,8 +205,9 @@ const ANSWER_SYNTHESIS_SCHEMA: OutputSchema = {
     uncertainty: "string[]",
     confidence: "string",
     citedObjectRefs: "string[]",
+    causalChain: "record",
   },
-  optional: ["whatWouldChangeTheView", "implication", "uncertainty", "confidence"],
+  optional: ["whatWouldChangeTheView", "implication", "uncertainty", "confidence", "causalChain"],
 };
 
 const SYNTHESIS_SYSTEM = [
@@ -96,6 +227,21 @@ const SYNTHESIS_SYSTEM = [
   "- QUESTION-FIRST LAW: the FIRST sentence of directAnswer must BE the answer to the question, never a scene-setting opener. Never begin with 'Current market conditions show', 'Comprehensive evidence has been gathered', 'Evidence indicates', 'Market data shows', or a restatement of the question. Begin with the conclusion in the question's own terms: 'What favors risk assets right now is', 'The main factors that could affect AAPL are', 'The evidence supports the thesis because'.",
   "- CONVERT OBSERVATIONS TO IMPLICATIONS: for every important observation state what it MEANS for the question (support, oppose, or condition the conclusion, through which mechanism). 'VIX is 14.81' is a fact; 'compressed volatility signals reduced near-term hedging demand, which supports risk appetite' is analysis. Numbers appear as supporting evidence after the answer, not as the answer.",
   "- COUNTEREVIDENCE IS REQUIRED for every material factor: cite the context evidence that weakens or complicates it. When the context holds no counterevidence for a factor, return an empty array for it (the run searched and found none is a fact; a manufactured opposition is not). Do not restate the factor's own supporting evidence as opposition.",
+  "- CAUSAL CHAIN OUTPUT (research contract): for CAUSAL/MACRO_REGIME questions, you MUST include the `causalChain` object. This structures the evidence into:",
+  "  1. OBSERVATION: What actually happened? (with evidence quality)",
+  "  2. DRIVERS: What directly explains the observed move? (with evidence quality)",
+  "  3. MECHANISMS: Through what economic/market mechanism could that driver produce the move? (with evidence quality)",
+  "  4. TRANSMISSION: Where did that effect propagate? (with source/target/mechanism)",
+  "  5. CROSS-ASSET RESPONSE: What happened in related markets? (with evidence quality)",
+  "  6. IMPLICATIONS: What does the combined evidence imply? (with evidence quality)",
+  "  7. COUNTER-EVIDENCE: What evidence would weaken or overturn the interpretation?",
+  "  8. FORWARD WATCH CONDITIONS: What observable conditions would strengthen or weaken the thesis?",
+  "- EVIDENCE QUALITY ASSESSMENT: for every causal relationship, assign one of:",
+  "  - DIRECT_EVIDENCE: the evidence directly establishes the claim",
+  "  - SUPPORTED_INFERENCE: the claim is a reasonable inference from direct evidence",
+  "  - CORRELATIONAL: the evidence shows correlation but not causation",
+  "  - UNRESOLVED: the evidence is insufficient to determine the relationship",
+  "- NEVER SILENTLY TURN CORRELATION INTO CAUSATION: if oil and yields moved together but no mechanism is established, label it CORRELATIONAL, not DRIVER.",
   "Output style: plain professional prose, decision-useful for a trader. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
@@ -106,6 +252,10 @@ export interface AnswerFactor {
   readonly evidenceRefs: readonly string[];
   /** Context evidence that weakens/complicates this factor; empty when none exists in context. */
   readonly counterevidenceRefs: readonly string[];
+  /** Evidence quality for this factor. */
+  readonly evidenceQuality?: EvidenceQuality;
+  /** Whether the evidence is direct or inferred. */
+  readonly evidenceDirectness?: "DIRECT" | "INFERRED";
 }
 
 export interface AnswerSynthesis {
@@ -123,6 +273,11 @@ export interface AnswerSynthesis {
    * and recorded here, so no unsupported claim ever stands in the trader-facing text.
    */
   readonly contractViolations?: readonly { readonly type: string; readonly detail: string }[];
+  /**
+   * CAUSAL CHAIN OUTPUT (research contract): structured representation for causal/macro
+   * questions. Prevents correlation-causation confusion and ensures complete evidence chain.
+   */
+  readonly causalChain?: CausalChainOutput;
 }
 
 export interface SynthesizeAnswerOptions {
@@ -240,6 +395,8 @@ export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promis
       // factor's own supporting refs (restating support as opposition is fabrication).
       counterevidenceRefs: keep(Array.isArray(rec.counterevidenceRefs) ? rec.counterevidenceRefs : [])
         .filter((r) => !Array.isArray(rec.evidenceRefs) || !(rec.evidenceRefs as unknown[]).map(String).includes(r)),
+      ...(typeof rec.evidenceQuality === "string" ? { evidenceQuality: rec.evidenceQuality as EvidenceQuality } : {}),
+      ...(typeof rec.evidenceDirectness === "string" ? { evidenceDirectness: rec.evidenceDirectness as "DIRECT" | "INFERRED" } : {}),
     });
   }
   // RESEARCH-CONTRACT VALIDATION (decision-quality contract): the model may synthesize, but it
@@ -294,6 +451,13 @@ export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promis
   }
   const contractGap = violations.length > 0 ? contractGapStatement(violations) : undefined;
   const implication = typeof data.implication === "string" ? data.implication.trim() : "";
+  
+  // CAUSAL CHAIN VALIDATION: validate and clean the causal chain if present
+  let causalChain: CausalChainOutput | undefined;
+  if (data.causalChain !== undefined && data.causalChain !== null) {
+    causalChain = validateCausalChain(data.causalChain, known);
+  }
+  
   return {
     directAnswer: direct,
     keyFactors: factors,
@@ -307,6 +471,7 @@ export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promis
     ...(violations.length > 0
       ? { contractViolations: violations.map((v) => ({ type: v.type, detail: v.detail })) }
       : {}),
+    ...(causalChain !== undefined ? { causalChain } : {}),
   };
 }
 
@@ -314,9 +479,12 @@ export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promis
  * Render the synthesis as the trader-facing answer prose (answer first, then the factors).
  *
  * COUNTEREVIDENCE HONESTY: a factor with no counterevidence refs may only be described as
- * "no material counterevidence found" when disconfirmation was ACTUALLY attempted — otherwise
+ * "no material counterevidence found" when disconfirmation was ACTUALLY attempted - otherwise
  * the rendered sentence would make exactly the claim the contract validator exists to reject
  * (an unsearched conclusion presented as a tested one).
+ *
+ * CAUSAL CHAIN RENDERING: for causal/macro questions, render the structured causal chain
+ * as readable prose with evidence quality labels.
  */
 export function renderAnswerSynthesis(s: AnswerSynthesis, opts: { readonly disconfirmationAttempted?: boolean } = {}): string {
   const parts: string[] = [s.directAnswer];
@@ -329,7 +497,9 @@ export function renderAnswerSynthesis(s: AnswerSynthesis, opts: { readonly disco
           ? " No material counterevidence was found in the retrieved evidence."
           : " Counterevidence for this factor was not searched for in this run.";
       const dir = f.direction !== "" ? ` (${f.direction})` : "";
-      return `${f.factor}${dir}: ${f.mechanism}${refs}.${counter}`;
+      const quality = f.evidenceQuality !== undefined ? ` [${f.evidenceQuality}]` : "";
+      const directness = f.evidenceDirectness !== undefined ? ` [${f.evidenceDirectness}]` : "";
+      return `${f.factor}${dir}: ${f.mechanism}${refs}${quality}${directness}.${counter}`;
     });
     parts.push("Factors that matter: " + factors.join("; ") + ".");
   }
@@ -339,5 +509,206 @@ export function renderAnswerSynthesis(s: AnswerSynthesis, opts: { readonly disco
   if (s.uncertainty.length > 0) {
     parts.push("Material uncertainty: " + s.uncertainty.join("; ") + ".");
   }
+  
+  // CAUSAL CHAIN RENDERING: for causal/macro questions, render the structured chain
+  if (s.causalChain !== undefined) {
+    const chain = s.causalChain;
+    const chainParts: string[] = [];
+    
+    // Observation
+    chainParts.push(`OBSERVATION: ${chain.observation.description} [${chain.observation.evidenceQuality}]`);
+    
+    // Drivers
+    if (chain.drivers.length > 0) {
+      const driverTexts = chain.drivers.map((d) => 
+        `${d.description} [${d.evidenceQuality}]`
+      );
+      chainParts.push("DRIVERS: " + driverTexts.join("; "));
+    }
+    
+    // Mechanisms
+    if (chain.mechanisms.length > 0) {
+      const mechTexts = chain.mechanisms.map((m) => 
+        `${m.description} [${m.evidenceQuality}]`
+      );
+      chainParts.push("MECHANISMS: " + mechTexts.join("; "));
+    }
+    
+    // Transmission
+    if (chain.transmission.length > 0) {
+      const transTexts = chain.transmission.map((t) => 
+        `${t.source} -> ${t.target}: ${t.mechanism} [${t.evidenceQuality}]${t.active ? " (active)" : ""}`
+      );
+      chainParts.push("TRANSMISSION: " + transTexts.join("; "));
+    }
+    
+    // Cross-asset response
+    if (chain.crossAssetResponse.length > 0) {
+      const crossTexts = chain.crossAssetResponse.map((c) => 
+        `${c.description} [${c.evidenceQuality}]`
+      );
+      chainParts.push("CROSS-ASSET RESPONSE: " + crossTexts.join("; "));
+    }
+    
+    // Implications
+    if (chain.implications.length > 0) {
+      const impTexts = chain.implications.map((i) => 
+        `${i.description} [${i.evidenceQuality}]`
+      );
+      chainParts.push("IMPLICATIONS: " + impTexts.join("; "));
+    }
+    
+    // Counter-evidence
+    if (chain.counterEvidence.length > 0) {
+      const counterTexts = chain.counterEvidence.map((c) => 
+        `${c.description} (${c.impact}; status: ${c.status})`
+      );
+      chainParts.push("COUNTER-EVIDENCE: " + counterTexts.join("; "));
+    }
+    
+    // Forward watch conditions
+    if (chain.forwardWatchConditions.length > 0) {
+      const watchTexts = chain.forwardWatchConditions.map((w) => 
+        `${w.condition} (${w.effect}; status: ${w.currentStatus})`
+      );
+      chainParts.push("WATCH: " + watchTexts.join("; "));
+    }
+    
+    // Uncertainties
+    if (chain.uncertainties.length > 0) {
+      chainParts.push("CHAIN UNCERTAINTIES: " + chain.uncertainties.join("; "));
+    }
+    
+    if (chainParts.length > 0) {
+      parts.push("CAUSAL CHAIN:\n" + chainParts.join("\n"));
+    }
+  }
+  
   return parts.join("\n\n");
+}
+
+/**
+ * Validate and clean the causal chain output from the model. Ensures evidence refs exist
+ * in the context and evidence quality is valid.
+ */
+function validateCausalChain(
+  chain: unknown,
+  knownRefs: Set<string>,
+): CausalChainOutput | undefined {
+  try {
+    const keep = (refs: unknown[]): string[] =>
+      Array.isArray(refs) ? refs.map(String).filter((r) => knownRefs.has(r)) : [];
+
+    const validateLink = (link: Record<string, unknown>): CausalChainLink | undefined => {
+      if (typeof link !== "object" || link === null) return undefined;
+      const description = typeof link.description === "string" ? link.description.trim() : "";
+      if (description === "") return undefined;
+      
+      const evidenceQuality = typeof link.evidenceQuality === "string" 
+        ? link.evidenceQuality as EvidenceQuality
+        : "UNRESOLVED";
+      const evidenceDirectness = typeof link.evidenceDirectness === "string"
+        ? link.evidenceDirectness as "DIRECT" | "INFERRED"
+        : "INFERRED";
+      
+      return {
+        type: typeof link.type === "string" ? link.type as CausalChainLink["type"] : "observation",
+        description,
+        evidenceRefs: Array.isArray(link.evidenceRefs) ? keep(link.evidenceRefs) : [],
+        evidenceQuality,
+        evidenceDirectness,
+        confidence: typeof link.confidence === "string" ? link.confidence as "HIGH" | "MODERATE" | "LOW" : "MODERATE",
+        ...(Array.isArray(link.limitations) && link.limitations.length > 0 
+          ? { limitations: link.limitations.map(String) }
+          : {}),
+      };
+    };
+
+    const validateTransmission = (trans: Record<string, unknown>): TransmissionMechanism | undefined => {
+      if (typeof trans !== "object" || trans === null) return undefined;
+      const source = typeof trans.source === "string" ? trans.source : "";
+      const target = typeof trans.target === "string" ? trans.target : "";
+      const mechanism = typeof trans.mechanism === "string" ? trans.mechanism : "";
+      if (source === "" || target === "" || mechanism === "") return undefined;
+      
+      return {
+        source,
+        target,
+        mechanism,
+        supportingEvidence: Array.isArray(trans.supportingEvidence) ? keep(trans.supportingEvidence) : [],
+        contradictingEvidence: Array.isArray(trans.contradictingEvidence) ? keep(trans.contradictingEvidence) : [],
+        evidenceQuality: typeof trans.evidenceQuality === "string"
+          ? trans.evidenceQuality as EvidenceQuality
+          : "UNRESOLVED",
+        active: typeof trans.active === "boolean" ? trans.active : false,
+      };
+    };
+
+    const validateCounterEvidence = (ce: Record<string, unknown>): CounterEvidence | undefined => {
+      if (typeof ce !== "object" || ce === null) return undefined;
+      const description = typeof ce.description === "string" ? ce.description.trim() : "";
+      if (description === "") return undefined;
+      
+      return {
+        description,
+        evidenceRefs: Array.isArray(ce.evidenceRefs) ? keep(ce.evidenceRefs) : [],
+        impact: typeof ce.impact === "string" ? ce.impact as "weakens" | "invalidates" | "complicates" : "weakens",
+        status: typeof ce.status === "string" ? ce.status as "present" | "absent" | "searched_not_found" : "searched_not_found",
+      };
+    };
+
+    const validateWatchCondition = (wc: Record<string, unknown>): ForwardWatchCondition | undefined => {
+      if (typeof wc !== "object" || wc === null) return undefined;
+      const condition = typeof wc.condition === "string" ? wc.condition.trim() : "";
+      if (condition === "") return undefined;
+      
+      return {
+        condition,
+        effect: typeof wc.effect === "string" ? wc.effect as "strengthens" | "weakens" | "invalidates" : "weakens",
+        evidenceRefs: Array.isArray(wc.evidenceRefs) ? keep(wc.evidenceRefs) : [],
+        currentStatus: typeof wc.currentStatus === "string" ? wc.currentStatus as "met" | "not_met" | "partially_met" | "unknown" : "unknown",
+      };
+    };
+
+    const chainObj = chain as Record<string, unknown>;
+    const observation = validateLink(chainObj.observation as Record<string, unknown>);
+    if (observation === undefined) return undefined;
+
+    const drivers = Array.isArray(chainObj.drivers)
+      ? (chainObj.drivers as Record<string, unknown>[]).map(validateLink).filter((l): l is CausalChainLink => l !== undefined)
+      : [];
+    const mechanisms = Array.isArray(chainObj.mechanisms)
+      ? (chainObj.mechanisms as Record<string, unknown>[]).map(validateLink).filter((l): l is CausalChainLink => l !== undefined)
+      : [];
+    const transmission = Array.isArray(chainObj.transmission)
+      ? (chainObj.transmission as Record<string, unknown>[]).map(validateTransmission).filter((t): t is TransmissionMechanism => t !== undefined)
+      : [];
+    const crossAssetResponse = Array.isArray(chainObj.crossAssetResponse)
+      ? (chainObj.crossAssetResponse as Record<string, unknown>[]).map(validateLink).filter((l): l is CausalChainLink => l !== undefined)
+      : [];
+    const implications = Array.isArray(chainObj.implications)
+      ? (chainObj.implications as Record<string, unknown>[]).map(validateLink).filter((l): l is CausalChainLink => l !== undefined)
+      : [];
+    const counterEvidence = Array.isArray(chainObj.counterEvidence)
+      ? (chainObj.counterEvidence as Record<string, unknown>[]).map(validateCounterEvidence).filter((c): c is CounterEvidence => c !== undefined)
+      : [];
+    const forwardWatchConditions = Array.isArray(chainObj.forwardWatchConditions)
+      ? (chainObj.forwardWatchConditions as Record<string, unknown>[]).map(validateWatchCondition).filter((w): w is ForwardWatchCondition => w !== undefined)
+      : [];
+
+    return {
+      observation,
+      drivers,
+      mechanisms,
+      transmission,
+      crossAssetResponse,
+      implications,
+      counterEvidence,
+      forwardWatchConditions,
+      overallConfidence: typeof chainObj.overallConfidence === "string" ? chainObj.overallConfidence as "HIGH" | "MODERATE" | "LOW" : "MODERATE",
+      uncertainties: Array.isArray(chainObj.uncertainties) ? chainObj.uncertainties.map(String) : [],
+    };
+  } catch {
+    return undefined;
+  }
 }

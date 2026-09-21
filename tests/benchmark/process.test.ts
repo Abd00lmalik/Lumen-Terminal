@@ -106,6 +106,9 @@ const SCENARIOS: readonly Scenario[] = [
         { content: "The 10-year Treasury yield is 4.998 percent, up 0.75 percent today." },
         { content: "The US dollar index DXY trades at 100.215, firmer on the day." },
         { content: "VIX is 14.81, down 13.4 percent, with the S&P 500 resilient at 7,650." },
+        { content: "US ISM Manufacturing PMI came in at 50.8, above the 49.5 consensus, signaling expansion." },
+        { content: "US CPI rose 0.2 percent month-over-month in August, in line with expectations, core CPI at 3.2 percent year-over-year." },
+        { content: "US high-yield credit spreads are 320 basis points, tighter by 15 basis points this month." },
       ]],
     ]),
     expected: {
@@ -226,6 +229,8 @@ const SCENARIOS: readonly Scenario[] = [
     providers: new Map([
       ["NEWS_ANALYSIS", [
         { content: "Semiconductor demand weakened as chip inventories rose and foundry utilization fell this quarter." },
+        { content: "Key semiconductor companies report earnings next week with guidance expected to be cautious amid slowing AI server orders." },
+        { content: "Trade tensions between the US and China escalate with new export controls on advanced chipmaking equipment." },
       ]],
     ]),
     expected: {

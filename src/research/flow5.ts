@@ -249,6 +249,7 @@ export async function runFlow5(objective: string, options: Flow5Options): Promis
         researchId: research.id, flow: "HAS_THIS_HAPPENED_BEFORE", mode: "HISTORICAL",
         plan: { objective, scopeIncluded: [], scopeExcluded: [], tasks: [], completionCriteria: [], adaptationPolicy: "n/a; planning failed" },
         rounds: [], executions: [], hypotheses: [], evidence: [],
+        requirements: [], floorCapabilities: [], recoveryRounds: 0,
         finalDecision: { decision: "INSUFFICIENT_EVIDENCE", rationale: `research could not start: ${outcome.modelFailure.message}`, nextTasks: [] },
         stoppedBecause: "MODEL_FAILURE",
         ...(outcome.modelFailure !== undefined ? { modelFailure: outcome.modelFailure } : {}),

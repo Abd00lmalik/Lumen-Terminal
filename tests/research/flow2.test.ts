@@ -18,11 +18,15 @@ function fakeCapability(capability: string, value: string): ProviderAdapter {
     limitations: ["fake"],
     freshnessProfile: "test:live",
     async execute(cap) {
+      // Production FALSIFICATION payloads are counterevidence-class; labeling them so the
+      // challenge-attempt law recognizes the attempt (a "no contradiction found" result is a
+      // completed challenge, not a failed one).
+      const outputClass = cap === "FALSIFICATION" ? "ANALYST_INTERPRETATION" : "FACTUAL_OBSERVATION";
       return {
         tool: `fake/${capability.toLowerCase()}`,
         capability: cap,
         transport: "fake",
-        outputs: [{ outputClass: "FACTUAL_OBSERVATION", content: value, about: "BTC" }],
+        outputs: [{ outputClass, content: value, about: "BTC" }],
       };
     },
   };
@@ -81,6 +85,8 @@ describe("Flow 2; WHY DID IT HAPPEN? (causal investigation)", () => {
 
     expect(result.outcome.flow).toBe("WHY_IT_HAPPENED");
     expect(result.outcome.mode).toBe("CAUSAL");
+    // The engine's completion gate accepts the COMPLETE because the ledger is covered (BTC
+    // evidence from the plan plus the floor's counterevidence attempt).
     expect(result.outcome.stoppedBecause).toBe("EVIDENCE_SUFFICIENT");
     expect(result.outcome.evidence.length).toBeGreaterThan(0);
     expect(result.synthesis).toBeDefined();

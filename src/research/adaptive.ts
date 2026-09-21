@@ -31,6 +31,7 @@ import { boundConfidence, computeConfidence, type ConfidenceComponents } from ".
 import {
   assessCoverage,
   buildRequirements,
+  CAPABILITY_SUPPORT,
   completeRequirements,
   coverageVerdict,
   mandatoryCapabilities,
@@ -65,6 +66,38 @@ export const MAX_RESEARCH_ROUNDS = 3;
  * resolution first, then its market-class vocabulary, then the run's earned subject. Nothing
  * here knows about any individual question: an unseen commodity gets the commodity contract.
  */
+/**
+ * Map a plan's scopeExcluded phrase onto registered capabilities whose name or domain vocabulary
+ * it names ("sentiment" -> SENTIMENT_ANALYSIS). Conservative: only an exact capability name or a
+ * domain-word match excludes; an unrecognized phrase excludes nothing. Deterministic, generic, and
+ * used ONLY to keep the floor from undoing declared scope exclusions.
+ */
+export function scopeExclusionToCapabilities(phrase: string, isAvailable: (cap: string) => boolean): readonly string[] {
+  const word = meaningfulTokensOfPhrase(phrase);
+  const out: string[] = [];
+  for (const cap of Object.keys(CAPABILITY_SUPPORT)) {
+    const capWord = meaningfulTokensOfPhrase(cap);
+    // Match if the exclusion phrase is an exact capability name token, a prefix of the
+    // capability name token (e.g. "macro" matches "MACRO_ANALYSIS"), or the exact uppercase
+    // phrase. This lets the planner express exclusions in domain vocabulary ("macro", "sentiment")
+    // while keeping the mapping conservative: one phrase maps only to capabilities whose name
+    // starts with that word.
+    const nameMatch = capWord === word || capWord.startsWith(`${word}_`) || cap === phrase.trim().toUpperCase();
+    if (nameMatch && isAvailable(cap)) out.push(cap);
+  }
+  return out;
+}
+
+/** Lowercase a phrase into its single canonical token when it is one word ("sentiment" -> SENTIMENT). */
+function meaningfulTokensOfPhrase(text: string): string {
+  return canonicalTokenOf(text.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_"));
+}
+
+function canonicalTokenOf(token: string): string {
+  // Local plural fold matching the requirement engine's canonicalToken for single words.
+  return token.length > 4 && token.endsWith("S") ? token.slice(0, -1) : token;
+}
+
 /**
  * REQUIREMENT-SCOPED RETRIEVAL BRIEF (research contract §5): the work order given to recovery
  * capabilities and deep-research workers. It names each unresolved requirement, its time window
@@ -365,7 +398,13 @@ export async function runAdaptiveResearch(
     if (round === 1) {
       const planned = new Set(roundTasks.flatMap((t) => [...t.capabilities]));
       const floor: string[] = [
-        ...mandatoryCapabilities(requirements, { isAvailable: capabilityUsable, exclude: [...planned] }),
+        ...mandatoryCapabilities(requirements, {
+          isAvailable: capabilityUsable,
+          exclude: [...planned],
+          // The plan's declared exclusions are SCOPE, not oversight: the floor closes gaps, it
+          // never widens scope the question already excluded.
+          excludedFromScope: plan.scopeExcluded.flatMap((s) => scopeExclusionToCapabilities(s, capabilityUsable)),
+        }),
       ];
       // COUNTEREVIDENCE FLOOR (coverage contract): an analytic question must ATTEMPT
       // disconfirmation, not only confirmation. One bounded call, made whenever the engine has

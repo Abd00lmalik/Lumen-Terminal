@@ -307,6 +307,7 @@ function emptyOutcome(objective: string, failure: ModelFailure): FlowOutcome {
     researchId: "n/a", flow: "WHAT_COULD_PROVE_ME_WRONG", mode: "FALSIFICATION",
     plan: { objective, scopeIncluded: [], scopeExcluded: [], tasks: [], completionCriteria: [], adaptationPolicy: "n/a; no belief to falsify" },
     rounds: [], executions: [], hypotheses: [], evidence: [],
+        requirements: [], floorCapabilities: [], recoveryRounds: 0,
     finalDecision: { decision: "INSUFFICIENT_EVIDENCE", rationale: failure.message, nextTasks: [] },
     stoppedBecause: "MODEL_FAILURE",
     ...(failure !== undefined ? { modelFailure: failure } : {}),

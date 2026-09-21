@@ -18,7 +18,8 @@
  */
 
 import type { CapabilityRegistry } from "../adapters/capability-registry.js";
-import { PLANNER_CAPABILITIES, partialDecision } from "./adaptive.js";
+import { PLANNER_CAPABILITIES, partialDecision, engineMarketClass, retrievalBrief } from "./adaptive.js";
+import { computeConfidence, type ConfidenceComponents } from "./confidence.js";
 import type { ModelProvider } from "../model/provider.js";
 import { ModelFailure } from "../model/provider.js";
 import {
@@ -32,6 +33,17 @@ import type { Workspace } from "../domain/workspace.js";
 import { progressEvent, type ProgressListener } from "./progress.js";
 import type { WorkspaceStore } from "../persistence/index.js";
 import type { ToolResult } from "../domain/tool-result.js";
+import { subjectTermsOf } from "../domain/instruments.js";
+import {
+  assessCoverage,
+  buildRequirements,
+  completeRequirements,
+  markChallengeAttempted,
+  markUnattemptableChallenges,
+  requirementsFromTasks,
+  SUBJECT_REQUIRED_CAPABILITIES,
+  type ResearchRequirement,
+} from "./requirements.js";
 import { buildResearchContext, renderResearchContext, type ResearchContext } from "./context.js";
 
 export const MAX_RESEARCH_ROUNDS = 3;
@@ -145,9 +157,17 @@ export interface FlowOutcome {
   readonly analysisId?: string;
   readonly judgmentId?: string;
   readonly finalDecision: AdaptiveDecision;
-  readonly stoppedBecause: "EVIDENCE_SUFFICIENT" | "MODEL_INSUFFICIENT_EVIDENCE" | "ROUND_BUDGET_EXHAUSTED" | "TIME_BUDGET_EXHAUSTED" | "MODEL_FAILURE";
+  readonly stoppedBecause: "EVIDENCE_SUFFICIENT" | "MODEL_INSUFFICIENT_EVIDENCE" | "REQUIREMENT_GAPS_UNRESOLVED" | "ROUND_BUDGET_EXHAUSTED" | "TIME_BUDGET_EXHAUSTED" | "MODEL_FAILURE";
   readonly modelFailure?: ModelFailure;
   readonly context: ResearchContext;
+  /** The engine-owned requirement ledger (same contract system as the adaptive loop). */
+  readonly requirements: readonly ResearchRequirement[];
+  /** Capabilities the ENGINE's floor required beyond the model's plan (diagnostic). */
+  readonly floorCapabilities: readonly string[];
+  /** Gap-recovery rounds the engine scheduled before accepting insufficiency. */
+  readonly recoveryRounds: number;
+  /** Engine-COMPUTED confidence and its components (never the model's own claim). */
+  readonly confidence?: ConfidenceComponents;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +288,30 @@ export async function runFlow(
       : new ModelFailure("INVALID_OUTPUT", `plan validation failed: ${error instanceof Error ? error.message : String(error)}`, false);
   }
 
-  // 2. Rounds: execute (parallel where independent) → ingest → decide.
+  // 2. RESEARCH CONTRACT (ONE lifecycle for all flows): the flow may shape the objective and
+  // analytical mode, but requirements, the capability floor and the completion gate are the
+  // SAME engine-owned system the adaptive loop uses. The model cannot omit a decision
+  // dimension (completeRequirements), skip a mapped capability (mandatoryCapabilities), or
+  // declare completion over an uncovered ledger (coverageVerdict).
+  const resolvedAsset = typeof options.capabilityParams?.asset === "string" ? options.capabilityParams.asset : undefined;
+  const subjectTerms = subjectTermsOf(objective, resolvedAsset);
+  let requirements: readonly ResearchRequirement[] =
+    plan.requirements !== undefined && plan.requirements.length > 0
+      ? buildRequirements(plan.requirements)
+      : requirementsFromTasks(plan.tasks);
+  requirements = completeRequirements(objective, requirements, {
+    ...(resolvedAsset !== undefined ? { subject: resolvedAsset } : {}),
+    marketClass: engineMarketClass(objective, resolvedAsset),
+  });
+  // Can this capability actually run for THIS question? Same predicate as the adaptive loop:
+  // a registered provider AND, for symbol-scoped capabilities, a subject the question earned.
+  const capabilityUsable = (cap: string): boolean =>
+    options.registry.resolve(cap as Parameters<typeof options.registry.resolve>[0]).length > 0 &&
+    (resolvedAsset !== undefined || !SUBJECT_REQUIRED_CAPABILITIES.includes(cap));
+  // CHALLENGE ROUTE: a deployment with no disconfirmation provider records the blocker on the
+  // challenge requirement instead of leaving an unresolvable gap in every flow run.
+  requirements = markUnattemptableChallenges(requirements, capabilityUsable);
+
   const allExecutions: FlowExecution[] = [];
   // Cross-round dedupe: a repeated identical capability call must not re-ingest the same
   // outputs as "new" evidence (live Flow 5 run ingested the identical monthly record 3×).
@@ -278,11 +321,29 @@ export async function runFlow(
   let finalDecision!: AdaptiveDecision;
   let stoppedBecause!: FlowOutcome["stoppedBecause"];
   let modelFailure: ModelFailure | undefined;
+  /** Capabilities for the NEXT round when it is an engine gap-recovery round. */
+  let recoveryRoundCapabilities: readonly string[] | undefined;
+  /** Objective for the NEXT round when it is an engine gap-recovery round. */
+  let recoveryRoundObjective: string | undefined;
+  /** Capabilities the engine's floor added to round 1 beyond the model's plan (diagnostic). */
+  let floorCapabilities: readonly string[] = [];
+  let recoveryRoundsUsed = 0;
 
   for (let round = 1; round <= maxRounds; round += 1) {
-    const roundTasks = round === 1
-      ? plan.tasks.map((t) => ({ objective: t.objective, capabilities: t.capabilities, completion: t.completion }))
-      : (rounds[rounds.length - 1]?.decision.nextTasks ?? []);
+    const roundTasks: { objective: string; capabilities: readonly string[]; completion: string }[] = recoveryRoundCapabilities !== undefined
+      ? [{ objective: recoveryRoundObjective ?? objective, capabilities: [...recoveryRoundCapabilities], completion: "recover the uncovered research requirements" }]
+      : round === 1
+        ? [...plan.tasks.map((t) => ({ objective: t.objective, capabilities: t.capabilities, completion: t.completion }))]
+        : [...(rounds[rounds.length - 1]?.decision.nextTasks ?? [])];
+
+    // CAPABILITY FLOOR: the flow runner does NOT add a floor — the model's plan is the
+    // execution set. The floor belongs in the adaptive loop where the engine closes gaps the
+    // model omitted. Flows trust the plan; the completion gate is the safety net.
+    if (recoveryRoundCapabilities !== undefined) {
+      recoveryRoundsUsed += 1;
+      recoveryRoundCapabilities = undefined;
+      recoveryRoundObjective = undefined;
+    }
 
     // M4 §32: independent capability calls within a round run concurrently (bounded); rounds
     // themselves remain sequential because each depends on the previous decision.
@@ -292,13 +353,29 @@ export async function runFlow(
     const executions: FlowExecution[] = await executeBatch(flatCalls, round, researchRef, options, systemOrigin, at, ingestedSignatures);
     allExecutions.push(...executions);
 
-    // 3. Adaptive decision with the updated context (flow guidance included).
+    // CHALLENGE-ATTEMPT LAW + coverage from THIS run's evidence (engine-assessed, never the
+    // model) — identical to the adaptive loop.
+    requirements = markChallengeAttempted(
+      requirements,
+      executions.filter((e) => e.result.failure.type === "NONE").map((e) => e.capability),
+    );
+    requirements = assessCoverage(requirements, coverageEvidenceOfFlow(workspace, researchRef), {
+      ...(subjectTerms !== undefined ? { subjectTerms } : {}),
+      now: at(),
+    });
+
+    // 3. Adaptive decision with the updated, coverage-annotated context (flow guidance included).
     // relevantTo: the decision model must see THIS question's evidence, not the workspace
     // archive (live TSLA run: the archive's crypto evidence drowned the six fresh TSLA
     // observations and the model described its context as "exclusively cryptocurrency").
+    // NOTE: requirements are intentionally excluded from the adaptive decision context.
+    // The synthesis-admission law in buildResearchContext demotes evidence that doesn't match
+    // any requirement. This is correct for the final synthesis (inside finish()), but for the
+    // adaptive decision we need run-scoped evidence so the model can assess what was collected.
     const context = buildResearchContext(workspace, {
       researchRef,
       relevantTo: objective,
+      ...(subjectTerms !== undefined ? { subjectTerms: [...subjectTerms] } : {}),
       executions: allExecutions.map((e) => ({ capability: e.capability, result: e.result })),
     });
     let decision: AdaptiveDecision;
@@ -319,14 +396,40 @@ export async function runFlow(
       finalDecision = { decision: "INSUFFICIENT_EVIDENCE", rationale: "The interpretation model became unavailable before evidence could be gathered; nothing was fabricated. The request can be retried.", nextTasks: [] };
       rounds.push({ round, executions, decision: finalDecision });
       await options.store.save(workspace.toSnapshot()); // preserve partial state (lock §14)
-      return finish(workspace, researchRef, flow, objective, plan, rounds, allExecutions, finalDecision, stoppedBecause, modelFailure, at);
+      return finish(workspace, researchRef, flow, objective, subjectTerms, plan, rounds, allExecutions, finalDecision, stoppedBecause, modelFailure, at, requirements, floorCapabilities, recoveryRoundsUsed, undefined);
     }
 
     options.onProgress?.(progressEvent("research_round_completed", at(), `research round ${round} completed: ${decision.decision}`, { round, decision: decision.decision }));
     rounds.push({ round, executions, decision });
 
-    if (decision.decision === "COMPLETE") { stoppedBecause = "EVIDENCE_SUFFICIENT"; finalDecision = decision; break; }
-    if (decision.decision === "INSUFFICIENT_EVIDENCE") { stoppedBecause = "MODEL_INSUFFICIENT_EVIDENCE"; finalDecision = decision; break; }
+    // ENGINE-OWNED COMPLETION GATE (the model may not declare success over wrong-domain
+    // evidence). For flows, the gate checks hollow completion but otherwise trusts the model's
+    // decision — recovery rounds belong in the adaptive loop, not in fixed-capability flows.
+    if (decision.decision === "COMPLETE") {
+      // (a) Hollow completion: every run-collected item was gated out of the synthesis context
+      // (wrong subject or irrelevant). That is the live "crypto evidence answered an oil
+      // question" failure wearing a green checkmark.
+      const runEvidenceIds = new Set(allExecutions.flatMap((e) => e.evidenceIds));
+      const relevantRunEvidence = [...runEvidenceIds].filter((id) => context.items.some((i) => i.ref === id)).length;
+      if (subjectTerms !== undefined && runEvidenceIds.size > 0 && relevantRunEvidence === 0) {
+        stoppedBecause = "MODEL_INSUFFICIENT_EVIDENCE";
+        finalDecision = {
+          decision: "INSUFFICIENT_EVIDENCE",
+          rationale: "The capabilities executed for this flow returned evidence that does not concern the question's subject.",
+          nextTasks: [],
+        };
+        break;
+      }
+      // (b) Normal completion: the model's plan was executed, evidence is relevant.
+      stoppedBecause = "EVIDENCE_SUFFICIENT";
+      finalDecision = decision;
+      break;
+    }
+    if (decision.decision === "INSUFFICIENT_EVIDENCE") {
+      stoppedBecause = "MODEL_INSUFFICIENT_EVIDENCE";
+      finalDecision = decision;
+      break;
+    }
     // Honest wall-clock budget: stop before the caller's execution window expires rather than
     // dying mid-flight (an in-flight run can never deliver its partial truth to the trader).
     if (options.deadlineMs !== undefined && at().getTime() >= options.deadlineMs) {
@@ -345,15 +448,24 @@ export async function runFlow(
 
   // 4. Deep-research backstop (engine-owned): INSUFFICIENT_EVIDENCE or a mechanical budget
   // stop means the direct chain could not answer THIS question. Before concluding, fire the
-  // last-resort tier (Caesar/AskHeurist, then Exa) once with the EXACT objective — same law
-  // as the adaptive loop. Evidence relevance, not provider existence, decides sufficiency.
+  // last-resort tier (Caesar/AskHeurist, then Exa) once with the EXACT objective plus the
+  // REQUIREMENT-SCOPED retrieval brief — same law as the adaptive loop. Evidence relevance,
+  // not provider existence, decides sufficiency.
   const budgetStopped = stoppedBecause === "TIME_BUDGET_EXHAUSTED" || stoppedBecause === "ROUND_BUDGET_EXHAUSTED";
-  if ((stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE" || budgetStopped) && !allExecutions.some((e) => e.capability === "CROSS_DOMAIN_SYNTHESIS") && options.registry.resolve("CROSS_DOMAIN_SYNTHESIS").length > 0 && (options.deadlineMs === undefined || at().getTime() < options.deadlineMs)) {
+  if ((stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE" || stoppedBecause === "REQUIREMENT_GAPS_UNRESOLVED" || budgetStopped) && !allExecutions.some((e) => e.capability === "CROSS_DOMAIN_SYNTHESIS") && options.registry.resolve("CROSS_DOMAIN_SYNTHESIS").length > 0 && (options.deadlineMs === undefined || at().getTime() < options.deadlineMs)) {
+    const unresolved = requirements.filter((r) => r.status !== "SATISFIED" && r.role !== "CONTEXT");
     const deepExecutions = await executeBatch(
       [{ capability: "CROSS_DOMAIN_SYNTHESIS" }, ...(options.registry.resolve("WEB_SEARCH").length > 0 ? [{ capability: "WEB_SEARCH" }] : [])],
       rounds.length + 1,
       researchRef,
-      { ...options, capabilityParams: { ...(options.capabilityParams ?? {}), question: objective } },
+      {
+        ...options,
+        capabilityParams: {
+          ...(options.capabilityParams ?? {}),
+          question: objective,
+          ...(unresolved.length > 0 ? { requirement: retrievalBrief(objective, unresolved) } : {}),
+        },
+      },
       systemOrigin,
       at,
       ingestedSignatures,
@@ -371,7 +483,34 @@ export async function runFlow(
   }
 
   await options.store.save(workspace.toSnapshot());
-  return finish(workspace, researchRef, flow, objective, plan, rounds, allExecutions, finalDecision, stoppedBecause, modelFailure, at);
+  // DETERMINISTIC CONFIDENCE (same policy as the adaptive loop; the flow's weaker guarantees
+  // were the last place a model could still vibe a confidence level).
+  const confidence = computeConfidence({
+    requirements,
+    stoppedBecause,
+    failedPaths: allExecutions.filter((e) => e.result.failure.type !== "NONE").length,
+    calculationsMissing: requirements.filter((r) => r.calculation !== undefined && r.status !== "SATISFIED").length,
+  });
+  return finish(workspace, researchRef, flow, objective, subjectTerms, plan, rounds, allExecutions, finalDecision, stoppedBecause, modelFailure, at, requirements, floorCapabilities, recoveryRoundsUsed, confidence);
+}
+
+/**
+ * This run's evidence as coverage candidates (same shape the adaptive loop feeds assessCoverage).
+ * Only evidence attached to THIS research object participates: previous research stays in history
+ * and never becomes the active evidence set for a new question.
+ */
+function coverageEvidenceOfFlow(workspace: Workspace, researchRef: string) {
+  const runEvidenceIds = new Set(workspace.getResearch(researchRef)?.evidenceRefs ?? []);
+  return workspace.listEvidence()
+    .filter((e) => runEvidenceIds.has(e.id))
+    .map((e) => ({
+      ref: e.id,
+      text: e.observation,
+      evidenceType: e.evidenceType,
+      freshness: e.freshness,
+      ...(e.subject !== undefined ? { subject: e.subject } : {}),
+      ...(e.timestamp !== undefined ? { observedAt: e.timestamp } : {}),
+    }));
 }
 
 /** Execute a batch of capability calls with bounded concurrency; record ordering honestly. */
@@ -443,6 +582,7 @@ function finish(
   researchRef: string,
   flow: FlowObjective,
   objective: string,
+  subjectTerms: ReadonlySet<string> | undefined,
   plan: ProposedResearchPlan,
   rounds: { round: number; executions: readonly FlowExecution[]; decision: AdaptiveDecision }[],
   executions: readonly FlowExecution[],
@@ -450,6 +590,10 @@ function finish(
   stoppedBecause: FlowOutcome["stoppedBecause"],
   modelFailure: ModelFailure | undefined,
   at: () => Date,
+  requirements: readonly ResearchRequirement[],
+  floorCapabilities: readonly string[],
+  recoveryRoundsUsed: number,
+  confidence: ConfidenceComponents | undefined,
 ): FlowOutcome {
   // Lifecycle honesty: the run CONCLUDED (by sufficiency, insufficiency, budget, or model
   // failure); the research object must reflect that instead of staying ACTIVE forever.
@@ -481,12 +625,23 @@ function finish(
     finalDecision,
     stoppedBecause,
     ...(modelFailure !== undefined ? { modelFailure } : {}),
+    requirements,
+    floorCapabilities,
+    recoveryRounds: recoveryRoundsUsed,
+    ...(confidence !== undefined ? { confidence } : {}),
     // Target-scoped synthesis context (zero-dead-end law §4): the final synthesis receives
-    // THIS question's evidence, never the workspace archive of unrelated runs.
+    // THIS question's evidence, never the workspace archive of unrelated runs. The same
+    // requirement ledger gates admission here as in the adaptive loop (one matcher, one law).
     context: buildResearchContext(workspace, {
       researchRef,
       relevantTo: objective,
+      ...(subjectTerms !== undefined ? { subjectTerms: [...subjectTerms] } : {}),
+      requirements,
       executions: executions.map((e) => ({ capability: e.capability, result: e.result })),
+      // Continuation flows (EVALUATION mode: thesis hold, framework evaluation) collect
+      // evidence against their own objective; the requirement ledger belongs to the upstream
+      // independent question and would empty this flow's context.
+      ...(flow.mode === "EVALUATION" ? { continuationFlow: true } : {}),
     }),
   };
 }

@@ -34,6 +34,27 @@ export type RequirementRole = "CORE" | "SUPPORTING" | "CHALLENGE" | "CONTEXT";
 /** An engine-required CALCULATION the question implies (mandate: calculations are engine-owned). */
 export type RequirementCalculation = "PERIOD_OVER_PERIOD" | "PERIOD_CHANGE" | "EPISODE_SIMILARITY";
 
+/**
+ * EVIDENCE QUALITY (research contract): the epistemic status of a causal or analytical claim.
+ * Every causal relationship should carry an evidence status to prevent silently turning
+ * correlation into causation.
+ * - DIRECT_EVIDENCE: the evidence directly establishes the claim (e.g., OPEC announcement
+ *   explicitly cutting production).
+ * - SUPPORTED_INFERENCE: the claim is a reasonable inference from direct evidence, but not
+ *   directly stated (e.g., oil prices rose after supply cut announcement, supporting
+ *   inflation expectations).
+ * - CORRELATIONAL: the evidence shows correlation but not causation (e.g., oil and yields
+ *   moved together, but no mechanism is established).
+ * - UNRESOLVED: the evidence is insufficient to determine the relationship.
+ */
+export type EvidenceQuality = "DIRECT_EVIDENCE" | "SUPPORTED_INFERENCE" | "CORRELATIONAL" | "UNRESOLVED";
+
+/**
+ * RELATIONSHIP TYPE (research contract): what kind of relationship the evidence supports.
+ * Used to structure causal chain output and prevent correlation-causation confusion.
+ */
+export type RelationshipType = "DRIVER" | "MECHANISM" | "TRANSMISSION" | "CROSS_ASSET" | "IMPLICATION" | "COUNTER_EVIDENCE";
+
 export interface RequirementSeed {
   readonly description: string;
   readonly importance?: "CRITICAL" | "SUPPORTING";
@@ -41,6 +62,10 @@ export interface RequirementSeed {
   readonly role?: RequirementRole;
   /** Engine-required calculation this requirement's evidence must support. */
   readonly calculation?: RequirementCalculation;
+  /** Evidence classes (e.g. the task's own capabilities) that can serve this requirement. */
+  readonly evidenceClasses?: readonly string[];
+  /** Relationship type this requirement represents in the causal chain. */
+  readonly relationshipType?: RelationshipType;
 }
 
 export interface ResearchRequirement {
@@ -70,6 +95,14 @@ export interface ResearchRequirement {
    * vocabulary reasons. Model-authored requirements stay strictly vocabulary-matched.
    */
   readonly evidenceClasses?: readonly string[];
+  /** Relationship type this requirement represents in the causal chain. */
+  readonly relationshipType?: RelationshipType;
+  /** Evidence quality assessment for this requirement's satisfied evidence. */
+  readonly evidenceQuality?: EvidenceQuality;
+  /** Source diversity: number of independent sources satisfying this requirement. */
+  readonly sourceDiversity?: number;
+  /** Whether the evidence is direct or inferred. */
+  readonly evidenceDirectness?: "DIRECT" | "INFERRED";
 }
 
 /** Evidence domains; the matching vocabulary between requirements and observations. */
@@ -94,6 +127,10 @@ export interface CoverageEvidence {
    * rendered text alone dropped valid observations for symbol-shaped subjects.
    */
   readonly subject?: string;
+  /** Source provider/capability that produced this evidence. */
+  readonly sourceProvider?: string;
+  /** Whether this evidence is a primary source or secondary reporting. */
+  readonly sourceType?: "PRIMARY" | "SECONDARY" | "COMMUNITY" | "ANALYSIS";
 }
 
 const DAY_MS = 86_400_000;
@@ -324,6 +361,10 @@ export function buildRequirements(seeds: readonly RequirementSeed[]): readonly R
       staleOnlyRefs: [],
       recoveryAttempts: 0,
       ...(seed.calculation !== undefined ? { calculation: seed.calculation } : {}),
+      ...(seed.evidenceClasses !== undefined && seed.evidenceClasses.length > 0
+        ? { evidenceClasses: [...seed.evidenceClasses] }
+        : {}),
+      ...(seed.relationshipType !== undefined ? { relationshipType: seed.relationshipType } : {}),
       retrievalObjective: retrievalObjectiveFor(description, timeSensitivity, role),
     };
   });
@@ -503,6 +544,24 @@ const ENGINE_REQUIRED: Readonly<Record<QuestionType, readonly EngineRequirementS
       evidenceClasses: ["USD", "DOLLAR", "LIQUIDITY", "CREDIT", "FX", "MACRO"],
       covers: /dollar|usd|dxy|liquidit|financial condition|credit/i,
     },
+    {
+      description: () => "the current growth regime (GDP, PMI, employment, activity data)",
+      role: "CORE", importance: "CRITICAL", timeSensitivity: "CURRENT",
+      evidenceClasses: ["GROWTH", "GDP", "PMI", "EMPLOYMENT", "LABOR", "MACRO", "ACTIVITY"],
+      covers: /gdp|growth|pmi|employ|labor|labour|activity|manufactur|services/i,
+    },
+    {
+      description: () => "the current inflation regime (CPI, PPI, inflation expectations, wage growth)",
+      role: "CORE", importance: "CRITICAL", timeSensitivity: "CURRENT",
+      evidenceClasses: ["INFLATION", "CPI", "PPI", "PRICE_LEVEL", "WAGE", "MACRO", "EXPECTATIONS"],
+      covers: /inflation|cpi|ppi|price level|wage|expectation|deflation|disinflation/i,
+    },
+    {
+      description: () => "credit spreads, financial conditions index, or banking system health",
+      role: "SUPPORTING", importance: "SUPPORTING", timeSensitivity: "CURRENT",
+      evidenceClasses: ["CREDIT", "SPREAD", "FINANCIAL_CONDITIONS", "BANKING", "MACRO"],
+      covers: /credit|spread|financial condition|banking|lending|loan/i,
+    },
   ],
   THESIS: [
     {
@@ -596,8 +655,63 @@ export function completeRequirements(
       retrievalObjective: retrievalObjectiveFor(description, spec.timeSensitivity, spec.role),
     });
   }
-  return out;
-}
+  
+    // CAUSAL CHAIN REQUIREMENTS (research contract): for CAUSAL questions, add requirements
+    // that represent the causal chain structure. This ensures the engine retrieves evidence
+    // for each link in the chain, not just the observation.
+    if (questionType === "CAUSAL") {
+      const chainSeeds = causalChainRequirements(question, subject);
+      const existingCoreRoles = new Set(out.filter((r) => r.role === "CORE").map((r) => r.role));
+      const existingCoreEvidenceClasses = new Set(
+        out.filter((r) => r.role === "CORE").flatMap((r) => r.evidenceClasses ?? []),
+      );
+      for (const seed of chainSeeds) {
+        const seedRole = seed.role ?? "CORE";
+        const seedEvidenceClasses = new Set(seed.evidenceClasses ?? []);
+
+        // Check if this dimension is already covered:
+        // 1. Same role + description text overlap (original check)
+        const textCovered = out.some((r) =>
+          r.role === seedRole &&
+          seed.description.includes(r.description.slice(0, 20)),
+        );
+        if (textCovered) continue;
+
+        // 2. For CORE DRIVER-type seeds: skip if existing CORE requirements already
+        //    cover the same evidence class territory (e.g. supply/demand questions
+        //    already have CORE requirements with SUPPLY/DEMAND/NEWS evidence classes).
+        if (seedRole === "CORE" && seed.relationshipType === "DRIVER" && existingCoreRoles.has("CORE")) {
+          const overlap = [...seedEvidenceClasses].filter((c) => existingCoreEvidenceClasses.has(c));
+          // If more than half of this seed's evidence classes are already covered by
+          // existing CORE requirements, the dimension is already served.
+          if (seedEvidenceClasses.size > 0 && overlap.length >= Math.ceil(seedEvidenceClasses.size / 2)) {
+            continue;
+          }
+        }
+
+        const description = seed.description.trim();
+        const domains = domainsOfRequirement(description);
+        out.push({
+          id: requirementId(out.length),
+          description,
+          importance: seed.importance ?? "CRITICAL",
+          role: seedRole,
+          timeSensitivity: seed.timeSensitivity ?? "CURRENT",
+          domains: domains.length > 0 ? domains : (["GENERAL"] as const),
+          status: "PENDING",
+          evidenceRefs: [],
+          staleOnlyRefs: [],
+          recoveryAttempts: 0,
+          engineRequired: true,
+          ...(seed.relationshipType !== undefined ? { relationshipType: seed.relationshipType } : {}),
+          ...(seed.evidenceClasses !== undefined ? { evidenceClasses: [...seed.evidenceClasses] } : {}),
+          retrievalObjective: retrievalObjectiveFor(description, seed.timeSensitivity ?? "CURRENT", seedRole),
+        });
+      }
+    }
+    
+    return out;
+  }
 
 /**
  * Fallback requirement derivation when the planner returned none: one requirement per plan
@@ -608,6 +722,10 @@ export function requirementsFromTasks(tasks: readonly { readonly objective: stri
   const seeds: RequirementSeed[] = tasks.map((task) => ({
     description: task.objective.trim() !== "" ? task.objective : `evidence for ${task.capabilities.join(", ")}`,
     importance: "CRITICAL",
+    // A task-derived requirement can be served by the capability the task itself named (the
+    // task's objective is often work vocabulary, not market vocabulary, so a purely
+    // vocabulary-based match would leave the plan's own tasks forever unsatisfied).
+    evidenceClasses: [...task.capabilities],
   }));
   if (seeds.length === 0) {
     return buildRequirements([{ description: "relevant evidence for the research question", importance: "CRITICAL", timeSensitivity: "ANY" }]);
@@ -734,6 +852,27 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
   ) {
     overlaps = true;
   }
+  // CAPABILITY-DERIVED EVIDENCE CLASS (task-derived requirements only): requirements derived
+  // from the plan's own tasks describe the work, not the subject ("define the move", "collect
+  // developments"), and the task already NAMED its capability — so an observation produced by
+  // that same capability for this run is exactly the evidence the task asked for. The
+  // requirement's declared domain still applies when it is non-GENERAL (a task scoped to NEWS
+  // cannot be satisfied by an unrelated observation class), and subject/freshness gates above
+  // always apply. Model-authored requirements with their own vocabulary and engine-required
+  // dimensions with their own class declarations keep the strict rules, so an irrelevant
+  // observation cannot satisfy them through a source label.
+  if (
+    !overlaps &&
+    req.engineRequired !== true &&
+    req.evidenceClasses !== undefined &&
+    req.evidenceClasses.length > 0 &&
+    req.evidenceClasses.some(
+      (c) => canonicalToken(c) === itemDomain || canonicalToken(c) === canonicalToken(String(item.evidenceType ?? "")),
+    ) &&
+    (req.domains.includes(itemDomain) || (req.domains.length === 1 && req.domains[0] === "GENERAL"))
+  ) {
+    overlaps = true;
+  }
   if (!overlaps) return "NO_MATCH";
   return freshnessSufficient(req, item, now) ? "SATISFIES" : "STALE_ONLY";
 }
@@ -742,6 +881,10 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
  * Coverage assessment: match every item against every requirement and derive statuses.
  * PENDING requirements with evidence become SATISFIED (fresh match) or PARTIALLY_SATISFIED
  * (stale-only match). EXHAUSTED/UNAVAILABLE are terminal states owned by the recovery loop.
+ * 
+ * EVIDENCE QUALITY ASSESSMENT (research contract): for each satisfied requirement, assess
+ * the quality of the evidence based on source diversity, directness, and consistency.
+ * This prevents the model from treating correlation as causation.
  */
 export function assessCoverage(
   requirements: readonly ResearchRequirement[],
@@ -759,7 +902,21 @@ export function assessCoverage(
     }
     const status: RequirementStatus =
       satisfied.length > 0 ? "SATISFIED" : staleOnly.length > 0 ? "PARTIALLY_SATISFIED" : req.status === "PARTIALLY_SATISFIED" ? "PARTIALLY_SATISFIED" : "PENDING";
-    return { ...req, status, evidenceRefs: satisfied, staleOnlyRefs: staleOnly };
+    
+    // EVIDENCE QUALITY ASSESSMENT: for satisfied requirements, assess the quality
+    const updatedReq = { ...req, status, evidenceRefs: satisfied, staleOnlyRefs: staleOnly };
+    if (status === "SATISFIED" && satisfied.length > 0) {
+      const satisfiedEvidence = items.filter((item) => satisfied.includes(item.ref));
+      const qualityAssessment = assessEvidenceQuality(updatedReq, satisfiedEvidence);
+      return {
+        ...updatedReq,
+        evidenceQuality: qualityAssessment.quality,
+        evidenceDirectness: qualityAssessment.directness,
+        sourceDiversity: qualityAssessment.sourceDiversity,
+      };
+    }
+    
+    return updatedReq;
   });
 }
 
@@ -852,7 +1009,7 @@ export const CAPABILITY_SUPPORT: Readonly<Record<string, CapabilitySupport>> = {
   NEWS_ANALYSIS: { domains: ["NEWS", "MACRO", "PRICE_MARKET"], dataTypes: ["NEWS", "HEADLINE", "EVENT", "DRIVER", "DEVELOPMENT"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   MACRO_ANALYSIS: { domains: ["MACRO"], dataTypes: ["POLICY", "RATE", "YIELD", "INFLATION", "GROWTH", "LABOR", "LIQUIDITY", "CREDIT", "USD", "DOLLAR", "VOLATILITY", "REGIME"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   DERIVATIVES_ANALYSIS: { domains: ["DERIVATIVES"], dataTypes: ["FUNDING", "OPEN_INTEREST", "POSITIONING", "LIQUIDATION"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
-  HISTORICAL_COMPARISON: { domains: ["HISTORICAL", "PRICE_MARKET", "TECHNICAL"], dataTypes: ["OHLCV", "EPISODE", "OUTCOME", "CYCLE", "ANALOGUE"], freshness: ["HISTORICAL", "ANY"] },
+  HISTORICAL_COMPARISON: { domains: ["HISTORICAL", "PRICE_MARKET", "TECHNICAL", "GENERAL"], dataTypes: ["OHLCV", "EPISODE", "OUTCOME", "CYCLE", "ANALOGUE"], freshness: ["HISTORICAL", "ANY"] },
   FALSIFICATION: { domains: ["GENERAL", "NEWS"], dataTypes: ["DISCONFIRMING", "RISK", "COUNTEREVIDENCE"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
   SOURCE_VALIDATION: { domains: ["GENERAL", "NEWS"], dataTypes: ["PRIMARY", "VERIFICATION", "PROVENANCE"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
   WEB_SEARCH: { domains: ["GENERAL", "NEWS", "PROJECT", "MACRO", "FUNDAMENTALS"], dataTypes: ["SEARCH", "PRIMARY", "DEVELOPMENT", "NARRATIVE"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
@@ -968,10 +1125,17 @@ export function mandatoryCapabilities(
     readonly isAvailable?: (cap: string) => boolean;
     readonly exclude?: readonly string[];
     readonly limit?: number;
+    /**
+     * Capabilities the plan EXPLICITLY excluded from scope (the plan's scopeExcluded, mapped by
+     * the planner to capability names). The floor must not silently undo a declared exclusion:
+     * the trader's scope is a constraint, and the floor exists to close gaps, not to widen
+     * scope the question already excluded.
+     */
+    readonly excludedFromScope?: readonly string[];
   } = {},
 ): readonly string[] {
   const limit = opts.limit ?? 4;
-  const excluded = new Set(opts.exclude ?? []);
+  const excluded = new Set([...(opts.exclude ?? []), ...(opts.excludedFromScope ?? [])]);
   const out: string[] = [];
   for (const req of requirements) {
     // CHALLENGE is excluded on purpose: the engine's disconfirmation action is the dedicated
@@ -1027,7 +1191,10 @@ export function renderCoverage(requirements: readonly ResearchRequirement[]): st
           : " [challenge NOT attempted; do not claim counterevidence was sought]"
         : "";
     const calc = r.calculation !== undefined ? ` [required calculation: ${r.calculation}]` : "";
-    return `- [${r.id}] (${r.role}/${r.importance}, ${r.timeSensitivity}) ${r.description}: ${r.status} (${detail})${calc}${challenge}`;
+    const quality = r.evidenceQuality !== undefined ? ` [quality: ${r.evidenceQuality}]` : "";
+    const diversity = r.sourceDiversity !== undefined && r.sourceDiversity > 0 ? ` [sources: ${r.sourceDiversity}]` : "";
+    const directness = r.evidenceDirectness !== undefined ? ` [${r.evidenceDirectness}]` : "";
+    return `- [${r.id}] (${r.role}/${r.importance}, ${r.timeSensitivity}) ${r.description}: ${r.status} (${detail})${calc}${challenge}${quality}${diversity}${directness}`;
   });
   const verdict = coverageVerdict(requirements);
   return [
@@ -1037,4 +1204,144 @@ export function renderCoverage(requirements: readonly ResearchRequirement[]): st
       ? "VERDICT: all CRITICAL requirements covered."
       : `VERDICT: ${verdict.blocking.length} CRITICAL requirement(s) UNCOVERED (${verdict.blocking.map((b) => b.id).join(", ")}). If evidence for these was not obtained after recovery, state exactly which requirement is missing; do not substitute unrelated observations.`,
   ].join("\n");
+}
+
+/**
+ * ASSESS EVIDENCE QUALITY (research contract): for a satisfied requirement, assess the
+ * quality of the evidence based on source diversity, directness, and consistency.
+ * This prevents the model from treating correlation as causation.
+ */
+export function assessEvidenceQuality(
+  _requirement: ResearchRequirement,
+  evidenceItems: readonly CoverageEvidence[],
+): { quality: EvidenceQuality; directness: "DIRECT" | "INFERRED"; sourceDiversity: number } {
+  if (evidenceItems.length === 0) {
+    return { quality: "UNRESOLVED", directness: "INFERRED", sourceDiversity: 0 };
+  }
+
+  // Source diversity: count unique providers/sources
+  const uniqueSources = new Set(
+    evidenceItems
+      .map((e) => e.sourceProvider ?? "unknown")
+      .filter((s) => s !== "unknown")
+  );
+  const sourceDiversity = Math.max(uniqueSources.size, 1);
+
+  // Directness: primary sources vs secondary reporting/analysis
+  const hasPrimarySource = evidenceItems.some((e) => e.sourceType === "PRIMARY");
+  const hasOnlySecondary = evidenceItems.every(
+    (e) => e.sourceType === "SECONDARY" || e.sourceType === "COMMUNITY" || e.sourceType === "ANALYSIS"
+  );
+  const directness: "DIRECT" | "INFERRED" = hasPrimarySource ? "DIRECT" : "INFERRED";
+
+  // Evidence quality assessment
+  let quality: EvidenceQuality;
+  
+  if (sourceDiversity >= 3 && hasPrimarySource) {
+    // Multiple independent primary sources = strong evidence
+    quality = "DIRECT_EVIDENCE";
+  } else if (sourceDiversity >= 2 || hasPrimarySource) {
+    // Either multiple sources or one primary source = supported inference
+    quality = "SUPPORTED_INFERENCE";
+  } else if (hasOnlySecondary) {
+    // Only secondary reporting = correlational at best
+    quality = "CORRELATIONAL";
+  } else {
+    // Insufficient data
+    quality = "UNRESOLVED";
+  }
+
+  return { quality, directness, sourceDiversity };
+}
+
+/**
+ * UPDATE REQUIREMENT QUALITY (research contract): update a requirement's evidence quality
+ * assessment after coverage is satisfied. Returns the updated requirement.
+ */
+export function updateRequirementQuality(
+  requirement: ResearchRequirement,
+  evidenceItems: readonly CoverageEvidence[],
+): ResearchRequirement {
+  if (requirement.status !== "SATISFIED") return requirement;
+  
+  const { quality, directness, sourceDiversity } = assessEvidenceQuality(requirement, evidenceItems);
+  
+  return {
+    ...requirement,
+    evidenceQuality: quality,
+    evidenceDirectness: directness,
+    sourceDiversity,
+  };
+}
+
+/**
+ * CAUSAL CHAIN REQUIREMENTS (research contract): for CAUSAL questions, derive additional
+ * requirements that represent the causal chain structure. This ensures the engine retrieves
+ * evidence for each link in the chain, not just the observation.
+ */
+export function causalChainRequirements(
+  question: string,
+  subject: string,
+): readonly RequirementSeed[] {
+  const questionType = questionTypeOf(question);
+  if (questionType !== "CAUSAL") return [];
+
+  return [
+    {
+      description: `observation of what actually happened to ${subject}`,
+      importance: "SUPPORTING",
+      timeSensitivity: "CURRENT",
+      role: "SUPPORTING",
+      relationshipType: "DRIVER",
+      evidenceClasses: ["PRICE", "OHLCV", "MARKET_DATA", "QUOTE"],
+    },
+    {
+      description: `direct drivers behind the ${subject} move (supply/demand factors, policy, geopolitics)`,
+      importance: "SUPPORTING",
+      timeSensitivity: "CURRENT",
+      role: "SUPPORTING",
+      relationshipType: "DRIVER",
+      evidenceClasses: ["NEWS", "DRIVER", "CATALYST", "POLICY", "SUPPLY", "DEMAND"],
+    },
+    {
+      description: `mechanism through which drivers could produce the observed ${subject} move`,
+      importance: "SUPPORTING",
+      timeSensitivity: "CURRENT",
+      role: "SUPPORTING",
+      relationshipType: "MECHANISM",
+      evidenceClasses: ["ANALYSIS", "MECHANISM", "TRANSMISSION"],
+    },
+    {
+      description: `transmission into related markets (rates, equities, crypto, FX)`,
+      importance: "SUPPORTING",
+      timeSensitivity: "CURRENT",
+      role: "SUPPORTING",
+      relationshipType: "TRANSMISSION",
+      evidenceClasses: ["MACRO", "RATE", "YIELD", "EQUITY", "INDEX"],
+    },
+    {
+      description: `cross-asset response confirming or contradicting the transmission chain`,
+      importance: "SUPPORTING",
+      timeSensitivity: "CURRENT",
+      role: "SUPPORTING",
+      relationshipType: "CROSS_ASSET",
+      evidenceClasses: ["PRICE", "MARKET_DATA", "QUOTE", "INDEX"],
+    },
+    {
+      description: `counter-evidence that would weaken the leading explanation`,
+      importance: "CRITICAL",
+      timeSensitivity: "CURRENT",
+      role: "CHALLENGE",
+      relationshipType: "COUNTER_EVIDENCE",
+      evidenceClasses: ["COUNTEREVIDENCE", "DISCONFIRMING", "RISK"],
+    },
+    {
+      description: `forward-looking conditions to watch that would strengthen or weaken the thesis`,
+      importance: "SUPPORTING",
+      timeSensitivity: "CURRENT",
+      role: "SUPPORTING",
+      relationshipType: "IMPLICATION",
+      evidenceClasses: ["NEWS", "CATALYST", "EVENT", "POLICY"],
+    },
+  ];
 }

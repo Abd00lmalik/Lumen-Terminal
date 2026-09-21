@@ -316,6 +316,7 @@ function emptyOutcome(objective: string, failure: ModelFailure): FlowOutcome {
     researchId: "n/a", flow: "EVALUATE_WITH_MY_FRAMEWORK", mode: "EVALUATION",
     plan: { objective, scopeIncluded: [], scopeExcluded: [], tasks: [], completionCriteria: [], adaptationPolicy: "n/a; no framework available" },
     rounds: [], executions: [], hypotheses: [], evidence: [],
+        requirements: [], floorCapabilities: [], recoveryRounds: 0,
     finalDecision: { decision: "INSUFFICIENT_EVIDENCE", rationale: failure.message, nextTasks: [] },
     stoppedBecause: "MODEL_FAILURE",
     ...(failure !== undefined ? { modelFailure: failure } : {}),

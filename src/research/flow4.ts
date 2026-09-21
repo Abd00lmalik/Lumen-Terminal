@@ -359,6 +359,7 @@ function emptyOutcome(objective: string, failure: ModelFailure): FlowOutcome {
     researchId: "n/a", flow: "DOES_MY_THESIS_HOLD", mode: "EVALUATION",
     plan: { objective, scopeIncluded: [], scopeExcluded: [], tasks: [], completionCriteria: [], adaptationPolicy: "n/a; no thesis to evaluate" },
     rounds: [], executions: [], hypotheses: [], evidence: [],
+        requirements: [], floorCapabilities: [], recoveryRounds: 0,
     finalDecision: { decision: "INSUFFICIENT_EVIDENCE", rationale: failure.message, nextTasks: [] },
     stoppedBecause: "MODEL_FAILURE",
     ...(failure !== undefined ? { modelFailure: failure } : {}),

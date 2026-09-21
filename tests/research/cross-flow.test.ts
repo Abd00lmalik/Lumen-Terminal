@@ -248,9 +248,15 @@ describe("cross-flow: capability-first execution (no Flow→Tool hardcoding)", (
     }
     const { lui } = buildLui(provider, registry);
     await lui.handle("Why did BTC move?");
-    expect(executed).toEqual(["TECHNICAL_ANALYSIS"]); // only planned capabilities ran
+    // Only the planned capability PLUS the engine's requirement-floor additions: the floor adds
+    // no domain capability here (the causal supply/demand dimensions are commodity-scoped and
+    // BTC is not one), and the counterevidence floor adds FALSIFICATION, which is not
+    // registered in this fixture, so the executed set stays exactly the plan's. A flow kit
+    // (fixed per-flow capability list) would have added macro/sentiment/news.
+    expect(executed).toEqual(["TECHNICAL_ANALYSIS"]);
     expect(executed).not.toContain("MACRO_ANALYSIS");
     expect(executed).not.toContain("SENTIMENT_ANALYSIS");
+    expect(executed).not.toContain("NEWS_ANALYSIS");
   });
 
   it("unmapped flow labels keep the M3 adaptive loop (no invented M4 routing)", async () => {
@@ -533,7 +539,9 @@ describe("M4b cross-flow: shared runner + no Flow→Tool hardcoding", () => {
     }
     const { lui } = buildLui(provider, registry);
     await lui.handle("What could affect BTC?");
-    expect(executed).toEqual(["MACRO_ANALYSIS"]); // only planned capability; no fixed flow kit
+    // Only planned capability + the engine's counterevidence floor (FALSIFICATION is not
+    // registered here, so it is not schedulable). No fixed flow kit.
+    expect(executed).toEqual(["MACRO_ANALYSIS"]);
   });
 
   it("evidence rules stay shared: capability failure is a limitation, never negative evidence, in M4b flows too", async () => {

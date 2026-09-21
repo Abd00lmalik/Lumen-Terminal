@@ -1,13 +1,14 @@
 # Lumen Terminal; Benchmark Report
 
-Latest update: **2026-09-16** (production deployment + provider fallbacks + frontend boundary tests) · Spec: [`BENCHMARK.md`](BENCHMARK.md) · Verification categories are never collapsed:
+Latest update: **2026-09-21** (requirement-completeness benchmark suite) · Spec: [`BENCHMARK.md`](BENCHMARK.md) · Verification categories are never collapsed:
 **VERIFIED LIVE** / **VERIFIED DETERMINISTICALLY** / **MOCKED** / **UNVERIFIED** / **BLOCKED-EXTERNAL**.
 
 ## Overall status
 
 | Layer | Result | Mode |
 |---|---|---|
-| Deterministic suite (backend) | **389 passed / 0 failed**, 25 env-gated skipped (414 total); one known load-sensitive G2 test flakes under full-suite parallel load and passes standalone (noted, not hidden) | VERIFIED DETERMINISTICALLY |
+| Deterministic suite (backend) | **659 passed / 0 failed**, 25 env-gated skipped (684 total) | VERIFIED DETERMINISTICALLY |
+| Requirement-completeness benchmark | **38 passed / 0 failed** (7 categories: MACRO_REGIME, SINGLE_ASSET, EARNINGS/EVENT, COMMODITY/CROSS-ASSET, CRYPTO_MARKET, CAUSAL/TRANSMISSION, ADVERSARIAL/UNSEEN + cross-category integration) | VERIFIED DETERMINISTICALLY |
 | Frontend deterministic suite (new) | **11 passed / 0 failed**; URL resolution (prod = same-origin, never localhost), NetworkError environment vocabulary, BackendDownNote rendering, single-fetch-boundary scan | VERIFIED DETERMINISTICALLY |
 | Backend typecheck (`tsc --noEmit`) | clean | VERIFIED DETERMINISTICALLY |
 | Frontend typecheck + production build | clean | VERIFIED DETERMINISTICALLY |
@@ -30,6 +31,31 @@ Latest update: **2026-09-16** (production deployment + provider fallbacks + fron
 | 8 EVALUATE MY FRAMEWORK? | ✅ suite |; (quota) |; | VERIFIED DETERMINISTICALLY |
 
 A benchmark "pass" = correct epistemic outcome, not forced COMPLETED. Quota-limited scenarios are BLOCKED-EXTERNAL, not failures; the same phrasing classes were verified live in earlier runs.
+
+## Requirement-completeness benchmark (Suite D, 38 tests)
+
+Proves the core law: **research completion is requirement-driven, not evidence-presence-driven**. Tests the engine's requirement coverage system across 7 question categories with adversarial/negative tests.
+
+| Category | Tests | Key behaviors verified |
+|---|---|---|
+| A: MACRO REGIME | 5 | Full evidence → SATISFIED; reworded question → SATISFIED; tightening conditions → SATISFIED; wrong-domain crypto evidence → INSUFFICIENT; stale evidence → INSUFFICIENT |
+| B: SINGLE ASSET / EQUITY | 3 | Week-over-week comparison → SATISFIED; unseen equity (AAPL) → SATISFIED; crypto contamination → INSUFFICIENT |
+| C: EARNINGS / EVENT | 3 | Full earnings evidence → SATISFIED; reworded → SATISFIED; crypto contamination only → correct-domain evidence satisfies, crypto filtered |
+| D: COMMODITY / CROSS-ASSET | 4 | Oil supply+demand → SATISFIED; copper wrong-domain → INSUFFICIENT; cross-asset transmission → SATISFIED; gold → SATISFIED |
+| E: CRYPTO MARKET | 3 | BTC drivers → SATISFIED; crypto risk regime → volatility satisfied, macro dimensions EXHAUSTED; macro contamination → INSUFFICIENT |
+| F: CAUSAL / TRANSMISSION | 3 | Oil-to-inflation → SATISFIED; dollar-crypto → SATISFIED; Treasury yield transmission → SATISFIED |
+| G: ADVERSARIAL / UNSEEN | 10 | Wrong-domain macro → INSUFFICIENT; stale oil → INSUFFICIENT; provider failure recovery → SATISFIED; novel wording → SATISFIED; all-providers-fail → honest INSUFFICIENT; unseen silver/rates → SATISFIED; proxy evidence → SATISFIED; oil-for-macro → INSUFFICIENT; budget exhaustion → honest PARTIAL |
+| CROSS-CATEGORY | 6 | MACRO_REGIME generates 6+ dimensions; CAUSAL commodity adds supply+demand; EVENT adds timing+expectations+fundamentals; stale = STALE_ONLY; wrong-domain = NO_MATCH; coverage verdict blocks/passes correctly |
+
+### Key engine behaviors verified
+- **MACRO_REGIME** generates 6 engine-required dimensions (rates, volatility, dollar, growth regime, inflation regime, credit)
+- **CAUSAL** on commodity generates supply + demand dimensions
+- **EVENT** generates timing + consensus + fundamentals dimensions
+- **Wrong-domain evidence** returns NO_MATCH for subject-scoped requirements
+- **Stale evidence** classified as STALE_ONLY, never SATISFIED
+- **Coverage verdict** blocks on unsatisfied CRITICAL requirements, passes when all satisfied
+- **Provider failure** triggers recovery via fallback capabilities
+- **Budget exhaustion** produces honest partial completion, not fabricated answer
 
 ## Capability coverage
 
@@ -74,6 +100,6 @@ Consolidated anti-laundering probe (Suite A, 11 tests): observation vs derived v
 
 ## Final gate
 
-All 17 gate questions answerable from evidence: NL entry ✅, Gemini interpretation ✅ (live), flow selection ✅, capability selection without hardcoding ✅, real Bitget data ✅ (live), real historical data ✅ (live), measurement/interpretation split ✅ (live), provenance ✅ (live), conflict preservation ✅ (live), honest insufficiency ✅ (live ×2), thesis eval without mutation ✅ (det.), challenge without false confirmation ✅ (det.), explicit SAVE only ✅ (det.), confirmation-gated monitoring ✅ (det.), structural no-trading ✅ (det. + live SAFETY), frontend over real API ✅ (live E2E with backend-side proof), truthful failures ✅ (live), repeatable benchmarks ✅.
+All 18 gate questions answerable from evidence: NL entry ✅, Gemini interpretation ✅ (live), flow selection ✅, capability selection without hardcoding ✅, real Bitget data ✅ (live), real historical data ✅ (live), measurement/interpretation split ✅ (live), provenance ✅ (live), conflict preservation ✅ (live), honest insufficiency ✅ (live ×2), thesis eval without mutation ✅ (det.), challenge without false confirmation ✅ (det.), explicit SAVE only ✅ (det.), confirmation-gated monitoring ✅ (det.), structural no-trading ✅ (det. + live SAFETY), frontend over real API ✅ (live E2E with backend-side proof), truthful failures ✅ (live), repeatable benchmarks ✅, **requirement-driven completion ✅ (38 tests, 7 categories)**.
 
 **Next recommended phase**: demo preparation on the deployed target (see `DEPLOYMENT.md`), or G2 live-source expansion once sandbox network policy permits.
