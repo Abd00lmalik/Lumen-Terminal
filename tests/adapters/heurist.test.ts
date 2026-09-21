@@ -25,6 +25,7 @@ import { CapabilityRegistry } from "../../src/adapters/capability-registry.js";
 import {
   HeuristAgentAdapter,
   HeuristMeshTransport,
+  createHeuristAskAdapter,
   createHeuristDefiLlamaAdapter,
   createHeuristFundingRateAdapter,
   createHeuristFredAdapter,
@@ -201,6 +202,24 @@ describe("parseHeuristOutputs classification", () => {
     expect(outputs[0]!.outputClass).toBe("QUANTITATIVE_OBSERVATION");
   });
 
+  it("an async job SUBMISSION is not evidence, while a real result that mentions a job id still parses", () => {
+    // Live failure: a yields question reached the deep tier, the agent answered with a job
+    // submission ({job_id, next_step: "Call check_job_status ..."}), and that envelope alone was
+    // ingested as the run's evidence — a pending job satisfying a research requirement.
+    expect(() =>
+      parseHeuristOutputs(
+        { job_id: "d5776eca-b30a", prompt: "Treasury yields", mode: "normal", next_step: "Call check_job_status with job_id 'd5776eca' after 60 sec" },
+        "ask-heurist",
+      ),
+    ).toThrow(/asynchronous job/i);
+    expect(() => parseHeuristOutputs({ job_id: "x", status: "queued" }, "ask-heurist")).toThrow(/asynchronous job/i);
+
+    // A completed job id alongside actual content is a result, not a submission.
+    const outputs = parseHeuristOutputs({ job_id: "x", status: "completed", answer: "Yields rose on fiscal supply concerns." }, "ask-heurist");
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0]!.outputClass).toBe("ANALYST_INTERPRETATION");
+  });
+
   it("agent prose -> ANALYST_INTERPRETATION with interpretationBasis (never self-upgrades to observation)", () => {
     const outputs = parseHeuristOutputs({ content: "AAPL appears to be strengthening because..." }, "yahoo-finance");
     expect(outputs).toHaveLength(1);
@@ -358,6 +377,23 @@ describe("Heurist registry chains", () => {
 
     const result = await registry.execute("MACRO_ANALYSIS", {}, origin);
     expect(result.failure.type).toBe("PROVIDER_ERROR");
+    expect(result.completeness).toBe("EMPTY");
+    expect(result.normalizedOutput.every((o) => o.outputClass === "UNAVAILABLE")).toBe(true);
+  });
+
+  it("an async job submission surfaces as EMPTY_RESULT at the registry, never as a satisfied requirement", async () => {
+    const registry = new CapabilityRegistry();
+    registry.register(
+      createHeuristAskAdapter(
+        new HeuristMeshTransport({
+          apiKey: "heu_test",
+          fetchImpl: fakeFetch([{ result: { job_id: "d5776eca", next_step: "Call check_job_status after 60 sec" } }]).fetch,
+        }),
+      ),
+      100,
+    );
+    const result = await registry.execute("CROSS_DOMAIN_SYNTHESIS", { question: "why are Treasury yields rising" }, origin);
+    expect(result.failure.type).toBe("EMPTY_RESULT");
     expect(result.completeness).toBe("EMPTY");
     expect(result.normalizedOutput.every((o) => o.outputClass === "UNAVAILABLE")).toBe(true);
   });

@@ -51,6 +51,10 @@ async function ask(question) {
       ...check,
       answer: body.answer ?? {},
       judgments: body.judgments ?? [],
+      /* Part 13 record: unresolved RESEARCH requirements (engine ledger) and the diagnostics
+         that stay out of the user-facing answer. */
+      researchGaps: body.researchGaps ?? [],
+      limitations: body.limitations ?? [],
       error: undefined,
     };
   } catch (error) {
@@ -70,6 +74,10 @@ for (const question of questions) {
   console.log(`  http ${report.http} | ${report.seconds}s | outcome ${report.outcome} | ${report.researchRef ?? "-"} | evidence ${report.evidence.length} | judgments ${report.judgments.length}`);
   console.log("  evidence types:", JSON.stringify(report.types));
   console.log(`  crypto evidence items: ${report.cryptoEvidenceItems}${report.contaminated ? "  <-- CONTAMINATION" : ""}`);
+  console.log(`  unresolved requirements (research gaps): ${report.researchGaps.length === 0 ? "none" : report.researchGaps.join(" | ")}`);
+  console.log(`  capability notes kept in diagnostics: ${report.limitations.length}`);
+  const confidence = report.judgments.map((j) => j.confidence).filter(Boolean);
+  if (confidence.length > 0) console.log(`  judgment confidence: ${[...new Set(confidence)].join(", ")}`);
   console.log("\n--- ANSWER ---");
   const answer = report.answer;
   console.log(typeof answer === "string" ? answer : JSON.stringify(answer, null, 2).slice(0, 6000));

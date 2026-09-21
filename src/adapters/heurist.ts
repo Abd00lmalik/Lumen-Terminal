@@ -160,7 +160,32 @@ function itemContent(item: unknown): Record<string, unknown> | undefined {
  * Such payloads are PROVIDER failures, not observations; they previously became evidence
  * (ev_000616) and even upgraded a dead-end into a false "COMPLETE". Detect them before any
  * other parsing and surface them as an EMPTY result so the registry records a failed tier.
+ *
+ * ASYNC-JOB LAW: an agent may answer a synchronous call with a job SUBMISSION envelope
+ * ({job_id, next_step: "Call check_job_status ..."}) instead of a result. That payload holds
+ * no observation — observed live: a yields question reached the deep tier, the submission
+ * enclosed alone was ingested as evidence, and a pending job satisfied the requirement
+ * (reported COMPLETED at LOW confidence with one "evidence" item that was a job id). A
+ * submission is a technical non-result: EMPTY_RESULT, so the registry fails over and the
+ * requirement stays honestly unresolved until something actually observes the subject.
  */
+/**
+ * Is this payload a job SUBMISSION (a promise of future work) rather than a result? It must
+ * carry a job identifier and a pending/next-step marker, and no observable content at all.
+ */
+function isAsyncJobSubmission(r: Record<string, unknown>): boolean {
+  const hasJobId = typeof r.job_id === "string" || typeof r.jobId === "string";
+  if (!hasJobId) return false;
+  const status = typeof r.status === "string" ? r.status.toLowerCase() : "";
+  const pending = typeof r.next_step === "string" || /pending|queued|processing|submitted|running|accepted/.test(status);
+  if (!pending) return false;
+  const observationFields = ["data", "results", "items", "chain", "option_chain", "snapshots", "series", "observations"];
+  const hasObservation = observationFields.some((k) => Array.isArray(r[k]) && (r[k] as unknown[]).length > 0);
+  const hasProse = ["answer", "analysis", "result", "summary", "content", "text"]
+    .some((k) => typeof r[k] === "string" && (r[k] as string).trim() !== "");
+  return !hasObservation && !hasProse;
+}
+
 export function parseHeuristOutputs(result: unknown, upstreamSource: string, about?: string): ToolOutput[] {
   // Embedded error objects: {error: "..."} / {errorMessage: ...} / {status: "error", ...}.
   if (result !== null && typeof result === "object" && !Array.isArray(result)) {
@@ -169,6 +194,13 @@ export function parseHeuristOutputs(result: unknown, upstreamSource: string, abo
     const statusError = r.status === "error" || r.status === "failed";
     if (errorText !== undefined || statusError) {
       throw new TransportError("PROVIDER_ERROR", `Heurist agent returned an embedded error: ${(errorText ?? JSON.stringify(r)).slice(0, 200)}`, { retriable: true });
+    }
+    if (isAsyncJobSubmission(r)) {
+      throw new TransportError(
+        "EMPTY_RESULT",
+        `Heurist agent submitted an asynchronous job instead of returning a result (job_id ${String(r.job_id ?? r.jobId)}); the job is not awaited and its submission is not evidence`,
+        { retriable: false },
+      );
     }
   }
   const outputs: ToolOutput[] = [];
