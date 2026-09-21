@@ -275,6 +275,8 @@ export interface ResearchDiagnosticsDto {
   }[];
   readonly floorCapabilities: readonly string[];
   readonly recoveryRounds: number;
+  /** One gate per research outcome the request ran (loop and/or flow). */
+  readonly completionGates?: readonly string[];
   readonly completionGate: string;
   readonly coverage: "COMPLETE" | "PARTIAL" | "INSUFFICIENT";
 }

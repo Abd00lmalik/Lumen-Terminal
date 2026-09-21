@@ -55,6 +55,9 @@ async function ask(question) {
          that stay out of the user-facing answer. */
       researchGaps: body.researchGaps ?? [],
       limitations: body.limitations ?? [],
+      /* Coverage-contract record: requirement ledger, executions, engine floor, gate. */
+      diagnostics: body.researchDiagnostics,
+      counterevidence: body.answer?.counterevidenceStatus,
       error: undefined,
     };
   } catch (error) {
@@ -76,6 +79,17 @@ for (const question of questions) {
   console.log(`  crypto evidence items: ${report.cryptoEvidenceItems}${report.contaminated ? "  <-- CONTAMINATION" : ""}`);
   console.log(`  unresolved requirements (research gaps): ${report.researchGaps.length === 0 ? "none" : report.researchGaps.join(" | ")}`);
   console.log(`  capability notes kept in diagnostics: ${report.limitations.length}`);
+  if (report.counterevidence !== undefined) console.log(`  counterevidence: ${report.counterevidence}`);
+  const d = report.diagnostics;
+  if (d !== undefined) {
+    console.log(`  coverage: ${d.coverage} | gate: ${d.completionGate} | recovery rounds: ${d.recoveryRounds} | floor: ${JSON.stringify(d.floorCapabilities)}`);
+    for (const r of d.requirements) {
+      console.log(`    req[${r.importance}/${r.timeSensitivity}] ${r.status} (${r.evidenceCount} ev${r.staleEvidenceCount > 0 ? `, ${r.staleEvidenceCount} stale` : ""}${r.recoveryAttempts > 0 ? `, ${r.recoveryAttempts} recovery` : ""}): ${String(r.description).slice(0, 92)}`);
+    }
+    for (const e of d.executions) {
+      console.log(`    exec r${e.round} ${e.capability} <- ${e.provider.split("/").slice(-1)[0]} [${e.completeness}/${e.failureType}] ev=${e.evidenceCount}`);
+    }
+  }
   const confidence = report.judgments.map((j) => j.confidence).filter(Boolean);
   if (confidence.length > 0) console.log(`  judgment confidence: ${[...new Set(confidence)].join(", ")}`);
   console.log("\n--- ANSWER ---");

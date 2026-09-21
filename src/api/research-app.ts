@@ -26,7 +26,7 @@ import {
   evidenceToDTO, evidenceSummaryDTO, judgmentToDTO, researchToDTO, continuitySnapshotToDTO,
   thesisToDTO, thesisAssessmentToDTO, artifactToDTO, memoryToDTO, monitorToDTO,
   toHistoricalAnalysisDTO, uiText,
-  type ResearchResponseDTO, type ResearchDiagnosticsDTO, type AnswerDTO, type EvidenceDTO, type JudgmentDTO,
+  type ResearchResponseDTO, type ResearchDiagnosticsDTO, type RequirementDiagnosticDTO, type AnswerDTO, type EvidenceDTO, type JudgmentDTO,
 } from "./dto.js";
 import { InvalidRequestError, ModelFailureError, PersistenceFailureError, NotFoundError } from "./errors.js";
 
@@ -282,45 +282,89 @@ export class ResearchApp {
       .slice(0, 5);
     // BENCHMARK VISIBILITY (coverage contract): structured facts an external benchmark can
     // score without reading model reasoning — the requirement ledger, what each capability
-    // actually returned, what the engine's floor added, and the completion gate. Execution
+    // actually returned, what the engine's floor added, and the completion gates. Execution
     // metadata and provenance only.
-    const researchOutcome = result.research;
-    const led = researchOutcome?.requirements ?? [];
-    const criticalRequirements = led.filter((r) => r.importance === "CRITICAL");
-    const satisfiedCritical = criticalRequirements.filter((r) => r.status === "SATISFIED").length;
+    //
+    // A single request may run SEVERAL research objects (the LUI's own dispatch plus the flow
+    // it routed to), and the evidence lives on whichever object retrieved it — reporting only
+    // the first object stated "0 evidence" for capabilities that had produced nine and sixteen
+    // observations. The surface aggregates every outcome the request produced.
+    // KNOWN GAP (recorded, not papered over): the flow runner keeps no requirement ledger, so
+    // a request that routes to a flow contributes its EXECUTIONS and gate here but not its
+    // requirements — only the adaptive loop's ledger is engine-owned today.
+    interface OutcomeLike {
+      readonly executions?: readonly {
+        readonly round: number;
+        readonly capability: string;
+        readonly result: { readonly tool: string; readonly completeness: string; readonly failure?: { readonly type: string } };
+        readonly evidenceIds: readonly string[];
+      }[];
+      readonly stoppedBecause?: string;
+      readonly requirements?: readonly {
+        readonly id: string; readonly description: string; readonly importance: string; readonly timeSensitivity: string;
+        readonly status: string; readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[];
+        readonly recoveryAttempts: number; readonly missingReason?: string;
+      }[];
+      readonly floorCapabilities?: readonly string[];
+      readonly recoveryRounds?: number;
+    }
+    const loopOutcomes = [
+      result.research,
+      result.flow2?.outcome, result.flow3?.outcome, result.flow4?.outcome,
+      result.flow5?.outcome, result.flow6?.outcome, result.flow7?.outcome, result.flow8?.outcome,
+    ]
+      .filter((outcome): outcome is NonNullable<typeof outcome> => outcome !== undefined)
+      .map((outcome) => outcome as unknown as OutcomeLike);
+    const executionRecords = loopOutcomes.flatMap((o) => o.executions ?? []);
+    const requirementLedger = loopOutcomes.flatMap((o) => o.requirements ?? []);
     const evidenceCount = evidence.length;
     const researchDiagnostics: ResearchDiagnosticsDTO | undefined =
-      researchOutcome === undefined
+      loopOutcomes.length === 0
         ? undefined
-        : {
-            requirements: led.map((r) => ({
-              description: r.description,
-              importance: r.importance,
-              timeSensitivity: r.timeSensitivity,
-              status: r.status,
-              evidenceCount: r.evidenceRefs.length,
-              staleEvidenceCount: r.staleOnlyRefs.length,
-              recoveryAttempts: r.recoveryAttempts,
-              ...(r.missingReason !== undefined ? { unresolvedReason: r.missingReason } : {}),
-            })),
-            executions: researchOutcome.executions.map((e) => ({
-              round: e.round,
-              capability: e.capability,
-              provider: e.result.tool,
-              completeness: e.result.completeness,
-              failureType: e.result.failure?.type ?? "NONE",
-              evidenceCount: e.evidenceIds.length,
-            })),
-            floorCapabilities: researchOutcome.floorCapabilities ?? [],
-            recoveryRounds: researchOutcome.recoveryRounds ?? 0,
-            completionGate: researchOutcome.stoppedBecause,
-            coverage:
-              researchOutcome.stoppedBecause === "EVIDENCE_SUFFICIENT" && satisfiedCritical === criticalRequirements.length
-                ? "COMPLETE"
-                : evidenceCount === 0 || satisfiedCritical === 0
-                  ? "INSUFFICIENT"
-                  : "PARTIAL",
-          };
+        : (() => {
+            const seen = new Set<string>();
+            const requirements: RequirementDiagnosticDTO[] = [];
+            for (const r of requirementLedger) {
+              const key = `${r.description}`;
+              if (seen.has(key)) continue; // the same requirement can appear on more than one outcome
+              seen.add(key);
+              requirements.push({
+                description: r.description,
+                importance: r.importance,
+                timeSensitivity: r.timeSensitivity,
+                status: r.status,
+                evidenceCount: r.evidenceRefs.length,
+                staleEvidenceCount: r.staleOnlyRefs.length,
+                recoveryAttempts: r.recoveryAttempts,
+                ...(r.missingReason !== undefined ? { unresolvedReason: r.missingReason } : {}),
+              });
+            }
+            const critical = requirements.filter((r) => r.importance === "CRITICAL");
+            const satisfied = critical.filter((r) => r.status === "SATISFIED").length;
+            const gates = [...new Set(loopOutcomes.map((o) => o.stoppedBecause ?? "UNKNOWN"))];
+            const allCriticalCovered = critical.length > 0 && satisfied === critical.length;
+            return {
+              requirements,
+              executions: executionRecords.map((e) => ({
+                round: e.round,
+                capability: e.capability,
+                provider: e.result.tool,
+                completeness: e.result.completeness,
+                failureType: e.result.failure?.type ?? "NONE",
+                evidenceCount: e.evidenceIds.length,
+              })),
+              floorCapabilities: [...new Set(loopOutcomes.flatMap((o) => o.floorCapabilities ?? []))],
+              recoveryRounds: Math.max(...loopOutcomes.map((o) => o.recoveryRounds ?? 0)),
+              completionGates: gates,
+              completionGate: gates[gates.length - 1] ?? "UNKNOWN",
+              coverage:
+                allCriticalCovered && gates.every((g) => g === "EVIDENCE_SUFFICIENT")
+                  ? "COMPLETE"
+                  : evidenceCount === 0 || satisfied === 0
+                    ? "INSUFFICIENT"
+                    : "PARTIAL",
+            };
+          })();
     // Honest outcome mapping: a pure interpretation failure (no research ran) is a MODEL_FAILURE;
     // a run that completed research but ended on a model failure is a partial COMPLETED with the
     // typed failure attached (the LUI's law: failure ≠ fabricated evidence, partial ≠ false success).

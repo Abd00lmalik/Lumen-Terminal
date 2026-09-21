@@ -576,7 +576,12 @@ export interface ResearchDiagnosticsDTO {
   /** Capabilities the ENGINE's floor required beyond the model's plan. */
   readonly floorCapabilities: readonly string[];
   readonly recoveryRounds: number;
-  /** The engine's completion gate verdict (stoppedBecause on the research loop). */
+  /**
+   * The engine's completion gate verdict per research outcome the request ran (a request may
+   * dispatch its own loop AND route to a flow, each with its own gate).
+   */
+  readonly completionGates: readonly string[];
+  /** The last gate reached (convenience for single-outcome runs). */
   readonly completionGate: string;
   /** Engine-assessed coverage: COMPLETE | PARTIAL | INSUFFICIENT. */
   readonly coverage: "COMPLETE" | "PARTIAL" | "INSUFFICIENT";
