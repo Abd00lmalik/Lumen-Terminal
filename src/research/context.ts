@@ -368,6 +368,7 @@ export function buildResearchContext(
         };
         const candidate: CoverageEvidence = {
           ref: e.id, text: item.text, evidenceType: e.evidenceType, freshness: e.freshness,
+          ...(e.subject !== undefined ? { subject: e.subject } : {}),
           ...(e.timestamp !== undefined ? { observedAt: e.timestamp } : {}),
         };
         return matchRequirement(probe, candidate, gateTerms !== undefined ? { subjectTerms: gateTerms } : {}) !== "NO_MATCH";

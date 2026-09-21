@@ -242,6 +242,8 @@ export interface AnswerDto {
   readonly answer: string;
   readonly supportingReasons: readonly string[];
   readonly opposingReasons: readonly string[];
+  /** PRESENT | NONE_FOUND | NOT_ASSESSED — engine-reported disconfirmation state. */
+  readonly counterevidenceStatus?: "PRESENT" | "NONE_FOUND" | "NOT_ASSESSED";
   readonly confidence: ConfidenceDto;
   readonly keyUncertainty: string;
   readonly implication: string;
@@ -250,11 +252,40 @@ export interface AnswerDto {
 
 export type ResearchOutcomeDto = "COMPLETED" | "AWAITING_CONFIRMATION" | "REJECTED" | "MODEL_FAILURE";
 
+export interface RequirementDiagnosticDto {
+  readonly description: string;
+  readonly importance: string;
+  readonly timeSensitivity: string;
+  readonly status: string;
+  readonly evidenceCount: number;
+  readonly staleEvidenceCount: number;
+  readonly recoveryAttempts: number;
+  readonly unresolvedReason?: string;
+}
+
+export interface ResearchDiagnosticsDto {
+  readonly requirements: readonly RequirementDiagnosticDto[];
+  readonly executions: readonly {
+    readonly round: number;
+    readonly capability: string;
+    readonly provider: string;
+    readonly completeness: string;
+    readonly failureType: string;
+    readonly evidenceCount: number;
+  }[];
+  readonly floorCapabilities: readonly string[];
+  readonly recoveryRounds: number;
+  readonly completionGate: string;
+  readonly coverage: "COMPLETE" | "PARTIAL" | "INSUFFICIENT";
+}
+
 export interface ResearchResponseDto {
   readonly requestId: string;
   readonly action: string;
   readonly outcome: ResearchOutcomeDto;
   readonly answer: AnswerDto;
+  /** Benchmark/coverage metadata (requirement ledger + execution facts). */
+  readonly researchDiagnostics?: ResearchDiagnosticsDto;
   readonly modelFailure?: { readonly type: string; readonly message: string };
   readonly limitations: readonly string[];
   /** Material research gaps (engine-assessed); the only user-facing coverage items. */

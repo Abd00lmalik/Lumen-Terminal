@@ -31,6 +31,7 @@ import {
   assessCoverage,
   buildRequirements,
   coverageVerdict,
+  mandatoryCapabilities,
   exhaustUnresolved,
   concernsSubject,
   recoveryCapabilities,
@@ -86,6 +87,13 @@ export interface AdaptiveLoopOutcome {
    * coverage panel; capability/provider notes never do.
    */
   readonly requirements?: readonly ResearchRequirement[];
+  /**
+   * Capabilities the ENGINE's capability floor required beyond the model's plan (the model
+   * may propose capabilities; it may not omit one a CRITICAL requirement depends on).
+   */
+  readonly floorCapabilities?: readonly string[];
+  /** Engine-scheduled gap-recovery rounds actually spent (bounded). */
+  readonly recoveryRounds?: number;
 }
 
 /** Schemas as prompt fragments; the model must answer in one of these shapes. */
@@ -255,17 +263,57 @@ export async function runAdaptiveResearch(
   let rejectedAtIngestion = 0;
   /** Capabilities for the NEXT round when it is a gap-recovery round (engine-scheduled). */
   let recoveryRoundCapabilities: readonly string[] | undefined;
+  /** Capabilities the engine's floor added to round 1 beyond the model's plan (diagnostic). */
+  let floorCapabilities: readonly string[] = [];
   let recoveryRoundsUsed = 0;
   const MAX_RECOVERY_ROUNDS = options.maxRecoveryRounds ?? 2;
 
   for (let round = 1; round <= maxRounds; round += 1) {
     // Determine this round's tasks: round 1 = the plan; a gap-recovery round = the engine's
     // recovery capabilities; later rounds = the decision's nextTasks.
-    const roundTasks = recoveryRoundCapabilities !== undefined
-      ? [{ objective, capabilities: [...recoveryRoundCapabilities], completion: "recover the uncovered research requirements" }]
-      : round === 1
-        ? plan.tasks.map((t) => ({ objective: t.objective, capabilities: t.capabilities, completion: t.completion }))
-        : (rounds[rounds.length - 1]?.decision.nextTasks ?? []);
+    const roundTasks: { objective: string; capabilities: readonly string[]; completion: string }[] =
+      recoveryRoundCapabilities !== undefined
+        ? [{ objective, capabilities: [...recoveryRoundCapabilities], completion: "recover the uncovered research requirements" }]
+        : round === 1
+          ? plan.tasks.map((t) => ({ objective: t.objective, capabilities: t.capabilities, completion: t.completion }))
+          : [...(rounds[rounds.length - 1]?.decision.nextTasks ?? [])];
+    // CAPABILITY FLOOR (engine-owned, round 1): the model proposes capabilities, but it may
+    // not omit one that an engine-derived CRITICAL requirement depends on. Live failure this
+    // prevents: a yields question whose plan named no direct market capability, so no yield
+    // observation was ever retrieved and the run reported "insufficient" without trying.
+    if (round === 1) {
+      const planned = new Set(roundTasks.flatMap((t) => [...t.capabilities]));
+      const floor: string[] = [
+        ...mandatoryCapabilities(requirements, {
+          isAvailable: (cap) => options.registry.resolve(cap as Parameters<typeof options.registry.resolve>[0]).length > 0,
+          exclude: [...planned],
+        }),
+      ];
+      // COUNTEREVIDENCE FLOOR (coverage contract): an analytic question must ATTEMPT
+      // disconfirmation, not only confirmation. One bounded call, made whenever the engine has
+      // a CRITICAL requirement to test and has not already planned it — the model asking for
+      // opposing evidence is a prompt convention; this makes it an engine action.
+      const falsification = "FALSIFICATION";
+      if (
+        !planned.has(falsification) &&
+        floor.length < 4 &&
+        requirements.some((r) => r.importance === "CRITICAL") &&
+        options.registry.resolve(falsification as Parameters<typeof options.registry.resolve>[0]).length > 0
+      ) {
+        floor.push(falsification);
+      }
+      floorCapabilities = [...floor];
+      if (floor.length > 0) {
+        roundTasks.push({
+          objective,
+          capabilities: floor,
+          completion: "engine-required capabilities for this question's CRITICAL requirements",
+        });
+        options.onProgress?.(
+          progressEvent("capability_started", at(), `capability floor: ${floor.join(", ")} required by this question's CRITICAL requirements`, { capability: floor[0] ?? "floor" }),
+        );
+      }
+    }
     if (recoveryRoundCapabilities !== undefined) {
       recoveryRoundsUsed += 1;
       recoveryRoundCapabilities = undefined;
@@ -446,6 +494,31 @@ export async function runAdaptiveResearch(
       break;
     }
     if (decision.decision === "INSUFFICIENT_EVIDENCE") {
+      // ENGINE-OWNED RECOVERY: the model may not end a run on "insufficient" while the
+      // engine's coverage assessment still reports blocking CRITICAL requirements and untried
+      // recovery paths exist. "Insufficient" must mean the relevant registered evidence paths
+      // were EXHAUSTED, never that the first plan came up short.
+      const verdict = coverageVerdict(requirements);
+      const recoveryCaps =
+        verdict.blocking.length > 0
+          ? recoveryCapabilities(verdict.blocking, {
+              isAvailable: (cap) => options.registry.resolve(cap as Parameters<typeof options.registry.resolve>[0]).length > 0,
+              exclude: allExecutions.map((e) => e.capability),
+            })
+          : [];
+      if (verdict.blocking.length > 0 && recoveryRoundsUsed < MAX_RECOVERY_ROUNDS && recoveryCaps.length > 0 && round < maxRounds) {
+        requirements = requirements.map((r) =>
+          verdict.blocking.some((b) => b.id === r.id) ? { ...r, recoveryAttempts: r.recoveryAttempts + 1 } : r,
+        );
+        recoveryRoundCapabilities = recoveryCaps;
+        options.onProgress?.(
+          progressEvent("capability_started", at(), `model reported insufficient evidence; recovering uncovered requirements via ${recoveryCaps.join(", ")}`, { capability: recoveryCaps[0] ?? "recovery" }),
+        );
+        continue; // engine-scheduled recovery round before accepting the insufficiency
+      }
+      if (verdict.blocking.length > 0) {
+        requirements = exhaustUnresolved(requirements, recoveryCaps.length > 0 ? recoveryCaps : ["direct capabilities"]);
+      }
       stoppedBecause = "MODEL_INSUFFICIENT_EVIDENCE";
       finalDecision = decision;
       break;
@@ -647,6 +720,8 @@ export async function runAdaptiveResearch(
     ...(synthesis !== undefined ? { synthesis } : {}),
     context: finalContext,
     requirements,
+    ...(floorCapabilities.length > 0 ? { floorCapabilities } : {}),
+    recoveryRounds: recoveryRoundsUsed,
   };
 }
 
@@ -688,6 +763,8 @@ function coverageEvidenceOf(workspace: Workspace, researchRef: string): readonly
       text: e.observation,
       evidenceType: e.evidenceType,
       freshness: e.freshness,
+      // The declared subject travels into coverage: a payload may never name its own ticker.
+      ...(e.subject !== undefined ? { subject: e.subject } : {}),
       ...(e.timestamp !== undefined ? { observedAt: e.timestamp } : {}),
     });
   }

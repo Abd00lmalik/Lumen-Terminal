@@ -53,6 +53,13 @@ export interface CoverageEvidence {
   readonly freshness?: string;
   /** Observation timestamp when known. */
   readonly observedAt?: string;
+  /**
+   * The subject the provider DECLARED for this observation (`about`). It must travel with the
+   * coverage item: a real market payload often never names its own ticker (the regime adapter
+   * reports "the 10-year Treasury yield is 4.998 percent" for ^TNX), so matching on the
+   * rendered text alone dropped valid observations for symbol-shaped subjects.
+   */
+  readonly subject?: string;
 }
 
 const DAY_MS = 86_400_000;
@@ -349,7 +356,12 @@ export function freshnessSufficient(req: Pick<ResearchRequirement, "timeSensitiv
  */
 export function matchRequirement(req: ResearchRequirement, item: CoverageEvidence, opts: MatchOptions = {}): MatchResult {
   const now = opts.now ?? new Date();
-  if (opts.subjectTerms !== undefined && opts.subjectTerms.size > 0 && !concernsSubject(item.text, opts.subjectTerms)) {
+  const declaredSubject = item.subject ?? "";
+  if (
+    opts.subjectTerms !== undefined &&
+    opts.subjectTerms.size > 0 &&
+    !concernsSubject(`${item.text} ${declaredSubject}`, opts.subjectTerms)
+  ) {
     return "NO_MATCH";
   }
   const itemDomain = domainOfEvidenceType(item.evidenceType);
@@ -470,10 +482,13 @@ export function capabilitiesForRequirement(
     if (!freshnessOk) continue; // a historical-only capability cannot serve a CURRENT need
     let typeHits = 0;
     for (const dt of support.dataTypes) if (reqTokens.has(dt)) typeHits += 1;
-    const available = opts.isAvailable?.(cap) ?? true;
+    // AVAILABILITY IS A FILTER, NOT A PREFERENCE: scheduling a capability no provider serves
+    // spends a round on a guaranteed empty result (the caller's intent — "recovery never
+    // schedules a capability the deployment cannot execute" — was only affecting the score).
+    if (opts.isAvailable !== undefined && !opts.isAvailable(cap)) continue;
     scored.push({
       cap,
-      score: domainHits * 10 + typeHits * 4 + (available ? 2 : 0) + (support.freshness.includes("ANY") ? 0 : 1),
+      score: domainHits * 10 + typeHits * 4 + 2 + (support.freshness.includes("ANY") ? 0 : 1),
     });
   }
   scored.sort((a, b) => b.score - a.score || a.cap.localeCompare(b.cap));
@@ -499,6 +514,43 @@ export function recoveryCapabilities(
     }
   }
   if (out.length === 0) out.push("WEB_SEARCH", "CROSS_DOMAIN_SYNTHESIS");
+  return out;
+}
+
+/**
+ * CAPABILITY FLOOR (research contract): the capabilities a question's CRITICAL requirements
+ * make MANDATORY, independent of what the model planned. The model may propose capabilities,
+ * but it cannot omit one an engine-derived requirement depends on — the live failure this
+ * prevents: a yields question whose plan named no direct market capability, so no yield
+ * observation was ever retrieved and the run ended "insufficient" without trying.
+ *
+ * Same lookup as recovery (CAPABILITY_SUPPORT declarations), but proactive: it runs in the
+ * FIRST round against requirements that are still PENDING, so a plan that omitted a mapped
+ * capability cannot leave an engine-required dimension unattempted.
+ */
+export function mandatoryCapabilities(
+  requirements: readonly ResearchRequirement[],
+  opts: {
+    readonly isAvailable?: (cap: string) => boolean;
+    readonly exclude?: readonly string[];
+    readonly limit?: number;
+  } = {},
+): readonly string[] {
+  const limit = opts.limit ?? 4;
+  const excluded = new Set(opts.exclude ?? []);
+  const out: string[] = [];
+  for (const req of requirements) {
+    if (req.importance !== "CRITICAL" || !isDiscriminatingRequirement(req)) continue;
+    for (const cap of capabilitiesForRequirement(req, { ...opts, limit: 2 })) {
+      if (excluded.has(cap) || out.includes(cap)) continue;
+      // Only capabilities the deployment can actually execute: the floor must not spend a
+      // round on a capability no provider serves (that would look like retrieval work while
+      // being a guaranteed empty result).
+      if (opts.isAvailable !== undefined && !opts.isAvailable(cap)) continue;
+      out.push(cap);
+      if (out.length >= limit) return out;
+    }
+  }
   return out;
 }
 

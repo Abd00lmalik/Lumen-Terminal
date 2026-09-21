@@ -636,12 +636,20 @@ describe("research process benchmark (scores process, not word matching)", () =>
     expect(outcomeA.evidence.length).toBeGreaterThan(0);
     expect(outcomeB.evidence.length).toBeGreaterThan(0);
 
-    // The third run carries only its own subject. NB: the serialized objects are searched, so
-    // the check covers evidence text AND every context item the synthesis model would see.
-    const runCText = JSON.stringify({ evidence: outcomeC.evidence, context: outcomeC.context });
+    // ISOLATION: no evidence object from the earlier runs may appear in the macro run's
+    // evidence, and none may reach its synthesis context. (The check is on the PRIOR RUNS'
+    // objects, not on vocabulary: the engine's capability floor may legitimately call an
+    // additional capability for its own requirements, and a subject-blind fixture answering
+    // that call is not inheritance.)
+    const priorIds = new Set([...outcomeA.evidence.map((e) => e.id), ...outcomeB.evidence.map((e) => e.id)]);
+    expect(priorIds.size).toBeGreaterThan(0);
+    expect(outcomeC.evidence.some((e) => priorIds.has(e.id))).toBe(false);
+    expect(outcomeC.context.items.some((i) => priorIds.has(i.ref))).toBe(false);
+
+    const contextText = outcomeC.context.items.map((i) => i.text).join(" ");
     for (const leak of ["NVDA", "earnings date", "OPEC", "crude", "accelerator"]) {
-      expect(runCText).not.toContain(leak);
+      expect(contextText).not.toContain(leak);
     }
-    expect(runCText).toMatch(/Treasury yield|VIX|dollar/i);
+    expect(contextText).toMatch(/Treasury yield|VIX|dollar/i);
   });
 });

@@ -534,11 +534,52 @@ export interface AnswerDTO {
   readonly answer: string;
   readonly supportingReasons: readonly string[];
   readonly opposingReasons: readonly string[];
+  /**
+   * PRESENT: opposing evidence was found. NONE_FOUND: the engine attempted disconfirmation
+   * (FALSIFICATION capability) and the retrieval identified no material counterevidence.
+   * NOT_ASSESSED: no disconfirmation was attempted, so an empty opposition list means nothing.
+   */
+  readonly counterevidenceStatus: "PRESENT" | "NONE_FOUND" | "NOT_ASSESSED";
   readonly confidence: ResponseConfidenceDTO;
   readonly keyUncertainty: string;
   readonly implication: string;
   /** Validated refs only (the LUI already drops invented citations). */
   readonly citedObjectRefs: readonly string[];
+}
+
+export interface RequirementDiagnosticDTO {
+  readonly description: string;
+  readonly importance: string;
+  readonly timeSensitivity: string;
+  /** SATISFIED | PARTIALLY_SATISFIED | PENDING | EXHAUSTED | UNAVAILABLE */
+  readonly status: string;
+  readonly evidenceCount: number;
+  /** Observations that matched but fell outside the requirement's time horizon. */
+  readonly staleEvidenceCount: number;
+  readonly recoveryAttempts: number;
+  readonly unresolvedReason?: string;
+}
+
+export interface ExecutionDiagnosticDTO {
+  readonly round: number;
+  readonly capability: string;
+  /** Provider that served it (empty when no provider could). */
+  readonly provider: string;
+  readonly completeness: string;
+  readonly failureType: string;
+  readonly evidenceCount: number;
+}
+
+export interface ResearchDiagnosticsDTO {
+  readonly requirements: readonly RequirementDiagnosticDTO[];
+  readonly executions: readonly ExecutionDiagnosticDTO[];
+  /** Capabilities the ENGINE's floor required beyond the model's plan. */
+  readonly floorCapabilities: readonly string[];
+  readonly recoveryRounds: number;
+  /** The engine's completion gate verdict (stoppedBecause on the research loop). */
+  readonly completionGate: string;
+  /** Engine-assessed coverage: COMPLETE | PARTIAL | INSUFFICIENT. */
+  readonly coverage: "COMPLETE" | "PARTIAL" | "INSUFFICIENT";
 }
 
 export interface ResearchResponseDTO {
@@ -559,6 +600,12 @@ export interface ResearchResponseDTO {
    * the collapsed traceability detail.
    */
   readonly researchGaps: readonly string[];
+  /**
+   * BENCHMARK VISIBILITY (research coverage contract): structured execution metadata for
+   * external scoring — what the run had to know, what it attempted, what it could not close.
+   * Provenance and execution facts only; never model reasoning or hidden chain-of-thought.
+   */
+  readonly researchDiagnostics?: ResearchDiagnosticsDTO;
   /** The research object created by this request, when research ran. */
   readonly researchRef?: string;
   readonly evidenceRefs: readonly string[];

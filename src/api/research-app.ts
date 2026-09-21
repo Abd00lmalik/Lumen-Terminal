@@ -26,7 +26,7 @@ import {
   evidenceToDTO, evidenceSummaryDTO, judgmentToDTO, researchToDTO, continuitySnapshotToDTO,
   thesisToDTO, thesisAssessmentToDTO, artifactToDTO, memoryToDTO, monitorToDTO,
   toHistoricalAnalysisDTO, uiText,
-  type ResearchResponseDTO, type AnswerDTO, type EvidenceDTO, type JudgmentDTO,
+  type ResearchResponseDTO, type ResearchDiagnosticsDTO, type AnswerDTO, type EvidenceDTO, type JudgmentDTO,
 } from "./dto.js";
 import { InvalidRequestError, ModelFailureError, PersistenceFailureError, NotFoundError } from "./errors.js";
 
@@ -203,11 +203,25 @@ export class ResearchApp {
   /** Map a LuiResult into the safe response DTO (epistemic status preserved as data). */
   private async toResponseDTO(requestId: string, result: LuiResult, submittedQuestion: string): Promise<ResearchResponseDTO> {
     const ws = this.ws();
+    // COUNTEREVIDENCE STATUS (coverage contract): the engine attempts disconfirmation itself
+    // (the FALSIFICATION capability is part of the capability floor), so the answer can state
+    // whether opposing evidence was found, was searched for and not found, or was never
+    // attempted — instead of an empty opposition list that reads as balance it never had.
+    const executionsOf = (outcome: unknown): readonly { readonly capability: string }[] =>
+      outcome !== null && typeof outcome === "object" && Array.isArray((outcome as { executions?: unknown }).executions)
+        ? ((outcome as { executions: readonly { capability: string }[] }).executions)
+        : [];
+    const falsificationAttempted = [
+      result.research,
+      result.flow2?.outcome, result.flow3?.outcome, result.flow4?.outcome,
+      result.flow5?.outcome, result.flow6?.outcome, result.flow7?.outcome, result.flow8?.outcome,
+    ].some((outcome) => executionsOf(outcome).some((e) => e.capability === "FALSIFICATION"));
     const answer: AnswerDTO = result.rejected !== undefined
       ? {
           answer: result.response?.answer ?? "Request rejected: execution-like commands cannot run in this research-only workbench.",
           supportingReasons: [],
           opposingReasons: [],
+          counterevidenceStatus: "NOT_ASSESSED",
           confidence: "UNKNOWN",
           keyUncertainty: "",
           implication: "Rephrase as a research question if you want analysis on this topic.",
@@ -217,6 +231,8 @@ export class ResearchApp {
           answer: uiText(result.response?.answer ?? ""),
           supportingReasons: result.response?.supportingReasons.map(uiText) ?? [],
           opposingReasons: result.response?.opposingReasons.map(uiText) ?? [],
+          counterevidenceStatus:
+            (result.response?.opposingReasons.length ?? 0) > 0 ? "PRESENT" : falsificationAttempted ? "NONE_FOUND" : "NOT_ASSESSED",
           confidence: result.response?.confidence ?? "UNKNOWN",
           keyUncertainty: uiText(result.response?.keyUncertainty ?? ""),
           implication: uiText(result.response?.implication ?? ""),
@@ -264,6 +280,47 @@ export class ResearchApp {
             : `${r.description}: not established by the collected evidence`,
       )
       .slice(0, 5);
+    // BENCHMARK VISIBILITY (coverage contract): structured facts an external benchmark can
+    // score without reading model reasoning — the requirement ledger, what each capability
+    // actually returned, what the engine's floor added, and the completion gate. Execution
+    // metadata and provenance only.
+    const researchOutcome = result.research;
+    const led = researchOutcome?.requirements ?? [];
+    const criticalRequirements = led.filter((r) => r.importance === "CRITICAL");
+    const satisfiedCritical = criticalRequirements.filter((r) => r.status === "SATISFIED").length;
+    const evidenceCount = evidence.length;
+    const researchDiagnostics: ResearchDiagnosticsDTO | undefined =
+      researchOutcome === undefined
+        ? undefined
+        : {
+            requirements: led.map((r) => ({
+              description: r.description,
+              importance: r.importance,
+              timeSensitivity: r.timeSensitivity,
+              status: r.status,
+              evidenceCount: r.evidenceRefs.length,
+              staleEvidenceCount: r.staleOnlyRefs.length,
+              recoveryAttempts: r.recoveryAttempts,
+              ...(r.missingReason !== undefined ? { unresolvedReason: r.missingReason } : {}),
+            })),
+            executions: researchOutcome.executions.map((e) => ({
+              round: e.round,
+              capability: e.capability,
+              provider: e.result.tool,
+              completeness: e.result.completeness,
+              failureType: e.result.failure?.type ?? "NONE",
+              evidenceCount: e.evidenceIds.length,
+            })),
+            floorCapabilities: researchOutcome.floorCapabilities ?? [],
+            recoveryRounds: researchOutcome.recoveryRounds ?? 0,
+            completionGate: researchOutcome.stoppedBecause,
+            coverage:
+              researchOutcome.stoppedBecause === "EVIDENCE_SUFFICIENT" && satisfiedCritical === criticalRequirements.length
+                ? "COMPLETE"
+                : evidenceCount === 0 || satisfiedCritical === 0
+                  ? "INSUFFICIENT"
+                  : "PARTIAL",
+          };
     // Honest outcome mapping: a pure interpretation failure (no research ran) is a MODEL_FAILURE;
     // a run that completed research but ended on a model failure is a partial COMPLETED with the
     // typed failure attached (the LUI's law: failure ≠ fabricated evidence, partial ≠ false success).
@@ -297,6 +354,7 @@ export class ResearchApp {
       ...(result.modelFailure !== undefined ? { modelFailure: { type: result.modelFailure.type, message: result.modelFailure.message } } : {}),
       limitations,
       researchGaps,
+      ...(researchDiagnostics !== undefined ? { researchDiagnostics } : {}),
       ...(researchRef !== undefined ? { researchRef } : {}),
       evidenceRefs: evidence.map((e) => e.ref),
       ...(judgments.length > 0 ? { judgmentRef: judgments[judgments.length - 1]!.ref } : {}),

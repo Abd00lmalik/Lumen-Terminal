@@ -98,6 +98,44 @@ describe("request handling", () => {
     await app.close();
   });
 
+  it("exposes the benchmark surface: requirement ledger, executions, floor, gate, counterevidence", { timeout: 30_000 }, async () => {
+    // COVERAGE CONTRACT (benchmark visibility): an external benchmark must be able to score
+    // whether the run actually researched the question — what it had to know, what each
+    // capability returned, what the engine's floor added, and how it ended — without reading
+    // model reasoning.
+    const provider = new FakeModelProvider(new Map());
+    scriptLuiDefaults(provider, ADAPTIVE_PLAN);
+    provider.responses.set("research.plan", responses.researchPlan());
+    provider.responses.set("research.adaptive_decision", responses.adaptiveDecision("COMPLETE"));
+    const { app } = await makeApp({ provider, capabilities: ["NEWS_ANALYSIS"] });
+    const res = await app.inject({ method: "POST", url: "/api/research", payload: { message: "What is affecting BTC right now?" } });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      answer: { counterevidenceStatus: string };
+      researchDiagnostics?: {
+        requirements: { description: string; status: string; evidenceCount: number }[];
+        executions: { capability: string; provider: string; completeness: string; failureType: string }[];
+        floorCapabilities: string[];
+        recoveryRounds: number;
+        completionGate: string;
+        coverage: string;
+      };
+    };
+
+    expect(["PRESENT", "NONE_FOUND", "NOT_ASSESSED"]).toContain(body.answer.counterevidenceStatus);
+    const diagnostics = body.researchDiagnostics;
+    expect(diagnostics).toBeDefined();
+    expect(diagnostics!.requirements.length).toBeGreaterThan(0);
+    expect(diagnostics!.requirements.every((r) => typeof r.status === "string" && typeof r.evidenceCount === "number")).toBe(true);
+    expect(diagnostics!.executions.length).toBeGreaterThan(0);
+    expect(diagnostics!.executions.every((e) => typeof e.capability === "string" && typeof e.failureType === "string")).toBe(true);
+    expect(Array.isArray(diagnostics!.floorCapabilities)).toBe(true);
+    expect(diagnostics!.recoveryRounds).toBeGreaterThanOrEqual(0);
+    expect(["COMPLETE", "PARTIAL", "INSUFFICIENT"]).toContain(diagnostics!.coverage);
+    expect(typeof diagnostics!.completionGate).toBe("string");
+    await app.close();
+  });
+
   it("one user question = ONE history entry; internal plan steps stay children", { timeout: 30_000 }, async () => {
     // Live failure this pins: a single submission showed up in history as
     // "Gather current market news...", "Synthesize the gathered factors..." — the action
