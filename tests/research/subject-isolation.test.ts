@@ -134,7 +134,17 @@ describe("subject gate (target-relevance law)", () => {
 describe("hollow-complete guard (engine owns completion)", () => {
   it("a COMPLETE with only wrong-domain evidence fires deep-research recovery instead of finishing", async () => {
     const provider = new FakeModelProvider(new Map([
-      ["research.plan", responses.researchPlan()],
+      // Question-consistent plan: in production the planner derives requirements from the
+      // question asked (the generic BTC fixture predates the requirement-admission gate and
+      // made the deep-research OPEC evidence match no requirement).
+      ["research.plan", JSON.stringify({
+        objective: "What is driving oil prices this week?",
+        scopeIncluded: ["oil market"], scopeExcluded: [],
+        tasks: [{ type: "FACT_FINDING", objective: "Identify current oil price drivers", capabilities: ["NEWS_ANALYSIS"], completion: "drivers identified or absence recorded" }],
+        requirements: [{ description: "current oil-specific supply and demand developments", importance: "CRITICAL", timeSensitivity: "CURRENT" }],
+        completionCriteria: ["drivers identified or honest insufficiency"],
+        adaptationPolicy: "n/a",
+      })],
       // The decision model accepts the wrong-domain context (it cannot know provider
       // coverage); the ENGINE must reject the hollow completion.
       ["research.adaptive_decision", responses.adaptiveDecision("COMPLETE")],

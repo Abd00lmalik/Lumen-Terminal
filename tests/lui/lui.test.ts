@@ -218,6 +218,80 @@ describe("six LUI actions (locked set)", () => {
     expect(seenParams.every((p) => p["asset"] === "AAPL")).toBe(true);
   });
 
+  it("target law: an inherited asset the question never names is dropped at dispatch (live macro failure)", async () => {
+    // LIVE FAILURE: after a BTC research run, the target-resolution model inherited asset
+    // "BTC" for the macro regime question. That routed crypto capabilities AND made BTC a
+    // subject term, so crypto evidence was admitted as subject-consistent and the answer
+    // became a crypto summary. A question the message never names is not the message's
+    // target. Positive control in the same shape: a BTC question KEEPS the asset.
+    const seenParams: Record<string, unknown>[] = [];
+    const capture = (registry: CapabilityRegistry): void => {
+      registry.register({
+        providerId: "fake/capturing",
+        capabilities: ["NEWS_ANALYSIS"],
+        limitations: ["fake"],
+        freshnessProfile: "test:live",
+        async execute(cap, params) {
+          seenParams.push(params);
+          return {
+            tool: "fake/capturing",
+            capability: cap,
+            transport: "fake",
+            outputs: [{ outputClass: "QUANTITATIVE_OBSERVATION", content: "treasury yields 4.99 percent; the dollar firmed; VIX 14.8" }],
+          };
+        },
+      });
+    };
+    const macroQuestion = "What macro conditions favor risk assets right now?";
+    const macroPlan = JSON.stringify({
+      objective: macroQuestion, scopeIncluded: [], scopeExcluded: [],
+      tasks: [{ type: "FACT_FINDING", objective: "current treasury yields and dollar conditions", capabilities: ["NEWS_ANALYSIS"], completion: "c" }],
+      requirements: [{ description: "current treasury yields and dollar conditions", importance: "CRITICAL", timeSensitivity: "CURRENT" }],
+      completionCriteria: [], adaptationPolicy: "a",
+    });
+    const macroProvider = new FakeModelProvider(new Map([
+      ["research.plan", macroPlan],
+      ["research.adaptive_decision", responses.adaptiveDecision("COMPLETE")],
+    ]));
+    scriptDefaults(
+      macroProvider,
+      [{ action: "RESEARCH", description: "research the macro regime", capabilities: ["NEWS_ANALYSIS"], params: {} }],
+      {
+        // The model inherited BTC from the workspace's earlier crypto run.
+        target: { asset: "BTC", flow: "WHAT_DOES_ALL_INFORMATION_SAY", researchRef: "", objectRefs: [], unresolved: [] },
+        request: { objective: macroQuestion, primaryAction: "RESEARCH" },
+      },
+    );
+    const macroRegistry = new CapabilityRegistry();
+    capture(macroRegistry);
+    const macroRun = buildLui(macroProvider, macroRegistry);
+    const macroResult = await macroRun.lui.handle(macroQuestion);
+
+    expect(seenParams.length).toBeGreaterThan(0);
+    // The inherited asset never reached capability params (crypto capabilities are never
+    // routed), and the capability still served without it.
+    expect(seenParams.every((p) => p["asset"] === undefined)).toBe(true);
+    expect(macroResult.research?.evidence.length).toBeGreaterThan(0);
+
+    // Positive control: the SAME inherited asset survives when the question names it.
+    seenParams.length = 0;
+    const btcProvider = new FakeModelProvider(new Map([
+      ["research.plan", responses.researchPlan()],
+      ["research.adaptive_decision", responses.adaptiveDecision("COMPLETE")],
+    ]));
+    scriptDefaults(btcProvider, [{ action: "RESEARCH", description: "research BTC developments", capabilities: ["NEWS_ANALYSIS"], params: {} }], {
+      target: { asset: "BTC", flow: "WHAT_HAPPENED", researchRef: "", objectRefs: [], unresolved: [] },
+      request: { objective: "What is happening with BTC today?", primaryAction: "RESEARCH" },
+    });
+    const btcRegistry = new CapabilityRegistry();
+    capture(btcRegistry);
+    const btcRun = buildLui(btcProvider, btcRegistry);
+    await btcRun.lui.handle("What is happening with BTC today?");
+
+    expect(seenParams.length).toBeGreaterThan(0);
+    expect(seenParams.every((p) => p["asset"] === "BTC")).toBe(true);
+  });
+
   it("ANALYZE interprets existing research with citations validated against the workspace", async () => {
     const provider = new FakeModelProvider(new Map([
       ["analysis.model_analysis", JSON.stringify({

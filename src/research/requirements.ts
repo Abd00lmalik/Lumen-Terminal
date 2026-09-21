@@ -123,6 +123,29 @@ const STOP = new Set([
   "WHAT", "WHY", "HOW", "CURRENT", "CURRENTLY", "RIGHT", "NOW", "TODAY", "THIS", "WEEK", "MONTH",
   "RECENT", "RECENTLY", "LATEST", "DATA", "INFORMATION", "EVIDENCE", "RESEARCH", "ABOUT",
   "SIMILAR", "SETUP", "SETUPS", "LIKE", "SAME", "DIFFERENT", "POSSIBLE", "MATERIAL", "MAIN", "KEY",
+  // Research-meta words: they name no market concept, so a requirement made only of them
+  // cannot discriminate relevance (the engine's own placeholder fallback is exactly
+  // "relevant evidence for the research question").
+  "RELEVANT", "RELEVANCE", "QUESTION", "QUESTIONS",
+]);
+
+/**
+ * Currency units ("USD", "EUR", "USDT", ...): tokens that denote a price DENOMINATION, not
+ * a market. Stripped from an observation's vocabulary ONLY when the observation concerns a
+ * crypto subject the question is not about (see meaningfulTokens) — there the fiat code is
+ * the quote's unit, never a market claim. Dependency-free: this module is shared by the
+ * matcher with no import-cycle risk.
+ */
+const CURRENCY_UNITS: ReadonlySet<string> = new Set(["USD", "USDT", "USDC", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD", "CNY", "KRW"]);
+
+/**
+ * Crypto assets (tickers AND common names) whose price quotes carry a fiat denomination.
+ * An observation naming one of these — when it is NOT among the question's subject terms —
+ * gets its currency-unit tokens stripped before requirement matching.
+ */
+const FOREIGN_CRYPTO_ASSETS: ReadonlySet<string> = new Set([
+  "BTC", "BITCOIN", "ETH", "ETHEREUM", "SOL", "SOLANA", "XRP", "RIPPLE", "DOGE", "DOGECOIN",
+  "ADA", "CARDANO", "LTC", "LITECOIN", "AVAX", "LINK", "CHAINLINK", "DOT", "POLKADOT", "TRON",
 ]);
 
 /**
@@ -152,10 +175,19 @@ function canonicalToken(token: string): string {
   return token;
 }
 
-function meaningfulTokens(text: string): Set<string> {
+function meaningfulTokens(text: string, opts: { stripCurrencyUnits?: boolean } = {}): Set<string> {
   const out = new Set<string>();
   for (const raw of text.toUpperCase().split(/[^A-Z0-9]+/)) {
     if (raw.length < 3 || STOP.has(raw)) continue;
+    // CURRENCY-UNIT GUARD (item-side, conditional): a crypto price quote's denomination
+    // ("80,750 USD") is not evidence about that currency's conditions. When the caller
+    // detects the observation concerns an incompatible crypto subject, fiat codes are
+    // stripped before matching so the USD->DOLLAR fold cannot satisfy a macro requirement
+    // naming the dollar (live benchmark failure: the macro risk-assets requirement was
+    // SATISFIED by BTC/ETF quotes through their USD unit). Requirement-side tokens are
+    // NEVER stripped: the planner's "USD conditions" means the dollar concept, and genuine
+    // macro observations ("USD index rose") keep matching through DXY/dollar/DXY vocabulary.
+    if (opts.stripCurrencyUnits === true && CURRENCY_UNITS.has(raw)) continue;
     out.add(canonicalToken(raw));
   }
   return out;
@@ -172,6 +204,18 @@ export function timeSensitivityOf(text: string): TimeSensitivity {
 /** Requirement id: stable, derived from the description (deterministic across rounds). */
 export function requirementId(index: number): string {
   return `rq_${String(index + 1).padStart(2, "0")}`;
+}
+
+/**
+ * Is this requirement capable of DISCRIMINATING relevance? A requirement whose text carries
+ * no market vocabulary and no non-GENERAL domain (the engine's placeholder fallback
+ * "relevant evidence for the research question", or a degenerate task objective) states no
+ * criterion an observation could meet or fail. Such a requirement still participates in
+ * coverage, but it must never EXCLUDE evidence from synthesis: it would empty the context of
+ * every run that used it.
+ */
+export function isDiscriminatingRequirement(req: Pick<ResearchRequirement, "description" | "domains">): boolean {
+  return meaningfulTokens(req.description).size > 0 || req.domains.some((d) => d !== "GENERAL");
 }
 
 /**
@@ -277,7 +321,14 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
   }
   const itemDomain = domainOfEvidenceType(item.evidenceType);
   const reqTokens = meaningfulTokens(req.description);
-  const itemTokens = meaningfulTokens(`${item.text} ${itemDomain}`);
+  // CURRENCY-UNIT GUARD (VALID ≠ RELEVANT): when the observation concerns a crypto asset the
+  // question is NOT about (subject terms resolved but lacking it, or no subject resolved at
+  // all), its fiat codes are price denominations, not dollar evidence — strip them so a
+  // BTC/ETF quote cannot satisfy a macro requirement through the USD->DOLLAR fold.
+  const itemTokenSet = new Set(item.text.toUpperCase().split(/[^A-Z0-9]+/));
+  const questionSubjects = opts.subjectTerms ?? new Set<string>();
+  const concernsForeignCrypto = [...FOREIGN_CRYPTO_ASSETS].some((t) => itemTokenSet.has(t) && !questionSubjects.has(t));
+  const itemTokens = meaningfulTokens(`${item.text} ${itemDomain}`, { stripCurrencyUnits: concernsForeignCrypto });
   // Vocabulary overlap is REQUIRED (a whole domain of observations cannot satisfy every
   // requirement in that domain: a yield quote is not inflation evidence). Domain agreement
   // is accepted only when the requirement itself has no distinguishing vocabulary left.

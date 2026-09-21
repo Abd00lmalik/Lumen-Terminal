@@ -109,6 +109,33 @@ const CRYPTO_ALIASES: readonly (readonly [name: string, ticker: string])[] = [
   ["POLKADOT", "DOT"], ["CHAINLINK", "LINK"], ["AVALANCHE", "AVAX"], ["TRON", "TRX"],
 ];
 
+/**
+ * Names/tickers of an asset as a question would legitimately spell them (asset -> terms).
+ * Used by the target law to decide whether the QUESTION TEXT itself names a candidate asset.
+ * Deliberately narrow: "favor" must never match "BTC"; conversely "risk-on Bitcoin rally"
+ * and "what is happening with BTC today" must both match.
+ */
+const ASSET_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  BTC: ["BITCOIN"], ETH: ["ETHEREUM"], SOL: ["SOLANA"], XRP: ["RIPPLE", "XRP"],
+  DOGE: ["DOGECOIN"], ADA: ["CARDANO"], LTC: ["LITECOIN"], AVAX: ["AVALANCHE"],
+  LINK: ["CHAINLINK"], DOT: ["POLKADOT"], TRX: ["TRON"],
+};
+
+/** Does the question text itself name this asset (exact ticker word or a known alias)? */
+export function questionNamesAsset(question: string, asset: string): boolean {
+  const q = question.toUpperCase();
+  const token = asset.trim().toUpperCase();
+  if (token === "") return false;
+  // Exact word: "BTC", "NVDA", "CL=F" (the =F/=X/=^ suffixes are normalized away).
+  const bare = token.replace(/[=^].*$/, "");
+  if (new RegExp(`\\b${bare.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(q)) return true;
+  // Known aliases (Bitcoin -> BTC).
+  for (const alias of ASSET_ALIASES[bare] ?? []) {
+    if (new RegExp(`\\b${alias}\\b`).test(q)) return true;
+  }
+  return false;
+}
+
 /** Tokens that identify no subject (they appear in questions about any subject). */
 const GENERIC_TOKENS = new Set([
   "A", "I", "AN", "THE", "AND", "OR", "OF", "ON", "IN", "TO", "FOR", "IS", "ARE", "WAS", "WERE", "IT", "ITS",

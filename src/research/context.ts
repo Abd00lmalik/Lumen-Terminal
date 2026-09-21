@@ -17,6 +17,7 @@
 import type { Evidence, EvidenceClass, Freshness, Claim, Hypothesis } from "../domain/objects.js";
 import type { Workspace } from "../domain/workspace.js";
 import type { ToolResult } from "../domain/tool-result.js";
+import { matchRequirement, domainsOfRequirement, isDiscriminatingRequirement, type CoverageEvidence, type EvidenceDomain, type ResearchRequirement } from "./requirements.js";
 
 /** One context item; every item keeps its architecture object type and epistemic class. */
 export interface ContextItem {
@@ -66,6 +67,8 @@ export interface ResearchContext {
   readonly archiveBackground?: { readonly count: number; readonly sampleRefs: readonly string[] };
   /** Run-collected items demoted by the SUBJECT gate: this run ingested them but they do not concern the question's subject (wrong-target evidence; the loop's recovery reads this). */
   readonly rejectedWrongTarget?: number;
+  /** Run-collected items admitted to no requirement (engine ledger): valid observations, but not evidence for THIS question — background for the graph, never synthesis input. */
+  readonly rejectedNoRequirement?: number;
   /** Requirement-coverage report (rendered text) when the engine assessed requirements. */
   readonly requirementCoverage?: string;
   /** Which run the context is anchored to (the archive fallback when unscoped). */
@@ -275,8 +278,7 @@ export function buildResearchContext(
      * synthesis models SEE which requirements are covered, which are stale-only, and which
      * are exhausted. The model cannot upgrade an uncovered requirement to satisfied.
      */
-    readonly requirements?: readonly { readonly id: string; readonly description: string; readonly importance: string; readonly timeSensitivity: string; readonly status: string; readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[]; readonly missingReason?: string }[];
-    /** TOOL_RESULTs from this session, for failure/limitation reporting. */
+    readonly requirements?: readonly { readonly id: string; readonly description: string; readonly importance: string; readonly timeSensitivity: string; readonly status: string; readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[]; readonly missingReason?: string }[];    /** TOOL_RESULTs from this session, for failure/limitation reporting. */
     readonly executions?: readonly { readonly capability: string; readonly result: ToolResult }[];
     /** Set when the caller already knows evidence is insufficient (valid completion state). */
     readonly insufficientEvidence?: string;
@@ -311,6 +313,27 @@ export function buildResearchContext(
   );
   const archiveBackground = { count: 0, sampleRefs: [] as string[] };
   let rejectedWrongTarget = 0;
+  // SYNTHESIS-ADMISSION LAW (VALID ≠ RELEVANT, second line of defense): when the engine
+  // assessed requirements for this run, run-collected evidence that matches NO requirement
+  // (not even stale-only) is background for the evidence graph, not synthesis input. The
+  // live failure this prevents: with no resolved subject (a subjectless macro question) the
+  // subject gate was off, so crypto observations the run collected entered the synthesis
+  // context whole and the answer became a crypto summary. Opt-in like the subject gate:
+  // callers without a requirement ledger keep run-scoped semantics. STALE_ONLY matches stay
+  // admitted: stale evidence remains usable, explicitly labeled background.
+  const admissionRequirements = (options.requirements ?? [])
+    .filter((r) => r.description.trim() !== "")
+    .map((r) => {
+      const domains: readonly EvidenceDomain[] =
+        (r as { domains?: readonly EvidenceDomain[] }).domains ?? domainsOfRequirement(r.description);
+      return {
+        id: r.id, description: r.description,
+        timeSensitivity: r.timeSensitivity as ResearchRequirement["timeSensitivity"],
+        domains: domains.length > 0 ? domains : (["GENERAL"] as const),
+      };
+    })
+    .filter((r) => isDiscriminatingRequirement(r));
+  let rejectedNoRequirement = 0;
   for (const e of workspace.listEvidence()) {
     const item: ContextItem = {
       ref: e.id,
@@ -335,6 +358,28 @@ export function buildResearchContext(
       (e.subject !== undefined && isSubjectRelevant(e.subject, gateTerms));
     if (isRunEvidence && gateTerms !== undefined && !concernsSubject) {
       rejectedWrongTarget += 1;
+      continue;
+    }
+    // Tier 1.6 (requirement-admission gate, run evidence): relevance to the QUESTION is
+    // decided by the requirement matcher, not by "a provider returned it during this run".
+    const matchesAnyRequirement =
+      !isRunEvidence ||
+      admissionRequirements.length === 0 ||
+      admissionRequirements.some((req) => {
+        const probe: ResearchRequirement = {
+          id: req.id, description: req.description, importance: "CRITICAL",
+          timeSensitivity: req.timeSensitivity,
+          domains: req.domains,
+          status: "PENDING", evidenceRefs: [], staleOnlyRefs: [], recoveryAttempts: 0,
+        };
+        const candidate: CoverageEvidence = {
+          ref: e.id, text: item.text, evidenceType: e.evidenceType, freshness: e.freshness,
+          ...(e.timestamp !== undefined ? { observedAt: e.timestamp } : {}),
+        };
+        return matchRequirement(probe, candidate, gateTerms !== undefined ? { subjectTerms: gateTerms } : {}) !== "NO_MATCH";
+      });
+    if (!matchesAnyRequirement) {
+      rejectedNoRequirement += 1;
       continue;
     }
     // Tier 2 (archive gate): evidence from OTHER runs is scoped by SUBJECT when the
@@ -448,6 +493,7 @@ export function buildResearchContext(
     ...(researchRef === undefined ? { scope: "workspace_archive" as const } : { scope: "single_research" as const }),
     ...(archiveBackground.count > 0 ? { archiveBackground } : {}),
     ...(rejectedWrongTarget > 0 ? { rejectedWrongTarget } : {}),
+    ...(rejectedNoRequirement > 0 ? { rejectedNoRequirement } : {}),
     ...(options.requirements !== undefined && options.requirements.length > 0 ? { requirementCoverage: renderRequirementCoverage(options.requirements) } : {}),
     items,
     claims,
@@ -501,6 +547,9 @@ export function renderResearchContext(ctx: ResearchContext): string {
   }
   if (ctx.rejectedWrongTarget !== undefined && ctx.rejectedWrongTarget > 0) {
     lines.push(`TARGET GATE: ${ctx.rejectedWrongTarget} item(s) collected during THIS run do not concern the question's subject and are EXCLUDED from synthesis (wrong-target evidence). They are recorded for provenance but are NOT research findings for this question.`);
+  }
+  if (ctx.rejectedNoRequirement !== undefined && ctx.rejectedNoRequirement > 0) {
+    lines.push(`REQUIREMENT GATE: ${ctx.rejectedNoRequirement} item(s) collected during THIS run satisfy none of the question's requirements and are EXCLUDED from synthesis. A provider returning data during this run does not make that data evidence for this question.`);
   }
   if (ctx.archiveBackground !== undefined) {
     lines.push(`RELEVANCE GATE: ${ctx.archiveBackground.count} archived evidence object(s) from unrelated past questions are EXCLUDED from this context (sample: ${ctx.archiveBackground.sampleRefs.join(", ")}). If this question needs them, research the question directly; do not treat the exclusion as evidence of absence.`);

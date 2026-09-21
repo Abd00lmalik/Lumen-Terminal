@@ -34,7 +34,7 @@ import { validateModelOutput } from "../model/provider.js";
 import type { Workspace } from "../domain/workspace.js";
 import type { SavedArtifact, Thesis } from "../domain/thesis.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
-import { resolveInstrument } from "../domain/instruments.js";
+import { resolveInstrument, questionNamesAsset } from "../domain/instruments.js";
 import type { WorkspaceStore } from "../persistence/index.js";
 import { runAdaptiveResearch, type AdaptiveLoopOutcome, MAX_RESEARCH_ROUNDS } from "../research/adaptive.js";
 import { progressEvent, type ProgressListener } from "../research/progress.js";
@@ -305,6 +305,8 @@ const RESPONSE_SYSTEM = [
 ].join("\n");
 
 export class Lui {
+  private currentMessage: string | undefined;
+
   constructor(private readonly options: LuiOptions) {}
 
   /** Main entry: one user message → validated pipeline → LuiResult.
@@ -318,6 +320,9 @@ export class Lui {
   ): Promise<LuiResult> {
     const provider = this.options.provider;
     const progress = onProgress ?? this.options.onProgress;
+    // The verbatim message, kept for the target law (a model-resolved asset is only the
+    // question's target when the QUESTION ITSELF names it).
+    this.currentMessage = userMessage;
 
     // 1–2. INPUT NORMALIZATION + INTENT DETECTION (validated; model failure aborts honestly).
     progress?.(progressEvent("request_accepted", new Date(), "request accepted", { messageLength: userMessage.length }));
@@ -571,8 +576,13 @@ export class Lui {
     // actually references the trader's own material — an independent question must never
     // inherit the thesis's asset as its research target (live contamination path).
     const referencesTraderMaterial = /\b(thesis|framework|my (view|position|setup|thesis|framework))\b/i.test(objective);
+    // TARGET LAW enforced at dispatch: a workspace/model-inherited asset survives only when
+    // the question names it. Anything else (the step's own explicit asset or canonical
+    // instrument resolution of the objective text) is question-earned.
+    const inherited = result.target.asset;
+    const inheritedEarned = inherited !== undefined && (referencesTraderMaterial || assetIsNamedByQuestion(this.currentMessage ?? objective, objective, inherited));
     const asset = step.params["asset"]
-      ?? result.target.asset
+      ?? (inheritedEarned ? inherited : undefined)
       ?? resolveInstrument(objective)?.symbol
       ?? objectiveTicker
       ?? (referencesTraderMaterial ? this.options.workspace.activeTheses()[0]?.scope.entities[0] : undefined);
@@ -704,6 +714,16 @@ export class Lui {
   ): Promise<{ outcome: AdaptiveLoopOutcome; modelFailure?: ModelFailure }> {
     const workspace = this.options.workspace;
     const objective = step.params["objective"] ?? step.description;
+    // TARGET LAW (same predicate as dispatchM4Flow): an inherited resolvedAsset that the
+    // question text does not name is dropped before it can reach capability params or the
+    // subject gate; crypto capabilities are then never routed for a question the user never
+    // aimed at crypto.
+    const referencesTraderMaterialResearch = /\b(thesis|framework|my (view|position|setup|thesis|framework))\b/i.test(objective);
+    const earnedResolvedAsset =
+      resolvedAsset !== undefined &&
+      (referencesTraderMaterialResearch || assetIsNamedByQuestion(this.currentMessage ?? objective, objective, resolvedAsset))
+        ? resolvedAsset
+        : undefined;
     const research = workspace.addResearch(
       { objective, question: objective, flow: step.params["flow"] ?? "WHAT_DOES_ALL_INFORMATION_SAY" },
       origin,
@@ -723,10 +743,13 @@ export class Lui {
           // instrument (oil -> CL=F), or an exact ticker in the objective must reach
           // capability params even when the plan step omitted the asset; symbol-scoped
           // adapters SCHEMA_ERROR otherwise, and the chain would fall through to
-          // domain-wrong fallbacks. Priority: explicit step asset > LUI-resolved target >
-          // canonical instrument > ticker-shaped token.
-          ...((step.params["asset"] ?? resolvedAsset ?? resolveInstrument(step.params["objective"] ?? step.description)?.symbol ?? /\b[A-Z][A-Z0-9]{1,5}\b/.exec(step.params["objective"] ?? step.description)?.[0]) !== undefined
-            ? { asset: (step.params["asset"] ?? resolvedAsset ?? resolveInstrument(step.params["objective"] ?? step.description)?.symbol ?? /\b[A-Z][A-Z0-9]{1,5}\b/.exec(step.params["objective"] ?? step.description)?.[0]) as string }
+          // domain-wrong fallbacks. TARGET LAW: a resolvedAsset that the question text does
+          // not name is dropped here too (the workspace-inheritance path) so crypto
+          // capabilities are never routed for a macro question. Priority: explicit step
+          // asset > LUI-resolved target (only when question-earned) > canonical instrument >
+          // ticker-shaped token.
+          ...((step.params["asset"] ?? earnedResolvedAsset ?? resolveInstrument(step.params["objective"] ?? step.description)?.symbol ?? /\b[A-Z][A-Z0-9]{1,5}\b/.exec(step.params["objective"] ?? step.description)?.[0]) !== undefined
+            ? { asset: (step.params["asset"] ?? earnedResolvedAsset ?? resolveInstrument(step.params["objective"] ?? step.description)?.symbol ?? /\b[A-Z][A-Z0-9]{1,5}\b/.exec(step.params["objective"] ?? step.description)?.[0]) as string }
             : {}),
           // G2 DISCOVER falls back to the question text when a task carries no query:
           // the objective still bounds the investigation; never a hard schema failure.
@@ -781,7 +804,11 @@ export class Lui {
           origin ?? { kind: "agent", detail: "ANALYZE re-route: archived context does not answer this question" },
           onProgress,
           deadlineMs,
-          result.target.asset,
+          // TARGET LAW at the third consumption site: the re-routed investigation inherits
+          // the resolved asset only when the question text names it.
+          result.target.asset !== undefined && assetIsNamedByQuestion(this.currentMessage ?? objective, objective, result.target.asset)
+            ? result.target.asset
+            : undefined,
         );
         result.research = research.outcome;
         if (research.modelFailure !== undefined) result.modelFailure = research.modelFailure;
@@ -1337,6 +1364,23 @@ function toModelFailure(error: unknown): ModelFailure {
 function firstUnresolvedRequirement(requirements: readonly { readonly importance: string; readonly status: string; readonly description: string }[]): string | undefined {
   const gap = requirements.find((r) => r.importance === "CRITICAL" && r.status !== "SATISFIED");
   return gap?.description;
+}
+
+/**
+ * TARGET LAW (question-centric research): a model-resolved target asset may carry into
+ * research dispatch ONLY when the question text itself names it (ticker word, known alias,
+ * or canonical instrument). The target-resolution model sees workspace context and inherits
+ * the most recent research subject (live failure: after a BTC run, the macro regime question
+ * arrived with asset BTC, which routed crypto capabilities AND admitted crypto evidence as
+ * subject-consistent). A question the message never names is not the message's target.
+ * Trader material (thesis/framework) explicitly waives this: continuing the thesis's asset
+ * IS the request's semantics.
+ */
+function assetIsNamedByQuestion(message: string, objective: string, asset: string): boolean {
+  if (questionNamesAsset(message, asset) || questionNamesAsset(objective, asset)) return true;
+  const instrument = resolveInstrument(message);
+  if (instrument !== undefined && (instrument.symbol === asset.toUpperCase() || instrument.subjectTerms.includes(asset.toUpperCase()))) return true;
+  return false;
 }
 
 function summarize(text: string, max = 160): string {
