@@ -21,6 +21,13 @@ import type { ModelProvider, OutputSchema } from "../model/provider.js";
 import { validateModelOutput } from "../model/provider.js";
 import type { ResearchContext } from "./context.js";
 import { renderResearchContext } from "./context.js";
+import {
+  contractGapStatement,
+  contractViolations,
+  stripUnsupportedClaims,
+  type ContractState,
+  type ContractViolation,
+} from "./contract-checks.js";
 
 /** Storage/process language: an implication phrased as run accounting is not decision support. */
 const PROCESS_NOTE = /preserved|evidence object|research id|rs_\d|deeper level|disclosure|provider|storage/i;
@@ -110,6 +117,12 @@ export interface AnswerSynthesis {
   readonly uncertainty: readonly string[];
   readonly confidence?: string;
   readonly citedObjectRefs: readonly string[];
+  /**
+   * Claims the evidence ledger did not support (research-contract validation). A draft that
+   * made them was retried once; anything that survived the retry was STRIPPED from the answer
+   * and recorded here, so no unsupported claim ever stands in the trader-facing text.
+   */
+  readonly contractViolations?: readonly { readonly type: string; readonly detail: string }[];
 }
 
 export interface SynthesizeAnswerOptions {
@@ -117,6 +130,8 @@ export interface SynthesizeAnswerOptions {
   /** The trader's verbatim question: the answer must address THIS. */
   readonly question: string;
   readonly context: ResearchContext;
+  /** The engine's epistemic state: what the run covered and actually retrieved. */
+  readonly contract?: ContractState;
 }
 
 /**
@@ -125,7 +140,7 @@ export interface SynthesizeAnswerOptions {
  * evidence-grounded fallback; nothing is fabricated).
  */
 export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promise<AnswerSynthesis | undefined> {
-  const { provider, question, context } = options;
+  const { provider, question, context, contract } = options;
   let raw: string;
   try {
     const res = await provider.structured<string>({
@@ -217,6 +232,57 @@ export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promis
         .filter((r) => !Array.isArray(rec.evidenceRefs) || !(rec.evidenceRefs as unknown[]).map(String).includes(r)),
     });
   }
+  // RESEARCH-CONTRACT VALIDATION (decision-quality contract): the model may synthesize, but it
+  // may not claim coverage the ledger does not support. Violations get ONE bounded corrective
+  // retry with the exact claim named; whatever survives is STRIPPED from the answer and the
+  // engine's own gap statement is added, so an unsupported claim never reaches the trader.
+  let violations: readonly ContractViolation[] = contract !== undefined ? contractViolations(direct, contract) : [];
+  if (violations.length > 0) {
+    const named = violations.map((v) => `- ${v.detail}`).join("\n");
+    try {
+      const retry = await provider.structured<string>({
+        schemaName: "research.answer_synthesis",
+        schemaDescription: ANSWER_SYNTHESIS_SCHEMA_DESC,
+        system: SYNTHESIS_SYSTEM,
+        prompt: [
+          `Trader question (answer THIS): "${question}"`,
+          "Your previous draft made claims the evidence ledger does not support:",
+          named,
+          `Rejected draft: "${direct.slice(0, 600)}"`,
+          "Rewrite it so every claim is supported: remove the unsupported claim, or state plainly that the requirement was not established. Do not replace it with a different unsupported claim.",
+          "Validated research context follows. Evidence ids in brackets are the ONLY citable refs.",
+          "---",
+          renderResearchContext(context),
+          "---",
+          'Respond as JSON conforming to schema "research.answer_synthesis".',
+          ANSWER_SYNTHESIS_SCHEMA_DESC,
+        ].join("\n"),
+        preferJson: true,
+      });
+      const retried = validateModelOutput<AnswerSynthesis>(ANSWER_SYNTHESIS_SCHEMA, retry.raw).data;
+      const retryDirect = typeof retried.directAnswer === "string" ? retried.directAnswer.trim() : "";
+      const retryViolations = retryDirect === "" ? violations : contractViolations(retryDirect, contract!);
+      if (retryDirect !== "" && retryViolations.length === 0) {
+        data = retried;
+        direct = retryDirect;
+        violations = [];
+      } else if (retryDirect !== "" && retryViolations.length < violations.length) {
+        data = retried;
+        direct = retryDirect;
+        violations = retryViolations;
+      }
+    } catch {
+      // Keep the original draft; the strip below still removes the unsupported claims.
+    }
+  }
+  if (violations.length > 0) {
+    const stripped = stripUnsupportedClaims(direct, violations).trim();
+    // If nothing evidence-supported remains, the synthesis is rejected outright and the
+    // caller keeps its deterministic evidence-grounded answer (never a fabricated one).
+    if (stripped === "") return undefined;
+    direct = stripped;
+  }
+  const contractGap = violations.length > 0 ? contractGapStatement(violations) : undefined;
   const implication = typeof data.implication === "string" ? data.implication.trim() : "";
   return {
     directAnswer: direct,
@@ -225,21 +291,33 @@ export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promis
     // A storage/process note is not an implication; drop it so the caller can use its
     // deterministic decision-relevant fallback instead of leaking run internals.
     ...(implication !== "" && !PROCESS_NOTE.test(implication) ? { implication } : {}),
-    uncertainty: (data.uncertainty ?? []).map(String),
+    uncertainty: [...(data.uncertainty ?? []).map(String), ...(contractGap !== undefined ? [contractGap] : [])],
     ...(typeof data.confidence === "string" ? { confidence: data.confidence } : {}),
     citedObjectRefs: keep(data.citedObjectRefs),
+    ...(violations.length > 0
+      ? { contractViolations: violations.map((v) => ({ type: v.type, detail: v.detail })) }
+      : {}),
   };
 }
 
-/** Render the synthesis as the trader-facing answer prose (answer first, then the factors). */
-export function renderAnswerSynthesis(s: AnswerSynthesis): string {
+/**
+ * Render the synthesis as the trader-facing answer prose (answer first, then the factors).
+ *
+ * COUNTEREVIDENCE HONESTY: a factor with no counterevidence refs may only be described as
+ * "no material counterevidence found" when disconfirmation was ACTUALLY attempted — otherwise
+ * the rendered sentence would make exactly the claim the contract validator exists to reject
+ * (an unsearched conclusion presented as a tested one).
+ */
+export function renderAnswerSynthesis(s: AnswerSynthesis, opts: { readonly disconfirmationAttempted?: boolean } = {}): string {
   const parts: string[] = [s.directAnswer];
   if (s.keyFactors.length > 0) {
     const factors = s.keyFactors.map((f) => {
       const refs = f.evidenceRefs.length > 0 ? ` [${f.evidenceRefs.join(", ")}]` : "";
       const counter = f.counterevidenceRefs.length > 0
         ? ` Counterevidence: [${f.counterevidenceRefs.join(", ")}]`
-        : " No material counterevidence was found in the retrieved evidence.";
+        : opts.disconfirmationAttempted === true
+          ? " No material counterevidence was found in the retrieved evidence."
+          : " Counterevidence for this factor was not searched for in this run.";
       const dir = f.direction !== "" ? ` (${f.direction})` : "";
       return `${f.factor}${dir}: ${f.mechanism}${refs}.${counter}`;
     });

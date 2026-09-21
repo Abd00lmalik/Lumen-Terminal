@@ -95,6 +95,11 @@ export interface AdaptiveLoopOutcome {
   readonly floorCapabilities?: readonly string[];
   /** Engine-scheduled gap-recovery rounds actually spent (bounded). */
   readonly recoveryRounds?: number;
+  /**
+   * Claims the evidence ledger did not support: the draft was retried once, and anything that
+   * survived was stripped from the answer (research-contract validation).
+   */
+  readonly contractViolations?: readonly { readonly type: string; readonly detail: string }[];
 }
 
 /** Schemas as prompt fragments; the model must answer in one of these shapes. */
@@ -710,8 +715,33 @@ export async function runAdaptiveResearch(
   let answer: string | undefined;
   let synthesis: AnswerSynthesis | undefined;
   if (collected.length > 0 && stoppedBecause !== "MODEL_FAILURE") {
-    synthesis = await synthesizeAnswer({ provider: options.provider, question: currentRun()?.userQuestion ?? objective, context: finalContext });
-    if (synthesis !== undefined) answer = renderAnswerSynthesis(synthesis);
+    synthesis = await synthesizeAnswer({
+      provider: options.provider,
+      question: currentRun()?.userQuestion ?? objective,
+      context: finalContext,
+      // RESEARCH-CONTRACT STATE (decision-quality contract): the model synthesizes, the engine
+      // states what was actually covered and retrieved, so a draft cannot claim counterevidence
+      // that was never searched for, a comparison period that was never retrieved, or earnings
+      // facts with no earnings evidence.
+      contract: {
+        ledger: requirements.map((r) => ({
+          description: r.description,
+          importance: r.importance,
+          status: r.status,
+          timeSensitivity: r.timeSensitivity,
+        })),
+        evidenceText: collected
+          .map((e) => `${e.observation} ${e.subject ?? ""}`)
+          .join(" ")
+          .slice(0, 40000),
+        executedCapabilities: [...new Set(allExecutions.map((e) => e.capability))],
+      },
+    });
+    if (synthesis !== undefined) {
+      answer = renderAnswerSynthesis(synthesis, {
+        disconfirmationAttempted: allExecutions.some((e) => e.capability === "FALSIFICATION"),
+      });
+    }
   }
   return {
     research: mustResearch(workspace, researchRef),
@@ -728,6 +758,7 @@ export async function runAdaptiveResearch(
     requirements,
     ...(floorCapabilities.length > 0 ? { floorCapabilities } : {}),
     recoveryRounds: recoveryRoundsUsed,
+    ...(synthesis?.contractViolations !== undefined ? { contractViolations: synthesis.contractViolations } : {}),
   };
 }
 
