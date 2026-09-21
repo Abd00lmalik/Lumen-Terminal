@@ -138,6 +138,34 @@ describe("engine-owned capability floor", () => {
     expect(outcome.floorCapabilities).toContain("FALSIFICATION");
   });
 
+  it("never schedules a subject-scoped capability for a question that earned no subject", async () => {
+    // Observed live on the macro-regime question: the floor dispatched EQUITY_MARKET_DATA and
+    // EARNINGS_CALENDAR, which cannot run without a symbol and came back SCHEMA_ERROR — a
+    // wasted round recorded as a capability failure.
+    const executed: string[] = [];
+    const registry = new CapabilityRegistry();
+    registry.register(capturing("MACRO_ANALYSIS", ["VIX is 14.81; the 10-year Treasury yield is 4.998 percent; the dollar index is 100.215."], executed));
+    registry.register(capturing("EQUITY_MARKET_DATA", ["ignored"], executed));
+    registry.register(capturing("EARNINGS_CALENDAR", ["ignored"], executed));
+
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", plan(REQUIREMENTS, [])],
+      ["research.adaptive_decision", responses.adaptiveDecision("COMPLETE")],
+      ["research.answer_synthesis", SYNTHESIS],
+    ]));
+    const ws = new Workspace();
+    const research = ws.addResearch({ objective: QUESTION, question: QUESTION, flow: "WHY_IT_HAPPENED" }, origin);
+    ws.transitionResearch(research.id, "ACTIVE", origin, "activated");
+    // NOTE: no capabilityParams — the question earned no asset (subjectless dispatch).
+    const outcome = await runAdaptiveResearch(QUESTION, research.id, {
+      provider, registry, workspace: ws, store: new MemoryStore(), maxRounds: 1,
+    });
+
+    expect(outcome.floorCapabilities).toContain("MACRO_ANALYSIS");
+    expect(executed).not.toContain("EQUITY_MARKET_DATA");
+    expect(executed).not.toContain("EARNINGS_CALENDAR");
+  });
+
   it("does not duplicate a capability the plan already requested", async () => {
     const executed: string[] = [];
     const registry = new CapabilityRegistry();

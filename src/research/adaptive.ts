@@ -32,6 +32,7 @@ import {
   buildRequirements,
   coverageVerdict,
   mandatoryCapabilities,
+  SUBJECT_REQUIRED_CAPABILITIES,
   exhaustUnresolved,
   concernsSubject,
   recoveryCapabilities,
@@ -265,6 +266,14 @@ export async function runAdaptiveResearch(
   let recoveryRoundCapabilities: readonly string[] | undefined;
   /** Capabilities the engine's floor added to round 1 beyond the model's plan (diagnostic). */
   let floorCapabilities: readonly string[] = [];
+  /**
+   * Can this capability actually run for THIS question? Registered providers AND, for
+   * symbol-scoped capabilities, a subject the question earned — otherwise the engine would
+   * schedule a guaranteed SCHEMA_ERROR (observed live on the macro-regime question).
+   */
+  const capabilityUsable = (cap: string): boolean =>
+    options.registry.resolve(cap as Parameters<typeof options.registry.resolve>[0]).length > 0 &&
+    (resolvedAsset !== undefined || !SUBJECT_REQUIRED_CAPABILITIES.includes(cap));
   let recoveryRoundsUsed = 0;
   const MAX_RECOVERY_ROUNDS = options.maxRecoveryRounds ?? 2;
 
@@ -284,10 +293,7 @@ export async function runAdaptiveResearch(
     if (round === 1) {
       const planned = new Set(roundTasks.flatMap((t) => [...t.capabilities]));
       const floor: string[] = [
-        ...mandatoryCapabilities(requirements, {
-          isAvailable: (cap) => options.registry.resolve(cap as Parameters<typeof options.registry.resolve>[0]).length > 0,
-          exclude: [...planned],
-        }),
+        ...mandatoryCapabilities(requirements, { isAvailable: capabilityUsable, exclude: [...planned] }),
       ];
       // COUNTEREVIDENCE FLOOR (coverage contract): an analytic question must ATTEMPT
       // disconfirmation, not only confirmation. One bounded call, made whenever the engine has
@@ -298,7 +304,7 @@ export async function runAdaptiveResearch(
         !planned.has(falsification) &&
         floor.length < 4 &&
         requirements.some((r) => r.importance === "CRITICAL") &&
-        options.registry.resolve(falsification as Parameters<typeof options.registry.resolve>[0]).length > 0
+        capabilityUsable(falsification)
       ) {
         floor.push(falsification);
       }
@@ -467,9 +473,9 @@ export async function runAdaptiveResearch(
         break;
       }
       const recoveryCaps = recoveryCapabilities(verdict.blocking, {
-        // Availability comes from the registry (does any provider serve this capability), so
-        // recovery never schedules a capability the deployment cannot execute.
-        isAvailable: (cap) => options.registry.resolve(cap as Parameters<typeof options.registry.resolve>[0]).length > 0,
+        // Availability is the same predicate as the floor: a registered provider AND, for
+        // symbol-scoped capabilities, a subject the question earned.
+        isAvailable: capabilityUsable,
         // Recovery must try NEW paths: a capability that already ran this round cannot
         // satisfy a gap it just failed (re-running it only duplicates evidence).
         exclude: allExecutions.map((e) => e.capability),
@@ -502,7 +508,7 @@ export async function runAdaptiveResearch(
       const recoveryCaps =
         verdict.blocking.length > 0
           ? recoveryCapabilities(verdict.blocking, {
-              isAvailable: (cap) => options.registry.resolve(cap as Parameters<typeof options.registry.resolve>[0]).length > 0,
+              isAvailable: capabilityUsable,
               exclude: allExecutions.map((e) => e.capability),
             })
           : [];

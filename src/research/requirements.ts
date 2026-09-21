@@ -518,6 +518,19 @@ export function recoveryCapabilities(
 }
 
 /**
+ * Capabilities that CANNOT run without a resolved subject/instrument: they are symbol-scoped,
+ * so dispatching one for a subjectless question ("what macro conditions favor risk assets right
+ * now") spends a round on a guaranteed SCHEMA_ERROR — observed live: the floor's
+ * EQUITY_MARKET_DATA and EARNINGS_CALENDAR calls for a macro-regime question both came back
+ * unusable. The floor and recovery skip them when the question earned no asset.
+ */
+export const SUBJECT_REQUIRED_CAPABILITIES: readonly string[] = [
+  "MARKET_DATA_ANALYSIS", "TECHNICAL_ANALYSIS", "EQUITY_MARKET_DATA", "EQUITY_FUNDAMENTALS",
+  "EARNINGS_CALENDAR", "OPTIONS_CHAIN_ANALYSIS", "EQUITY_NEWS", "DERIVATIVES_ANALYSIS",
+  "ONCHAIN_ANALYSIS", "DEFI_ANALYSIS",
+];
+
+/**
  * CAPABILITY FLOOR (research contract): the capabilities a question's CRITICAL requirements
  * make MANDATORY, independent of what the model planned. The model may propose capabilities,
  * but it cannot omit one an engine-derived requirement depends on — the live failure this
