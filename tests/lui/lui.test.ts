@@ -292,6 +292,50 @@ describe("six LUI actions (locked set)", () => {
     expect(seenParams.every((p) => p["asset"] === "BTC")).toBe(true);
   });
 
+  it("target law: a plan-supplied symbol the question never names is replaced by the canonical instrument", async () => {
+    // LIVE FAILURE: "what happened to the dollar this week" dispatched the plan's asset "USD".
+    // Yahoo Finance serves USD as ProShares Ultra Semiconductors, so the run gathered leveraged
+    // semiconductor ETF candles as dollar evidence. The question names the dollar index, so only
+    // that canonical instrument may reach a symbol-scoped capability.
+    const seenParams: Record<string, unknown>[] = [];
+    const registry = new CapabilityRegistry();
+    registry.register({
+      providerId: "fake/capturing",
+      capabilities: ["NEWS_ANALYSIS"],
+      limitations: ["fake"],
+      freshnessProfile: "test:live",
+      async execute(cap, params) {
+        seenParams.push(params);
+        return {
+          tool: "fake/capturing",
+          capability: cap,
+          transport: "fake",
+          outputs: [{ outputClass: "QUANTITATIVE_OBSERVATION", content: "The dollar index (DX-Y.NYB) firmed 0.57 percent this week to 100.215." }],
+        };
+      },
+    });
+    const question = "What happened to the dollar this week?";
+    const plan = JSON.stringify({
+      objective: question, scopeIncluded: [], scopeExcluded: [],
+      tasks: [{ type: "FACT_FINDING", objective: "dollar index weekly move and drivers", capabilities: ["NEWS_ANALYSIS"], completion: "c" }],
+      requirements: [{ description: "current dollar index level and weekly change", importance: "CRITICAL", timeSensitivity: "CURRENT" }],
+      completionCriteria: [], adaptationPolicy: "a",
+    });
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", plan],
+      ["research.adaptive_decision", responses.adaptiveDecision("COMPLETE")],
+    ]));
+    scriptDefaults(provider, [{ action: "RESEARCH", description: "research the dollar", capabilities: ["NEWS_ANALYSIS"], params: { asset: "USD" } }], {
+      target: { asset: "USD", flow: "WHAT_HAPPENED", researchRef: "", objectRefs: [], unresolved: [] },
+      request: { objective: question, primaryAction: "RESEARCH" },
+    });
+    await buildLui(provider, registry).lui.handle(question);
+
+    expect(seenParams.length).toBeGreaterThan(0);
+    expect(seenParams.every((p) => p["asset"] !== "USD")).toBe(true);
+    expect(seenParams.every((p) => p["asset"] === "DX-Y.NYB")).toBe(true);
+  });
+
   it("ANALYZE interprets existing research with citations validated against the workspace", async () => {
     const provider = new FakeModelProvider(new Map([
       ["analysis.model_analysis", JSON.stringify({

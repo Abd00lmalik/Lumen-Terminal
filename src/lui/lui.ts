@@ -581,11 +581,11 @@ export class Lui {
     // instrument resolution of the objective text) is question-earned.
     const inherited = result.target.asset;
     const inheritedEarned = inherited !== undefined && (referencesTraderMaterial || assetIsNamedByQuestion(this.currentMessage ?? objective, objective, inherited));
-    const asset = step.params["asset"]
-      ?? (inheritedEarned ? inherited : undefined)
-      ?? resolveInstrument(objective)?.symbol
-      ?? objectiveTicker
-      ?? (referencesTraderMaterial ? this.options.workspace.activeTheses()[0]?.scope.entities[0] : undefined);
+    const asset = earnedCapabilityAsset(
+      this.currentMessage,
+      objective,
+      step.params["asset"] ?? (inheritedEarned ? inherited : undefined) ?? objectiveTicker,
+    ) ?? (referencesTraderMaterial ? this.options.workspace.activeTheses()[0]?.scope.entities[0] : undefined);
     const constraints = step.params["constraints"] !== undefined ? step.params["constraints"].split(";").map((s) => s.trim()).filter((s) => s !== "") : undefined;
     const now = this.options.now;
     if (flow === "WHY_IT_HAPPENED") {
@@ -684,7 +684,7 @@ export class Lui {
   private async dispatchFlow7(step: ActionPlan["steps"][number], result: LuiResult, origin: ProvenanceOrigin, onProgress?: ProgressListener, deadlineMs?: number): Promise<void> {
     const { runFlow7 } = await import("../research/flow7.js");
     const objective = step.params["objective"] ?? step.description;
-    const asset = step.params["asset"];
+    const asset = earnedCapabilityAsset(this.currentMessage, objective, step.params["asset"]);
     const now = this.options.now;
     const flow7 = await runFlow7(objective, {
       provider: this.options.provider,
@@ -724,6 +724,7 @@ export class Lui {
       (referencesTraderMaterialResearch || assetIsNamedByQuestion(this.currentMessage ?? objective, objective, resolvedAsset))
         ? resolvedAsset
         : undefined;
+    const capabilityAsset = earnedCapabilityAsset(this.currentMessage, objective, step.params["asset"] ?? earnedResolvedAsset);
     const research = workspace.addResearch(
       { objective, question: objective, flow: step.params["flow"] ?? "WHAT_DOES_ALL_INFORMATION_SAY" },
       origin,
@@ -743,14 +744,11 @@ export class Lui {
           // instrument (oil -> CL=F), or an exact ticker in the objective must reach
           // capability params even when the plan step omitted the asset; symbol-scoped
           // adapters SCHEMA_ERROR otherwise, and the chain would fall through to
-          // domain-wrong fallbacks. TARGET LAW: a resolvedAsset that the question text does
-          // not name is dropped here too (the workspace-inheritance path) so crypto
-          // capabilities are never routed for a macro question. Priority: explicit step
-          // asset > LUI-resolved target (only when question-earned) > canonical instrument >
-          // ticker-shaped token.
-          ...((step.params["asset"] ?? earnedResolvedAsset ?? resolveInstrument(step.params["objective"] ?? step.description)?.symbol ?? /\b[A-Z][A-Z0-9]{1,5}\b/.exec(step.params["objective"] ?? step.description)?.[0]) !== undefined
-            ? { asset: (step.params["asset"] ?? earnedResolvedAsset ?? resolveInstrument(step.params["objective"] ?? step.description)?.symbol ?? /\b[A-Z][A-Z0-9]{1,5}\b/.exec(step.params["objective"] ?? step.description)?.[0]) as string }
-            : {}),
+          // domain-wrong fallbacks. TARGET LAW: the asset must be EARNED by the question text
+          // — both a workspace-inherited target AND a plan-supplied symbol (live: asset "USD"
+          // for a dollar question resolved to a leveraged semiconductor ETF) are dropped or
+          // replaced by the canonical instrument the question actually names.
+          ...(capabilityAsset !== undefined ? { asset: capabilityAsset } : {}),
           // G2 DISCOVER falls back to the question text when a task carries no query:
           // the objective still bounds the investigation; never a hard schema failure.
           question: step.params["question"] ?? objective,
@@ -1381,6 +1379,31 @@ function assetIsNamedByQuestion(message: string, objective: string, asset: strin
   const instrument = resolveInstrument(message);
   if (instrument !== undefined && (instrument.symbol === asset.toUpperCase() || instrument.subjectTerms.includes(asset.toUpperCase()))) return true;
   return false;
+}
+
+/**
+ * TARGET LAW at the capability boundary: the asset a capability is dispatched with must be
+ * earned by the question text. A plan/model-supplied asset the question never names cannot
+ * route capabilities — live failure: "what happened to the dollar this week" dispatched the
+ * plan's asset "USD", which Yahoo Finance serves as ProShares Ultra Semiconductors, so a
+ * dollar run gathered leveraged-semiconductor ETF candles as dollar evidence. When the
+ * question names a canonical instrument (dollar -> DX-Y.NYB) that instrument is dispatched
+ * instead; when it names no instrument, no asset is sent at all.
+ */
+function earnedCapabilityAsset(
+  message: string | undefined,
+  objective: string,
+  candidate: string | undefined,
+): string | undefined {
+  const named = candidate?.trim();
+  if (named !== undefined && named !== "" && assetIsNamedByQuestion(message ?? objective, objective, named)) {
+    return resolveInstrument(named)?.symbol ?? named;
+  }
+  const canonical = resolveInstrument(objective) ?? (message !== undefined ? resolveInstrument(message) : undefined);
+  if (canonical !== undefined) return canonical.symbol;
+  // Last resort (unchanged behavior): an exact ticker-shaped token in the objective is named by
+  // the question's own step text.
+  return /\b[A-Z][A-Z0-9]{1,5}\b/.exec(objective)?.[0];
 }
 
 function summarize(text: string, max = 160): string {
