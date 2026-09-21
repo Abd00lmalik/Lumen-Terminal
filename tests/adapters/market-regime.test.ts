@@ -42,13 +42,14 @@ function fakeRest(responses: Record<string, string | number>): RestTransport {
 
 describe("market-regime observables", () => {
   it("serves the canonical regime basket as quantitative observations with provenance", async () => {
-    const rest = fakeRest({
-      "^TNX": chartBody("^TNX", 4.21, 4.18),
-      "^IRX": chartBody("^IRX", 3.9, 3.88),
-      "^VIX": chartBody("^VIX", 18.4, 17.9),
-      "DX-Y.NYB": chartBody("DX-Y.NYB", 101.2, 101.6),
-      "^GSPC": chartBody("^GSPC", 5600, 5580),
-    });
+    // Derived from the canonical table: the fixture serves whatever the basket declares, so
+    // widening the family cannot silently turn this law into a PARTIAL pass.
+    const prices: Record<string, number> = { "^TNX": 4.21, "^FVX": 3.98, "^IRX": 3.9, "^VIX": 18.4, "DX-Y.NYB": 101.2, "^GSPC": 5600, "^IXIC": 17800, "GC=F": 2450, "CL=F": 78.5 };
+    const rest = fakeRest(
+      Object.fromEntries(
+        REGIME_OBSERVABLES.map((o) => [o.symbol, chartBody(o.symbol, prices[o.symbol] ?? 100, (prices[o.symbol] ?? 100) * 0.995)]),
+      ),
+    );
     const adapter = new MarketRegimeAdapter(rest);
     const result = await adapter.execute("MACRO_ANALYSIS", {});
     expect(result.failure?.type).toBe("NONE");
@@ -61,6 +62,15 @@ describe("market-regime observables", () => {
       expect(typeof content.value).toBe("number");
       expect(content.upstreamSource).toBe("yahoo-finance");
       expect(content.asOf).toBeDefined();
+    }
+  });
+
+  it("family breadth: the canonical basket carries the macro dimensions any regime requirement can need", () => {
+    const symbols = REGIME_OBSERVABLES.map((o) => o.symbol);
+    // yields (long + mid + front), volatility, USD, equity breadth, and the energy/precious
+    // inflation channels — the market-implied half of a macro regime, from one keyless provider.
+    for (const symbol of ["^TNX", "^FVX", "^IRX", "^VIX", "DX-Y.NYB", "^GSPC", "^IXIC", "CL=F", "GC=F"]) {
+      expect(symbols).toContain(symbol);
     }
   });
 

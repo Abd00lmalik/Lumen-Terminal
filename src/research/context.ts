@@ -17,7 +17,7 @@
 import type { Evidence, EvidenceClass, Freshness, Claim, Hypothesis } from "../domain/objects.js";
 import type { Workspace } from "../domain/workspace.js";
 import type { ToolResult } from "../domain/tool-result.js";
-import { matchRequirement, domainsOfRequirement, isDiscriminatingRequirement, type CoverageEvidence, type EvidenceDomain, type ResearchRequirement } from "./requirements.js";
+import { matchRequirement, domainsOfRequirement, isDiscriminatingRequirement, concernsSubject, type CoverageEvidence, type EvidenceDomain, type ResearchRequirement } from "./requirements.js";
 
 /** One context item; every item keeps its architecture object type and epistemic class. */
 export interface ContextItem {
@@ -149,19 +149,13 @@ function isRelevant(itemText: string, terms: Set<string>): boolean {
  */
 function isSubjectRelevant(itemText: string, subjectTerms: Set<string>): boolean {
   if (isRelevant(itemText, subjectTerms)) return true;
-  const upper = itemText.toUpperCase();
-  const itemTokens = new Set(upper.split(/[^A-Z0-9]+/).filter((t) => t !== ""));
-  for (const term of subjectTerms) {
-    for (const suffix of QUOTE_SUFFIXES) {
-      if (itemTokens.has(`${term}${suffix}`)) return true;
-    }
-    if (new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(upper)) return true;
-  }
-  return false;
+  // ONE LAW, ONE IMPLEMENTATION: the ingestion gate (requirements.concernsSubject) and this
+  // synthesis-context gate must agree, or evidence is accepted at ingestion and then silently
+  // dropped from synthesis (live: a canonical instrument like ^TNX tokenizes to TNX, so the
+  // two copies disagreed and a rates run ended with zero context despite satisfied
+  // requirements). Canonical instrument forms are handled by the shared predicate.
+  return concernsSubject(itemText, subjectTerms);
 }
-
-/** Quote-asset suffixes that glue a ticker into a market symbol (BTCUSDT, EURUSD...). */
-const QUOTE_SUFFIXES = ["USDT", "USD", "USDC", "PERP"] as const;
 
 /** Map an evidence object to its context item kind; the epistemic boundary, mechanically. */
 export function contextKindForEvidence(e: Evidence): ContextItem["kind"] {

@@ -61,6 +61,25 @@ const CURRENT_MAX_AGE_DAYS = 21;
 /** A RECENT requirement tolerates this much age. */
 const RECENT_MAX_AGE_DAYS = 120;
 
+/**
+ * TEMPORAL LAW (research mandate Part 4): when a requirement names an explicit recency
+ * window, EVENT-DATED coverage (headlines/news) must fall inside it. A headline from three
+ * weeks ago does not answer a "this week" catalyst requirement, however valid it is as
+ * background. Market quotes keep the data-freshness window instead: a quote carries its own
+ * timestamp, and a yield level is a state, not an event-dated development.
+ */
+const EXPLICIT_WINDOWS: readonly { readonly pattern: RegExp; readonly days: number }[] = [
+  { pattern: /\b(today|right now|currently|intraday|tonight|at the moment)\b/i, days: 3 },
+  { pattern: /\b(this week|this week's|week to date|this-week|weekly)\b/i, days: 7 },
+  { pattern: /\b(this month|month to date|monthly)\b/i, days: 31 },
+];
+
+/** Days named by a requirement's own recency phrasing, when it names one. */
+export function explicitWindowDays(description: string): number | undefined {
+  for (const window of EXPLICIT_WINDOWS) if (window.pattern.test(description)) return window.days;
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Domain vocabulary: requirement text -> evidence domains, evidence type -> domain.
 // Domain vocabulary, not question routing: it maps INFORMATION KINDS to each other.
@@ -279,13 +298,25 @@ export function concernsSubject(text: string, subjectTerms: ReadonlySet<string>)
   for (const term of subjectTerms) {
     if (tokens.has(term)) return true;
     for (const suffix of ["USDT", "USD", "USDC", "PERP"]) if (tokens.has(`${term}${suffix}`)) return true;
+    // INSTRUMENT-SHAPED TERMS (^TNX, CL=F, DX-Y.NYB, EURUSD=X): the tokenizer above strips
+    // punctuation, so a resolved canonical instrument could NEVER match provider text and its
+    // evidence was rejected at ingestion (a rates question resolved to ^TNX lost every yield
+    // observation). Compare the punctuation-free form, and the term's own token parts (all of
+    // them, at least one substantive), so the canonical forms of an instrument count as the
+    // same subject as the text providers write.
+    if (/[^A-Z0-9]/.test(term)) {
+      const squashed = term.replace(/[^A-Z0-9]+/g, "");
+      if (tokens.has(squashed)) return true;
+      const parts = term.split(/[^A-Z0-9]+/).filter((p) => p !== "");
+      if (parts.some((p) => p.length >= 2) && parts.every((p) => tokens.has(p))) return true;
+    }
     if (new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(upper)) return true;
   }
   return false;
 }
 
 /** Is the observation fresh enough for this requirement's time sensitivity? */
-export function freshnessSufficient(req: Pick<ResearchRequirement, "timeSensitivity">, item: CoverageEvidence, now: Date): boolean {
+export function freshnessSufficient(req: Pick<ResearchRequirement, "timeSensitivity" | "description">, item: CoverageEvidence, now: Date): boolean {
   if (req.timeSensitivity === "ANY") return true;
   const tag = (item.freshness ?? "").toUpperCase();
   if (req.timeSensitivity === "HISTORICAL") {
@@ -301,7 +332,9 @@ export function freshnessSufficient(req: Pick<ResearchRequirement, "timeSensitiv
     const observed = Date.parse(item.observedAt);
     if (!Number.isNaN(observed)) {
       const ageDays = (now.getTime() - observed) / DAY_MS;
-      const limit = req.timeSensitivity === "CURRENT" ? CURRENT_MAX_AGE_DAYS : RECENT_MAX_AGE_DAYS;
+      const base = req.timeSensitivity === "CURRENT" ? CURRENT_MAX_AGE_DAYS : RECENT_MAX_AGE_DAYS;
+      const explicit = explicitWindowDays(req.description);
+      const limit = explicit !== undefined && domainOfEvidenceType(item.evidenceType) === "NEWS" ? Math.min(base, explicit) : base;
       if (ageDays > limit) return false;
     }
   }

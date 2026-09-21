@@ -15,6 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { resolveInstrument, subjectTermsOf } from "../../src/domain/instruments.js";
+import { concernsSubject } from "../../src/research/requirements.js";
 import { Workspace } from "../../src/domain/workspace.js";
 import { buildResearchContext } from "../../src/research/context.js";
 import { runAdaptiveResearch } from "../../src/research/adaptive.js";
@@ -128,6 +129,35 @@ describe("subject gate (target-relevance law)", () => {
     });
     expect(ctx.items.map((i) => i.ref)).not.toContain(oilId);
     expect(ctx.rejectedWrongTarget).toBe(1);
+  });
+});
+
+describe("canonical-instrument gate law (one predicate, both gates)", () => {
+  it("a caret, futures, or FX instrument form matches provider text at ingestion", () => {
+    // The text tokenizer strips punctuation, so the canonical instrument form must be compared
+    // punctuation-free: otherwise a resolved instrument (^TNX) rejects the very evidence that
+    // reports it, and a rates question loses every yield observation.
+    expect(concernsSubject("^TNX 10-year Treasury yield stands at 4.998 percent.", new Set(["^TNX"]))).toBe(true);
+    expect(concernsSubject("CL=F crude oil trades at 96.08, down 3.97 percent.", new Set(["CL=F"]))).toBe(true);
+    expect(concernsSubject("DX-Y.NYB dollar index trades at 100.215.", new Set(["DX-Y.NYB"]))).toBe(true);
+    expect(concernsSubject("EURUSD=X trades at 1.0842.", new Set(["EURUSD=X"]))).toBe(true);
+    // ...and the gate still rejects a different subject.
+    expect(concernsSubject("Bitcoin trades at 80,750 USD.", new Set(["^TNX"]))).toBe(false);
+  });
+
+  it("the ingestion gate and the synthesis-context gate agree (evidence is never silently dropped)", () => {
+    // Live failure class: a rates run collected ^TNX observations that passed ingestion and
+    // then vanished from synthesis — satisfied requirements, empty context, hollow completion.
+    const question = "What is driving Treasury yields higher?";
+    const terms = [...new Set(["^TNX", ...(subjectTermsOf(question) ?? [])])].map((t) => t.toUpperCase());
+    const ws = new Workspace();
+    const research = ws.addResearch({ objective: question, question, flow: "WHY_IT_HAPPENED" }, origin);
+    ws.transitionResearch(research.id, "ACTIVE", origin, "activated");
+    const yieldId = ingest(ws, research.id, "^TNX 10-year Treasury yield stands at 4.998 percent, up 0.75 percent on the day.");
+
+    expect(concernsSubject("^TNX 10-year Treasury yield stands at 4.998 percent.", new Set(terms))).toBe(true);
+    const ctx = buildResearchContext(ws, { researchRef: research.id, relevantTo: question, subjectTerms: terms });
+    expect(ctx.items.map((i) => i.ref)).toContain(yieldId);
   });
 });
 

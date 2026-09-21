@@ -1,6 +1,12 @@
 /**
  * Current market-regime observables: a REUSABLE capability provider.
  *
+ * Family breadth (research mandate Part 5): the basket carries the market-implied macro
+ * dimensions ANY regime/inflation-pressure requirement can need — long-curve and mid-curve
+ * yields, front-end rate proxy, volatility, USD, broad equity, growth leadership (Nasdaq),
+ * and the two inflation-channel commodities (gold, crude). Everything here is a keyless
+ * delayed quote from one provider; nothing is derived, interpolated, or fabricated.
+ *
  * Why it exists (live failure): a CURRENT macro question ("what macro conditions favor risk
  * assets right now") was answered with annual World Bank CPI/GDP while yields, volatility,
  * and the dollar were reported unavailable. Annual statistical releases are valid observations
@@ -45,10 +51,14 @@ interface ChartQuoteResponse {
 /** Canonical regime instruments: the market-implied macro observables any MACRO requirement can use. */
 export const REGIME_OBSERVABLES: readonly { readonly symbol: string; readonly label: string; readonly measures: string }[] = [
   { symbol: "^TNX", label: "10-year Treasury yield", measures: "long-term risk-free rate, growth/inflation expectations" },
+  { symbol: "^FVX", label: "5-year Treasury yield", measures: "mid-curve risk-free rate, policy-rate expectations" },
   { symbol: "^IRX", label: "13-week Treasury bill yield", measures: "front-end policy-rate proxy" },
   { symbol: "^VIX", label: "CBOE volatility index", measures: "equity risk appetite / implied volatility" },
   { symbol: "DX-Y.NYB", label: "US dollar index", measures: "USD strength (global liquidity/risk channel)" },
   { symbol: "^GSPC", label: "S&P 500 index", measures: "broad equity risk-asset level" },
+  { symbol: "^IXIC", label: "Nasdaq Composite index", measures: "growth/technology equity leadership, risk appetite" },
+  { symbol: "GC=F", label: "Gold futures", measures: "safe-haven demand, real-rate/inflation hedging" },
+  { symbol: "CL=F", label: "WTI crude oil futures", measures: "energy/inflation pressure, supply-demand balance" },
 ];
 
 export class MarketRegimeAdapter implements ProviderAdapter {

@@ -45,6 +45,7 @@ interface Scenario {
     readonly forbiddenEvidenceDomains?: readonly string[];
     readonly forbiddenInContext?: readonly string[];
     readonly mustNotSatisfy?: string;
+    readonly mustSatisfy?: string;
     readonly completion: "EVIDENCE_SUFFICIENT" | "REQUIREMENT_GAPS_UNRESOLVED";
   };
 }
@@ -248,6 +249,138 @@ const SCENARIOS: readonly Scenario[] = [
       completion: "REQUIREMENT_GAPS_UNRESOLVED",
     },
   },
+  // ---------------------------------------------------------------------------------------
+  // UNSEEN CATEGORIES (mandate Part 12): these categories carry no handler anywhere in the
+  // engine — the requirement vocabulary, registry dispatch, ingestion gate, and completion
+  // gate are generic. A category-specific branch would show up here as a failure.
+  // ---------------------------------------------------------------------------------------
+  {
+    name: "unseen commodity: copper",
+    question: "What is moving copper prices?",
+    plan: planWithRequirements("What is moving copper prices?", [
+      { description: "current copper price action", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+      { description: "copper supply and demand developments", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+    ], ["MARKET_DATA_ANALYSIS", "NEWS_ANALYSIS"]),
+    providers: new Map([
+      ["MARKET_DATA_ANALYSIS", [{ content: "HG=F copper trades at 4.52, up 1.8 percent on the session.", about: "HG=F" }]],
+      ["NEWS_ANALYSIS", [
+        { content: "Copper supply tightened as smelter outages cut refined output while grid-investment demand strengthened.", about: "HG=F" },
+        { content: "Bitcoin ETF inflows resumed as crypto sentiment improved.", about: "BTC" },
+      ]],
+    ]),
+    capabilityParams: { asset: "HG=F" },
+    expected: {
+      assetInParams: "HG=F",
+      forbiddenInContext: ["Bitcoin"],
+      completion: "EVIDENCE_SUFFICIENT",
+    },
+  },
+  {
+    name: "unseen FX: EUR/USD",
+    question: "What is affecting EUR/USD?",
+    plan: planWithRequirements("What is affecting EUR/USD?", [
+      { description: "current EUR/USD price action", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+      { description: "EUR/USD rate differential and central bank drivers", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+    ], ["MARKET_DATA_ANALYSIS", "MACRO_ANALYSIS"]),
+    providers: new Map([
+      ["MARKET_DATA_ANALYSIS", [{ content: "EURUSD=X trades at 1.0842, down 0.4 percent on the session.", about: "EURUSD=X" }]],
+      ["MACRO_ANALYSIS", [{ content: "EUR/USD rate differential: the 10-year Treasury yield is 4.998 percent while German yields lag, pressuring the euro.", about: "EURUSD=X" }]],
+    ]),
+    capabilityParams: { asset: "EURUSD=X" },
+    expected: {
+      assetInParams: "EURUSD=X",
+      completion: "EVIDENCE_SUFFICIENT",
+    },
+  },
+  {
+    name: "unseen safe haven: gold this week",
+    question: "What could affect gold this week?",
+    plan: planWithRequirements("What could affect gold this week?", [
+      { description: "current gold price action", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+      { description: "gold safe-haven and real-rate drivers this week", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+    ], ["MARKET_DATA_ANALYSIS", "MACRO_ANALYSIS"]),
+    providers: new Map([
+      ["MARKET_DATA_ANALYSIS", [{ content: "GC=F gold futures trade at 2,450, up 0.7 percent this week.", about: "GC=F" }]],
+      ["MACRO_ANALYSIS", [{ content: "Gold real-rate channel: the 10-year Treasury yields eased to 4.21 percent and the dollar index softened to 100.2 this week.", about: "GC=F" }]],
+    ]),
+    capabilityParams: { asset: "GC=F" },
+    expected: {
+      assetInParams: "GC=F",
+      completion: "EVIDENCE_SUFFICIENT",
+    },
+  },
+  {
+    name: "unseen rates question: what is driving yields higher",
+    question: "What is driving Treasury yields higher?",
+    plan: planWithRequirements("What is driving Treasury yields higher?", [
+      { description: "current Treasury yields levels and recent change", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+      { description: "policy and growth drivers behind Treasury yields", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+    ], ["MARKET_DATA_ANALYSIS", "MACRO_ANALYSIS"]),
+    providers: new Map([
+      ["MARKET_DATA_ANALYSIS", [{ content: "^TNX 10-year Treasury yields stand at 4.998 percent, up 0.75 percent on the day.", about: "^TNX" }]],
+      ["MACRO_ANALYSIS", [{ content: "Treasury yields drivers: firmer growth data and inflation expectations lifted the 10-year and 5-year Treasury yields this week.", about: "^TNX" }]],
+    ]),
+    capabilityParams: { asset: "^TNX" },
+    expected: {
+      assetInParams: "^TNX",
+      completion: "EVIDENCE_SUFFICIENT",
+    },
+  },
+  {
+    name: "unseen dollar question: what happened to the dollar this week",
+    question: "What happened to the dollar this week?",
+    plan: planWithRequirements("What happened to the dollar this week?", [
+      { description: "current dollar index level and weekly change", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+      { description: "dollar-specific developments this week", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+    ], ["MARKET_DATA_ANALYSIS", "NEWS_ANALYSIS"]),
+    providers: new Map([
+      ["MARKET_DATA_ANALYSIS", [{ content: "DX-Y.NYB dollar index trades at 100.215, up 0.57 percent this week.", about: "DX-Y.NYB" }]],
+      ["NEWS_ANALYSIS", [{ content: "Dollar developments: the currency firmed after hawkish central bank commentary and a wider rate differential this week.", about: "DX-Y.NYB" }]],
+    ]),
+    capabilityParams: { asset: "DX-Y.NYB" },
+    expected: {
+      assetInParams: "DX-Y.NYB",
+      completion: "EVIDENCE_SUFFICIENT",
+    },
+  },
+  // ---------------------------------------------------------------------------------------
+  // TEMPORAL LAW (mandate Part 4): explicit recency phrasing narrows the window for
+  // event-dated coverage. Both directions are pinned — the law must reject out-of-window
+  // news AND keep accepting in-window news (a blanket-rejection bug would pass the first
+  // test alone).
+  // ---------------------------------------------------------------------------------------
+  {
+    name: "temporal law: 'this week' catalyst requirement rejects news from outside the window",
+    question: "What is driving copper prices this week?",
+    plan: planWithRequirements("What is driving copper prices this week?", [
+      { description: "copper-specific news catalysts this week", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+    ], ["NEWS_ANALYSIS"]),
+    providers: new Map([
+      ["NEWS_ANALYSIS", [{ content: "Copper markets: smelter outages tightened refined supply.", about: "HG=F" }]],
+    ]),
+    capabilityParams: { asset: "HG=F" },
+    staleDaysAgo: 10,
+    expected: {
+      mustNotSatisfy: "copper-specific news catalysts",
+      completion: "REQUIREMENT_GAPS_UNRESOLVED",
+    },
+  },
+  {
+    name: "temporal law control: the same requirement IS satisfied by in-window news",
+    question: "What is driving copper prices this week?",
+    plan: planWithRequirements("What is driving copper prices this week?", [
+      { description: "copper-specific news catalysts this week", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+    ], ["NEWS_ANALYSIS"]),
+    providers: new Map([
+      ["NEWS_ANALYSIS", [{ content: "Copper markets: smelter outages tightened refined supply.", about: "HG=F" }]],
+    ]),
+    capabilityParams: { asset: "HG=F" },
+    staleDaysAgo: 1,
+    expected: {
+      mustSatisfy: "copper-specific news catalysts",
+      completion: "EVIDENCE_SUFFICIENT",
+    },
+  },
 ];
 
 async function runScenario(scenario: Scenario): Promise<AdaptiveLoopOutcome> {
@@ -386,6 +519,11 @@ describe("research process benchmark (scores process, not word matching)", () =>
         expect(req).toBeDefined();
         expect(req!.status === "SATISFIED").toBe(false);
       }
+      if (scenario.expected.mustSatisfy !== undefined) {
+        const req = outcome.requirements.find((r) => r.description.includes(scenario.expected.mustSatisfy!));
+        expect(req).toBeDefined();
+        expect(req!.status).toBe("SATISFIED");
+      }
 
       // COMPLETION: engine-owned verdict.
       expect(outcome.stoppedBecause).toBe(scenario.expected.completion);
@@ -433,5 +571,77 @@ describe("research process benchmark (scores process, not word matching)", () =>
     // insufficiency rationale names requirements (not provider diagnostics).
     expect(macroReq!.status === "SATISFIED").toBe(false);
     expect(outcome.finalDecision.rationale).toMatch(/regime|requirement|evidence/i);
+  });
+
+  it("sequential runs in one workspace: a macro run never inherits the previous runs' evidence (mandate Part 3)", async () => {
+    // NVDA run -> oil run -> macro run, all in ONE workspace. The macro run's evidence and
+    // synthesis context must be scoped to its own question: previous research stays in HISTORY
+    // and never becomes the active evidence set for a new question.
+    const modelFor = (plan: string): FakeModelProvider =>
+      new FakeModelProvider(new Map([
+        ["research.plan", plan],
+        ["research.adaptive_decision", responses.adaptiveDecision("COMPLETE")],
+        ["research.answer_synthesis", JSON.stringify({
+          direct: "Direct answer for the question.", why: "Because the validated evidence establishes it.",
+          support: [{ statement: "Evidence-grounded support.", refs: [] }], oppose: [],
+          factors: [{ factor: "f", mechanism: "m", direction: "neutral", refs: [] }],
+          uncertainty: "What remains unresolved is stated in the ledger.",
+        })],
+      ]));
+
+    const registry = new CapabilityRegistry();
+    registry.register(capabilityFixture("EARNINGS_CALENDAR", [
+      { content: "NVDA next earnings date is 2026-10-28; consensus EPS estimate 1.05.", about: "NVDA" },
+    ]));
+    registry.register(capabilityFixture("EQUITY_NEWS", [
+      { content: "NVDA datacenter demand catalyst strengthens the AI accelerator outlook.", about: "NVDA" },
+    ]));
+    registry.register(capabilityFixture("NEWS_ANALYSIS", [
+      { content: "OPEC+ production increase pressured crude oil prices as inventories built.", about: "CL=F" },
+    ]));
+    registry.register(capabilityFixture("MACRO_ANALYSIS", [
+      { content: "The 10-year Treasury yield is 4.998 percent, VIX is 14.81, and the dollar index is 100.215.", about: "MACRO" },
+    ]));
+
+    const ws = new Workspace();
+    const store = new MemoryStore();
+    const run = async (question: string, plan: string, params?: Record<string, unknown>): Promise<AdaptiveLoopOutcome> => {
+      const research = ws.addResearch({ objective: question, question, flow: "WHAT_DOES_ALL_INFORMATION_SAY" }, origin);
+      ws.transitionResearch(research.id, "ACTIVE", origin, "activated");
+      return runAdaptiveResearch(question, research.id, {
+        provider: modelFor(plan), registry, workspace: ws, store, maxRounds: 1,
+        ...(params !== undefined ? { capabilityParams: params } : {}),
+      });
+    };
+
+    const nvdaQuestion = "What could affect NVDA around its next earnings?";
+    const oilQuestion = "What is driving oil prices this week?";
+    const outcomeA = await run(
+      nvdaQuestion,
+      planWithRequirements(nvdaQuestion, [
+        { description: "upcoming NVDA earnings date and consensus estimates", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+      ], ["EARNINGS_CALENDAR"]),
+      { asset: "NVDA" },
+    );
+    const outcomeB = await run(
+      oilQuestion,
+      planWithRequirements(oilQuestion, [
+        { description: "oil supply and demand developments", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+      ], ["NEWS_ANALYSIS"]),
+      { asset: "CL=F" },
+    );
+    const outcomeC = await run(MACRO_QUESTION, planWithRequirements(MACRO_QUESTION, MACRO_REQUIREMENTS, ["MACRO_ANALYSIS"]));
+
+    // The first two runs genuinely gathered their own evidence (this is not isolation-by-emptiness).
+    expect(outcomeA.evidence.length).toBeGreaterThan(0);
+    expect(outcomeB.evidence.length).toBeGreaterThan(0);
+
+    // The third run carries only its own subject. NB: the serialized objects are searched, so
+    // the check covers evidence text AND every context item the synthesis model would see.
+    const runCText = JSON.stringify({ evidence: outcomeC.evidence, context: outcomeC.context });
+    for (const leak of ["NVDA", "earnings date", "OPEC", "crude", "accelerator"]) {
+      expect(runCText).not.toContain(leak);
+    }
+    expect(runCText).toMatch(/Treasury yield|VIX|dollar/i);
   });
 });
