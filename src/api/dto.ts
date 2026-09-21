@@ -549,6 +549,8 @@ export interface AnswerDTO {
 
 export interface RequirementDiagnosticDTO {
   readonly description: string;
+  /** CORE | SUPPORTING | CHALLENGE | CONTEXT (or the role the engine inferred). */
+  readonly role?: string;
   readonly importance: string;
   readonly timeSensitivity: string;
   /** SATISFIED | PARTIALLY_SATISFIED | PENDING | EXHAUSTED | UNAVAILABLE */
@@ -585,6 +587,14 @@ export interface ResearchDiagnosticsDTO {
   readonly completionGate: string;
   /** Engine-assessed coverage: COMPLETE | PARTIAL | INSUFFICIENT. */
   readonly coverage: "COMPLETE" | "PARTIAL" | "INSUFFICIENT";
+  /** Engine-COMPUTED confidence level (the ceiling applied to any model-stated confidence). */
+  readonly confidence?: string;
+  /** Why that level: coverage, freshness, challenge and recovery components (no secrets). */
+  readonly confidenceBasis?: string;
+  /** The decision type the engine inferred from the question (research contract). */
+  readonly questionType?: string;
+  /** Requirement roles present in the ledger (CORE/SUPPORTING/CHALLENGE/CONTEXT). */
+  readonly requirementRoles?: readonly string[];
 }
 
 export interface ResearchResponseDTO {

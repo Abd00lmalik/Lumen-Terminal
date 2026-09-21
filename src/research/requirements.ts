@@ -18,16 +18,36 @@ export type TimeSensitivity = "CURRENT" | "RECENT" | "HISTORICAL" | "ANY";
 
 export type RequirementStatus = "PENDING" | "PARTIALLY_SATISFIED" | "SATISFIED" | "EXHAUSTED" | "UNAVAILABLE";
 
+/**
+ * DECISION ROLES (research contract): what a requirement is FOR. Different roles have
+ * different completion laws, so a run cannot claim success by satisfying only the easy half
+ * of the question:
+ * - CORE: must be satisfied, or explicitly named as unresolved, before completion.
+ * - SUPPORTING: improves confidence; may remain unresolved.
+ * - CHALLENGE: must be actively ATTEMPTED for a completed judgment (disconfirmation is an
+ *   engine action, not a prompt convention). Attempted-and-empty is a valid terminal state and
+ *   must be reported as such, never as "no counterevidence exists".
+ * - CONTEXT: background only; never satisfies a current question and never blocks completion.
+ */
+export type RequirementRole = "CORE" | "SUPPORTING" | "CHALLENGE" | "CONTEXT";
+
+/** An engine-required CALCULATION the question implies (mandate: calculations are engine-owned). */
+export type RequirementCalculation = "PERIOD_OVER_PERIOD" | "PERIOD_CHANGE" | "EPISODE_SIMILARITY";
+
 export interface RequirementSeed {
   readonly description: string;
   readonly importance?: "CRITICAL" | "SUPPORTING";
   readonly timeSensitivity?: TimeSensitivity;
+  readonly role?: RequirementRole;
+  /** Engine-required calculation this requirement's evidence must support. */
+  readonly calculation?: RequirementCalculation;
 }
 
 export interface ResearchRequirement {
   readonly id: string;
   readonly description: string;
   readonly importance: "CRITICAL" | "SUPPORTING";
+  readonly role: RequirementRole;
   readonly timeSensitivity: TimeSensitivity;
   readonly domains: readonly EvidenceDomain[];
   readonly status: RequirementStatus;
@@ -36,6 +56,20 @@ export interface ResearchRequirement {
   readonly missingReason?: string;
   /** Recovery rounds already spent trying to satisfy this requirement (bounded). */
   readonly recoveryAttempts: number;
+  /** Set when the engine inferred this requirement itself (the model omitted the dimension). */
+  readonly engineRequired?: boolean;
+  /** Engine-required calculation, when the question implies one. */
+  readonly calculation?: RequirementCalculation;
+  /** Requirement-scoped retrieval objective for research workers (never the whole question). */
+  readonly retrievalObjective?: string;
+  /**
+   * Declared acceptable evidence classes (data types / domains the requirement can be served
+   * by). Used ONLY by engine-inferred requirements and ONLY for subject-scoped evidence: an
+   * analytically-worded dimension ("the drivers behind X") never contains the literal words a
+   * headline uses, so class matching keeps a satisfiable engine requirement from failing for
+   * vocabulary reasons. Model-authored requirements stay strictly vocabulary-matched.
+   */
+  readonly evidenceClasses?: readonly string[];
 }
 
 /** Evidence domains; the matching vocabulary between requirements and observations. */
@@ -245,25 +279,324 @@ export function isDiscriminatingRequirement(req: Pick<ResearchRequirement, "desc
 }
 
 /**
+ * Role from the requirement's own wording plus its declared importance. Deterministic and
+ * question-agnostic: it reads the CRITERION (does it look for disconfirmation? is it
+ * background?), not the subject.
+ */
+export function roleOf(description: string, importance: "CRITICAL" | "SUPPORTING"): RequirementRole {
+  if (/\b(count(er|er-)?evidence|oppos\w*|contradict\w*|disconfirm\w*|falsif\w*|disconfirming|what (could|would) (prove|invalidate|weaken)|downside|bear\w*|risk to|challenge\w*)\b/i.test(description)) {
+    return "CHALLENGE";
+  }
+  if (importance === "SUPPORTING" && /\b(context|background|overview|structural|general|industry (context|background)|for reference)\b/i.test(description)) {
+    return "CONTEXT";
+  }
+  return importance === "CRITICAL" ? "CORE" : "SUPPORTING";
+}
+
+/** Requirement-scoped retrieval objective handed to research workers (never the whole question). */
+export function retrievalObjectiveFor(description: string, timeSensitivity: TimeSensitivity, role: RequirementRole): string {
+  const window = timeSensitivity === "CURRENT" ? "current data only" : timeSensitivity === "RECENT" ? "the recent period" : timeSensitivity === "HISTORICAL" ? "historical periods" : "the relevant period";
+  const purpose = role === "CHALLENGE" ? "Find evidence that could WEAKEN or contradict the emerging conclusion for" : "Find dated, attributable evidence for";
+  return `${purpose}: ${description} (${window}). Return sources with dates; distinguish primary evidence from secondary reporting; do not return the same syndicated article twice.`;
+}
+
+/**
  * Seeds -> requirements. When the planner supplied requirement descriptions, they are used
- * verbatim (it understands the question); the engine adds domains and the freshness policy.
+ * verbatim (it understands the question); the engine adds domains, the freshness policy, the
+ * decision role and the retrieval objective.
  */
 export function buildRequirements(seeds: readonly RequirementSeed[]): readonly ResearchRequirement[] {
   return seeds.map((seed, i) => {
     const description = seed.description.trim();
     const domains = domainsOfRequirement(description);
+    const importance = seed.importance ?? "CRITICAL";
+    const timeSensitivity = seed.timeSensitivity ?? timeSensitivityOf(description);
+    const role = seed.role ?? roleOf(description, importance);
     return {
       id: requirementId(i),
       description,
-      importance: seed.importance ?? "CRITICAL",
-      timeSensitivity: seed.timeSensitivity ?? timeSensitivityOf(description),
+      importance,
+      role,
+      timeSensitivity,
       domains: domains.length > 0 ? domains : (["GENERAL"] as const),
       status: "PENDING" as const,
       evidenceRefs: [],
       staleOnlyRefs: [],
       recoveryAttempts: 0,
+      ...(seed.calculation !== undefined ? { calculation: seed.calculation } : {}),
+      retrievalObjective: retrievalObjectiveFor(description, timeSensitivity, role),
     };
   });
+}
+
+export type QuestionType =
+  | "COMPARISON" | "CAUSAL" | "EVENT" | "MACRO_REGIME" | "THESIS" | "FALSIFICATION" | "HISTORICAL" | "SYNTHESIS";
+
+/**
+ * The question's decision type, read from its own wording. Deterministic and generic: these
+ * patterns describe QUESTION SHAPES (compare two periods, explain a move, anticipate an event,
+ * assess a regime, test a belief), never assets or topics.
+ */
+/**
+ * The market class the question is about, read from its own vocabulary (a taxonomy of MARKET
+ * CLASSES, not a list of questions). Used to decide whether a market-class-specific engine
+ * requirement (supply/demand for a commodity, a rate differential for an FX pair) applies at
+ * all. Unseen assets of a known class are handled identically to the ones the product has seen.
+ */
+export function subjectMarketClassOf(question: string): SubjectMarketClass {
+  const q = question.toLowerCase();
+  if (/\bvolatility index\b|\bvix\b/.test(q)) return "VOLATILITY";
+  if (/\byield|\btreasur|\bbond|\brates?\b|\bcurve\b|\bfed funds\b/.test(q)) return "RATES";
+  if (/\bcrypto|\bbitcoin|\bbtc\b|\bether|\beth\b|\bsolana|\bsol\b|\btoken\b|\bonchain\b/.test(q)) return "CRYPTO";
+  if (/\bgold|\bsilver|\bcopper|\bplatinum|\bpalladium|\bmetal/.test(q)) return "METAL";
+  if (/\boil\b|\bcrude|\bbrent|\bwti\b|\bgas\b|\bcommodit|\bbarrel/.test(q)) return "COMMODITY";
+  if (/\bdollar|\bdxy\b|\beur|\busd\b|\bjpy\b|\bgbp\b|\bcurrency|\bforex|\bfx\b|\bpair\b|\byen\b|\bpound\b|\beuro\b/.test(q)) return "FX";
+  if (/\bs\s*&\s*p\b|\bnasdaq|\bdow\b|\bindex|\bindices|\bequit|\bstocks?\b|\bshares\b|\bsemiconductor|\bsector/.test(q)) return "INDEX";
+  if (/\bearnings|\bcompany|\bguidance|\brevenue|\bmargins?\b/.test(q)) return "EQUITY";
+  return "UNKNOWN";
+}
+
+/** Map an instrument resolution's market kind onto the research contract's subject class. */
+export function subjectClassOfKind(kind: string | undefined): SubjectMarketClass {
+  switch (kind) {
+    case "commodity": return "COMMODITY";
+    case "metal": return "METAL";
+    case "fx": return "FX";
+    case "index": return "INDEX";
+    case "volatility": return "VOLATILITY";
+    default: return "UNKNOWN";
+  }
+}
+
+export function questionTypeOf(question: string): QuestionType {
+  const q = question.toLowerCase();
+  if (/\bprove\b.*\bwrong\b|\binvalidate\b|\bfalsif\w*|\bwhat would change\b|\bdisconfirm\w*/.test(q)) return "FALSIFICATION";
+  if (/\bhas (this|it|that|the .*? setup)\b.*\bhappened\b|\bhistor\w*|\bsimilar setup\b|\bhappened before\b|\banalog\w*|\bcomparable episodes?\b/.test(q)) return "HISTORICAL";
+  if (/\bmy thesis\b|\bthesis\b|\bmy (view|framework|position|read|call)\b|\baccording to my\b|\bdoes (this|the) (hold|still hold)\b/.test(q)) return "THESIS";
+  if (/\bcompare\w*|\bcompared (with|to)\b|\bversus\b|\bvs\.?\b|\bweek over week\b|\bweek[- ]over[- ]week\b|\bmonth over month\b|\bbetter than\b|\bperformance (vs|versus)\b/.test(q)) return "COMPARISON";
+  if (/\bearnings\b|\breport\b|\bresults\b|\bfomc\b|\bcpi print\b|\bupcoming\b|\baround its next\b|\bnext (earnings|report|meeting|print)\b/.test(q)) return "EVENT";
+  if (/\bmacro\b|\brisk assets\b|\brisk[- ]on\b|\brisk appetite\b|\bregime\b|\bconditions?\b|\bfinancial conditions\b|\bliquidity\b/.test(q)) return "MACRO_REGIME";
+  if (/\bdriv\w*|\bdriving\b|\bwhy\b|\bwhat happened\b|\bwhat.s (behind|pushing|pressuring|moving)\b|\bpressur\w*|\bcaus\w*|\bexplain\w*/.test(q)) return "CAUSAL";
+  return "SYNTHESIS";
+}
+
+/**
+ * Market classes an engine-required dimension applies to. A supply/demand dimension belongs on
+ * a commodity question and would be nonsense on a yield or index question, so applicability is
+ * declared per dimension rather than assumed. Derived from the question's own subject (never
+ * from a question list), so an unseen asset of a known class is handled identically.
+ */
+export type SubjectMarketClass = "COMMODITY" | "METAL" | "FX" | "INDEX" | "VOLATILITY" | "RATES" | "EQUITY" | "CRYPTO" | "UNKNOWN";
+
+interface EngineRequirementSpec {
+  readonly description: (subject: string) => string;
+  readonly role: RequirementRole;
+  readonly importance: "CRITICAL" | "SUPPORTING";
+  readonly timeSensitivity: TimeSensitivity;
+  readonly calculation?: RequirementCalculation;
+  /** Evidence classes that can serve this dimension (engine-inferred requirements only). */
+  readonly evidenceClasses: readonly string[];
+  /** Does an existing requirement already state this dimension? */
+  readonly covers: RegExp;
+  /** When present, the domain applies only to these subject market classes. */
+  readonly markets?: readonly SubjectMarketClass[];
+}
+
+/**
+ * ENGINE-REQUIRED DIMENSIONS per question type (research contract): the model may propose
+ * requirements, but it cannot omit a dimension the engine requires. An omitted dimension is
+ * added with role CORE, so the capability floor must retrieve it and the completion gate
+ * must see it covered. Generic by construction: the specs describe DECISION dimensions
+ * (previous-period performance, supply/demand drivers, event timing and expectations,
+ * regime components, belief support and challenge), not assets or questions.
+ */
+const ENGINE_REQUIRED: Readonly<Record<QuestionType, readonly EngineRequirementSpec[]>> = {
+  COMPARISON: [
+    {
+      description: (s) => `the previous period's price performance for ${s} (for the comparison the question asks for)`,
+      role: "CORE", importance: "CRITICAL", timeSensitivity: "CURRENT",
+      evidenceClasses: ["OHLCV", "PRICE", "QUOTE", "MARKET_DATA", "HISTORICAL"],
+      covers: /previous (week|period|month|quarter|day)|prior (week|month|quarter|period)|last (week|month|quarter)|comparison period/i,
+    },
+    {
+      description: (s) => `the explicit period over period change for ${s} (price, volume and range) as a calculated comparison`,
+      role: "CORE", importance: "CRITICAL", timeSensitivity: "CURRENT", calculation: "PERIOD_OVER_PERIOD",
+      evidenceClasses: ["OHLCV", "PRICE", "RETURN", "MARKET_DATA", "PERFORMANCE"],
+      covers: /period over period|week over week|month over month|calculated comparison|change (vs|from|compared)|\.pct change\b/i,
+    },
+    {
+      description: (s) => `volume and range context for ${s} across the compared periods`,
+      role: "SUPPORTING", importance: "SUPPORTING", timeSensitivity: "CURRENT",
+      evidenceClasses: ["VOLUME", "OHLCV", "RANGE", "MARKET_DATA"],
+      covers: /volume|range|high.{0,3}(and|or).{0,3}low/i,
+    },
+  ],
+  CAUSAL: [
+    {
+      description: (s) => `the current drivers and catalysts behind ${s}`,
+      // SUPPORTING, not CORE: the substantive dimensions of a causal question are the ones that
+      // explain the move (supply/demand for a commodity, a rate/policy differential for an FX
+      // pair), which the engine requires separately. The wrapper dimension improves
+      // interpretation and must not block a run whose factors were retrieved under another label.
+      role: "SUPPORTING", importance: "SUPPORTING", timeSensitivity: "CURRENT",
+      evidenceClasses: ["NEWS", "DRIVER", "HEADLINE", "CATALYST", "DEVELOPMENT", "EVENT"],
+      covers: /driver|catalyst|what (is )?(driving|pushing|pressuring)|explanation|reason/i,
+    },
+    {
+      description: (s) => `the supply and producer side factors affecting ${s}`,
+      role: "CORE", importance: "CRITICAL", timeSensitivity: "CURRENT",
+      markets: ["COMMODITY", "METAL"],
+      evidenceClasses: ["SUPPLY", "PRODUCTION", "POLICY", "NEWS", "COMMODITY", "FUNDAMENTALS"],
+      covers: /supply|producer|production|opec|output|export/i,
+    },
+    {
+      description: (s) => `the demand, inventory and consumption factors affecting ${s}`,
+      role: "CORE", importance: "CRITICAL", timeSensitivity: "CURRENT",
+      markets: ["COMMODITY", "METAL"],
+      evidenceClasses: ["INVENTORY", "DEMAND", "SUPPLY", "NEWS", "COMMODITY", "FUNDAMENTALS"],
+      covers: /demand|inventor|consumption|import|usage/i,
+    },
+    {
+      description: (s) => `the rate, policy or growth differential driving ${s}`,
+      role: "SUPPORTING", importance: "SUPPORTING", timeSensitivity: "CURRENT",
+      markets: ["FX", "RATES", "INDEX"],
+      evidenceClasses: ["RATE", "YIELD", "POLICY", "MACRO", "NEWS", "GROWTH"],
+      covers: /differential|policy|rate|growth/i,
+    },
+  ],
+  EVENT: [
+    {
+      description: (s) => `the timing of the upcoming event for ${s} (date or window)`,
+      role: "CORE", importance: "CRITICAL", timeSensitivity: "CURRENT",
+      evidenceClasses: ["EARNINGS_DATE", "CALENDAR", "DATE", "REPORT", "EVENT"],
+      covers: /date|timing|schedul|when\b/i,
+    },
+    {
+      description: (s) => `the consensus expectations for the upcoming event for ${s}`,
+      role: "CORE", importance: "CRITICAL", timeSensitivity: "CURRENT",
+      evidenceClasses: ["CONSENSUS", "ESTIMATE", "GUIDANCE", "FORECAST", "EARNINGS"],
+      covers: /consensus|expectation|estimate|forecast|guidance/i,
+    },
+    {
+      description: (s) => `recent fundamentals and company catalysts for ${s}`,
+      role: "CORE", importance: "CRITICAL", timeSensitivity: "RECENT",
+      evidenceClasses: ["FUNDAMENTALS", "NEWS", "COMPANY_EVENT", "ANNOUNCEMENT", "REVENUE", "MARGIN"],
+      covers: /fundamental|catalyst|recent .*(development|news)|company development/i,
+    },
+  ],
+  MACRO_REGIME: [
+    {
+      description: () => "the current interest rate, yield and policy conditions",
+      role: "CORE", importance: "CRITICAL", timeSensitivity: "CURRENT",
+      evidenceClasses: ["RATE", "YIELD", "POLICY", "MACRO", "INFLATION"],
+      covers: /rate|yield|policy|fed|central bank/i,
+    },
+    {
+      description: () => "the current volatility and risk appetite regime",
+      role: "CORE", importance: "CRITICAL", timeSensitivity: "CURRENT",
+      evidenceClasses: ["VOLATILITY", "VIX", "SENTIMENT", "MACRO", "REGIME"],
+      covers: /volatil|risk appetite|risk regime|sentiment/i,
+    },
+    {
+      description: () => "the current dollar and liquidity or financial conditions",
+      role: "SUPPORTING", importance: "SUPPORTING", timeSensitivity: "CURRENT",
+      evidenceClasses: ["USD", "DOLLAR", "LIQUIDITY", "CREDIT", "FX", "MACRO"],
+      covers: /dollar|usd|dxy|liquidit|financial condition|credit/i,
+    },
+  ],
+  THESIS: [
+    {
+      description: () => "evidence that supports the trader's stated thesis",
+      role: "CORE", importance: "CRITICAL", timeSensitivity: "CURRENT",
+      evidenceClasses: ["NEWS", "PRICE", "MACRO", "MARKET_DATA", "FUNDAMENTALS", "SENTIMENT"],
+      covers: /support|confirm|consistent with|for the thesis/i,
+    },
+    {
+      description: () => "evidence that challenges or contradicts the trader's stated thesis",
+      role: "CHALLENGE", importance: "CRITICAL", timeSensitivity: "CURRENT",
+      evidenceClasses: ["COUNTEREVIDENCE", "DISCONFIRMING", "RISK", "NEWS"],
+      covers: /challeng|contradict|against the thesis|weaken|oppos/i,
+    },
+  ],
+  FALSIFICATION: [
+    {
+      description: (s) => `disconfirming evidence that would falsify the leading conclusion for ${s}`,
+      role: "CHALLENGE", importance: "CRITICAL", timeSensitivity: "CURRENT",
+      evidenceClasses: ["COUNTEREVIDENCE", "DISCONFIRMING", "RISK", "NEWS"],
+      covers: /falsif|disconfirm|prove.{0,12}wrong|invalidate|weaken/i,
+    },
+  ],
+  HISTORICAL: [
+    {
+      description: (s) => `comparable past episodes for ${s}`,
+      role: "CORE", importance: "CRITICAL", timeSensitivity: "HISTORICAL",
+      evidenceClasses: ["EPISODE", "OHLCV", "HISTORICAL", "MARKET_DATA", "CYCLE"],
+      covers: /episode|analog|similar (setup|period|instance)|historical (instance|period|episode)/i,
+    },
+    {
+      description: (s) => `how comparable past setups for ${s} resolved afterwards, with the sample and similarity criteria`,
+      role: "CORE", importance: "CRITICAL", timeSensitivity: "HISTORICAL", calculation: "EPISODE_SIMILARITY",
+      evidenceClasses: ["OUTCOME", "EPISODE", "OHLCV", "HISTORICAL", "RETURN"],
+      covers: /resolved|outcome|after (similar|comparable|prior)|follow(ed|ing) (sessions|weeks|period)/i,
+    },
+  ],
+  SYNTHESIS: [],
+};
+
+/**
+ * Complete the ledger against the question's decision type: every missing engine-required
+ * dimension is ADDED (never downgraded, never silently dropped), and every question gets a
+ * CHALLENGE requirement so disconfirmation cannot be skipped. Returns the ledger in a stable
+ * order: model requirements first, then engine-added dimensions.
+ */
+export function completeRequirements(
+  question: string,
+  requirements: readonly ResearchRequirement[],
+  opts: { readonly subject?: string; readonly marketClass?: SubjectMarketClass } = {},
+): readonly ResearchRequirement[] {
+  const subject = (opts.subject ?? "the subject").trim();
+  const marketClass = opts.marketClass ?? "UNKNOWN";
+  const questionType = questionTypeOf(question);
+  const specs: EngineRequirementSpec[] = [...ENGINE_REQUIRED[questionType]].filter(
+    (spec) => spec.markets === undefined || spec.markets.includes(marketClass),
+  );
+  // CHALLENGE IS ALWAYS REQUIRED for a completed judgment (question type adds its own when it
+  // has a more specific one).
+  specs.push({
+    description: () => "evidence that weakens or contradicts the leading conclusion (counterevidence)",
+    role: "CHALLENGE", importance: "CRITICAL", timeSensitivity: "CURRENT",
+    evidenceClasses: ["COUNTEREVIDENCE", "DISCONFIRMING", "RISK", "NEWS"],
+    covers: /contradict|weaken|oppos|counter.?evidence|disconfirm|falsif|downside|against/i,
+  });
+
+  const out: ResearchRequirement[] = [...requirements];
+  for (const spec of specs) {
+    // Coverage of a dimension requires the SAME ROLE, not only overlapping vocabulary: a CORE
+    // requirement worded "...supports the thesis that NVDA is weakening" must not be mistaken
+    // for the CHALLENGE dimension just because it contains "weakening". Role is what the
+    // completion law acts on, so role is what decides whether the dimension is already asked.
+    const covered = out.some((r) => r.role === spec.role && spec.covers.test(r.description));
+    if (covered) continue;
+    const description = spec.description(subject);
+    const domains = domainsOfRequirement(description);
+    out.push({
+      id: requirementId(out.length),
+      description,
+      importance: spec.importance,
+      role: spec.role,
+      timeSensitivity: spec.timeSensitivity,
+      domains: domains.length > 0 ? domains : (["GENERAL"] as const),
+      status: "PENDING",
+      evidenceRefs: [],
+      staleOnlyRefs: [],
+      recoveryAttempts: 0,
+      engineRequired: true,
+      ...(spec.calculation !== undefined ? { calculation: spec.calculation } : {}),
+      evidenceClasses: [...spec.evidenceClasses],
+      retrievalObjective: retrievalObjectiveFor(description, spec.timeSensitivity, spec.role),
+    });
+  }
+  return out;
 }
 
 /**
@@ -385,6 +718,22 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
     }
   }
   if (!overlaps && reqTokens.size === 0 && req.domains.includes(itemDomain)) overlaps = true;
+  // DECLARED EVIDENCE CLASSES (engine-inferred dimensions only, subject-scoped items only):
+  // an engine requirement phrased analytically ("the drivers behind X") can never share
+  // vocabulary with a headline; it is served by an item of a CLASS the requirement declares
+  // (news/driver, OHLCV, calendar, macro observation), which must still pass the subject,
+  // temporal and freshness gates. Model-authored requirements keep the strict vocabulary rule,
+  // so a technically-valid but irrelevant observation still cannot satisfy them.
+  if (
+    !overlaps &&
+    req.engineRequired === true &&
+    req.evidenceClasses !== undefined &&
+    opts.subjectTerms !== undefined &&
+    opts.subjectTerms.size > 0 &&
+    req.evidenceClasses.some((c) => itemTokens.has(canonicalToken(c)) || canonicalToken(c) === itemDomain)
+  ) {
+    overlaps = true;
+  }
   if (!overlaps) return "NO_MATCH";
   return freshnessSufficient(req, item, now) ? "SATISFIES" : "STALE_ONLY";
 }
@@ -414,9 +763,66 @@ export function assessCoverage(
   });
 }
 
-/** Blocking requirements: CRITICAL ones that are not SATISFIED (stale-only counts as a gap). */
+/**
+ * Blocking requirements: CRITICAL ones that are not SATISFIED (stale-only counts as a gap).
+ * ROLE LAWS (research contract §3):
+ * - CONTEXT is background and never blocks completion.
+ * - CHALLENGE un-attempted BLOCKS even though its evidence may be absent: a judgment may only
+ *   state that no counterevidence was found once a disconfirmation-capable capability actually
+ *   executed (recorded as an attempt on the requirement by markChallengeAttempted).
+ */
 export function blockingRequirements(requirements: readonly ResearchRequirement[]): readonly ResearchRequirement[] {
-  return requirements.filter((r) => r.importance === "CRITICAL" && r.status !== "SATISFIED" && r.status !== "UNAVAILABLE" && r.status !== "EXHAUSTED");
+  return requirements.filter((r) => {
+    if (r.status === "SATISFIED" || r.status === "UNAVAILABLE" || r.status === "EXHAUSTED") return false;
+    if (r.role === "CONTEXT") return false;
+    if (r.role === "CHALLENGE") return r.recoveryAttempts === 0;
+    return r.importance === "CRITICAL";
+  });
+}
+
+/**
+ * CHALLENGE-ATTEMPT LAW: records, on every CHALLENGE requirement, that the engine actually
+ * attempted disconfirmation. `executedCapabilities` are the capabilities that ran this run;
+ * a capability counts as a disconfirmation attempt only when its declaration says it returns
+ * counterevidence (or disconfirming) material. Absence of a challenge is therefore never
+ * confused with absence of counterevidence, and the engine can honestly render
+ * "attempted; nothing credible found" versus "not attempted".
+ */
+/**
+ * When NO disconfirmation-capable provider is registered for this deployment, the engine has no
+ * route to attempt a challenge at all. Rather than blocking every run forever (which would turn
+ * a missing provider into a fake research gap) or silently dropping the requirement (which would
+ * let a judgment claim counterevidence was sought), the challenge is marked UNAVAILABLE with the
+ * blocker recorded — the honest state, rendered as such and never as "no counterevidence found".
+ */
+export function markUnattemptableChallenges(
+  requirements: readonly ResearchRequirement[],
+  isAvailable: (capability: string) => boolean,
+): readonly ResearchRequirement[] {
+  const hasRoute = DISCONFIRMATION_CAPABILITIES.some((cap) => isAvailable(cap));
+  if (hasRoute) return requirements;
+  return requirements.map((r) =>
+    r.role === "CHALLENGE" && r.status !== "SATISFIED"
+      ? {
+          ...r,
+          status: "UNAVAILABLE" as const,
+          missingReason: "no disconfirmation-capable provider is registered for this deployment (counterevidence could not be sought)",
+        }
+      : r,
+  );
+}
+
+export function markChallengeAttempted(
+  requirements: readonly ResearchRequirement[],
+  executedCapabilities: readonly string[],
+): readonly ResearchRequirement[] {
+  const attempted = executedCapabilities.some((cap) => DISCONFIRMATION_CAPABILITIES.includes(cap));
+  if (!attempted) return requirements;
+  return requirements.map((r) =>
+    r.role === "CHALLENGE" && r.status !== "SATISFIED"
+      ? { ...r, recoveryAttempts: Math.max(r.recoveryAttempts, 1) }
+      : r,
+  );
 }
 
 /** The engine's completion verdict: complete only when no CRITICAL requirement is blocking. */
@@ -496,6 +902,14 @@ export function capabilitiesForRequirement(
 }
 
 /**
+ * Capabilities that return disconfirming material (the engine's challenge tier). Used by
+ * recovery when the unresolved requirement IS the challenge itself, and by the attempt law.
+ */
+export const DISCONFIRMATION_CAPABILITIES: readonly string[] = Object.entries(CAPABILITY_SUPPORT)
+  .filter(([, support]) => support.dataTypes.some((t) => t === "COUNTEREVIDENCE" || t === "DISCONFIRMING"))
+  .map(([cap]) => cap);
+
+/**
  * Recovery plan for a set of blocking requirements: the capabilities their domains map to,
  * in priority order, bounded so one round cannot explode into dozens of calls.
  */
@@ -507,7 +921,14 @@ export function recoveryCapabilities(
   const excluded = new Set(opts.exclude ?? []);
   const out: string[] = [];
   for (const req of blocking) {
-    for (const cap of capabilitiesForRequirement(req, { ...opts, limit: 2 })) {
+    // A blocking CHALLENGE requirement is recovered with DISCONFIRMATION capabilities only:
+    // the gap is "no challenge was attempted", so the fix is a challenge attempt, never an
+    // unrelated capability that happens to share the challenge's domain.
+    const candidates =
+      req.role === "CHALLENGE"
+        ? DISCONFIRMATION_CAPABILITIES.filter((cap) => opts.isAvailable === undefined || opts.isAvailable(cap))
+        : capabilitiesForRequirement(req, { ...opts, limit: 2 });
+    for (const cap of candidates) {
       if (excluded.has(cap) || out.includes(cap)) continue;
       out.push(cap);
       if (out.length >= limit) return out;
@@ -553,6 +974,11 @@ export function mandatoryCapabilities(
   const excluded = new Set(opts.exclude ?? []);
   const out: string[] = [];
   for (const req of requirements) {
+    // CHALLENGE is excluded on purpose: the engine's disconfirmation action is the dedicated
+    // counterevidence floor (FALSIFICATION), not an arbitrary capability that happens to share
+    // the challenge's domain. Mapping it generically made the floor schedule a deep-research
+    // agent in round 1 of a question whose plan had not asked for one.
+    if (req.role === "CHALLENGE") continue;
     if (req.importance !== "CRITICAL" || !isDiscriminatingRequirement(req)) continue;
     for (const cap of capabilitiesForRequirement(req, { ...opts, limit: 2 })) {
       if (excluded.has(cap) || out.includes(cap)) continue;
@@ -587,14 +1013,21 @@ export function exhaustUnresolved(requirements: readonly ResearchRequirement[], 
 /** Human-readable coverage report for the synthesis context (never the user-facing answer). */
 export function renderCoverage(requirements: readonly ResearchRequirement[]): string {
   if (requirements.length === 0) return "REQUIREMENT COVERAGE: none declared.";
-  const lines = requirements.map((r) => {
+  const lines = requirements.map((r) => {  // role and calculation are part of the engine's ledger state
     const detail =
       r.status === "SATISFIED" ? `${r.evidenceRefs.length} observation(s)`
       : r.status === "PARTIALLY_SATISFIED" ? `STALE ONLY (${r.staleOnlyRefs.length} observation(s) outside the ${r.timeSensitivity} time horizon)`
       : r.status === "EXHAUSTED" ? `EXHAUSTED: ${r.missingReason ?? "no relevant evidence after recovery"}`
       : r.status === "UNAVAILABLE" ? "UNAVAILABLE"
       : "no relevant evidence yet";
-    return `- [${r.id}] (${r.importance}, ${r.timeSensitivity}) ${r.description}: ${r.status} (${detail})`;
+    const challenge =
+      r.role === "CHALLENGE"
+        ? r.recoveryAttempts > 0
+          ? " [challenge attempted]"
+          : " [challenge NOT attempted; do not claim counterevidence was sought]"
+        : "";
+    const calc = r.calculation !== undefined ? ` [required calculation: ${r.calculation}]` : "";
+    return `- [${r.id}] (${r.role}/${r.importance}, ${r.timeSensitivity}) ${r.description}: ${r.status} (${detail})${calc}${challenge}`;
   });
   const verdict = coverageVerdict(requirements);
   return [

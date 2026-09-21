@@ -449,7 +449,16 @@ describe("research process benchmark (scores process, not word matching)", () =>
       ]));
       const registry = new CapabilityRegistry();
       const staleTs = scenario.staleDaysAgo !== undefined ? new Date(Date.now() - scenario.staleDaysAgo * DAY_MS).toISOString() : undefined;
-      for (const [capability, outputs] of scenario.providers) {
+      // Production registers a disconfirmation tier (G2 web retrieval serves FALSIFICATION), and
+      // the CHALLENGE-Attempt law requires that a completed run actually attempted it; the
+      // harness mirrors production so completion is measured, not the fixture's missing provider.
+      const providers = new Map<string, readonly { content: string; about?: string }[]>(scenario.providers);
+      if (!providers.has("FALSIFICATION")) {
+        providers.set("FALSIFICATION", [
+          { content: "Counter-case: flows and positioning, rather than the retrieved driver, may explain the move." },
+        ]);
+      }
+      for (const [capability, outputs] of providers) {
         const wrapped = capabilityFixture(capability, outputs, { ...(staleTs !== undefined ? { sourceTimestamp: staleTs } : {}) });
         registry.register({
           providerId: wrapped.providerId,
@@ -550,6 +559,10 @@ describe("research process benchmark (scores process, not word matching)", () =>
     registry.register(capabilityFixture("MARKET_DATA_ANALYSIS", [
       { content: "BTC trades at 80,750 USD today with elevated volume.", about: "BTC" },
     ]));
+    // The disconfirmation tier exists in production; a completed run must have attempted it.
+    registry.register(capabilityFixture("FALSIFICATION", [
+      { content: "Counter-case: flows rather than the retrieved driver may explain the move.", about: "BTC" },
+    ]));
     const ws = new Workspace();
     const research = ws.addResearch({ objective: question, question, flow: "WHAT_HAPPENED" }, origin);
     ws.transitionResearch(research.id, "ACTIVE", origin, "activated");
@@ -601,6 +614,9 @@ describe("research process benchmark (scores process, not word matching)", () =>
     ]));
     registry.register(capabilityFixture("MACRO_ANALYSIS", [
       { content: "The 10-year Treasury yield is 4.998 percent, VIX is 14.81, and the dollar index is 100.215.", about: "MACRO" },
+    ]));
+    registry.register(capabilityFixture("FALSIFICATION", [
+      { content: "Counter-case: flows rather than the retrieved driver may explain the move.", about: "MACRO" },
     ]));
 
     const ws = new Workspace();

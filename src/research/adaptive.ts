@@ -24,14 +24,20 @@ import {
 } from "../model/schemas.js";
 import { evidenceFromToolResult } from "../domain/evidence.js";
 import { normalizedResult } from "../domain/tool-result.js";
-import { subjectTermsOf } from "../domain/instruments.js";
+import { subjectTermsOf, resolveInstrument } from "../domain/instruments.js";
 import { currentRun } from "../domain/run-context.js";
 import { synthesizeAnswer, renderAnswerSynthesis, type AnswerSynthesis } from "./synthesis.js";
+import { boundConfidence, computeConfidence, type ConfidenceComponents } from "./confidence.js";
 import {
   assessCoverage,
   buildRequirements,
+  completeRequirements,
   coverageVerdict,
   mandatoryCapabilities,
+  markChallengeAttempted,
+  markUnattemptableChallenges,
+  subjectClassOfKind,
+  subjectMarketClassOf,
   SUBJECT_REQUIRED_CAPABILITIES,
   exhaustUnresolved,
   concernsSubject,
@@ -39,6 +45,7 @@ import {
   requirementsFromTasks,
   type CoverageEvidence,
   type ResearchRequirement,
+  type SubjectMarketClass,
 } from "./requirements.js";
 import type { Evidence, Research } from "../domain/objects.js";
 import { createEvidence } from "../domain/objects.js";
@@ -51,6 +58,46 @@ import type { ToolResult } from "../domain/tool-result.js";
 import { buildResearchContext, renderResearchContext, type ResearchContext } from "./context.js";
 
 export const MAX_RESEARCH_ROUNDS = 3;
+
+/**
+ * The question's subject market class, used by the research contract to decide which
+ * market-class-specific dimensions apply. Read from the question's own canonical instrument
+ * resolution first, then its market-class vocabulary, then the run's earned subject. Nothing
+ * here knows about any individual question: an unseen commodity gets the commodity contract.
+ */
+/**
+ * REQUIREMENT-SCOPED RETRIEVAL BRIEF (research contract §5): the work order given to recovery
+ * capabilities and deep-research workers. It names each unresolved requirement, its time window
+ * and its role, and states what to return — never just "research <the question>". The question
+ * stays attached so nothing is researched outside its scope.
+ */
+export function retrievalBrief(
+  question: string,
+  unresolved: readonly ResearchRequirement[],
+): string {
+  const lines = unresolved.map((r) => {
+    const what = r.retrievalObjective ?? r.description;
+    const classes = r.evidenceClasses !== undefined && r.evidenceClasses.length > 0
+      ? ` Evidence classes: ${r.evidenceClasses.join(", ")}.`
+      : "";
+    return `- ${what} (${r.role}, ${r.timeSensitivity}).${classes}`;
+  });
+  return [
+    `Research objective: ${question}`,
+    "Unresolved requirements — return current, attributable evidence for THESE; do not answer the whole question and do not substitute unrelated material:",
+    ...lines,
+  ].join("\n");
+}
+
+export function engineMarketClass(question: string, resolvedAsset?: string): SubjectMarketClass {
+  const fromQuestion = subjectClassOfKind(resolveInstrument(question)?.kind);
+  if (fromQuestion !== "UNKNOWN") return fromQuestion;
+  if (resolvedAsset !== undefined) {
+    const fromAsset = subjectClassOfKind(resolveInstrument(resolvedAsset)?.kind);
+    if (fromAsset !== "UNKNOWN") return fromAsset;
+  }
+  return subjectMarketClassOf(question);
+}
 
 export interface RoundExecution {
   readonly round: number;
@@ -95,6 +142,8 @@ export interface AdaptiveLoopOutcome {
   readonly floorCapabilities?: readonly string[];
   /** Engine-scheduled gap-recovery rounds actually spent (bounded). */
   readonly recoveryRounds?: number;
+  /** Engine-COMPUTED confidence and its components (never the model's own claim). */
+  readonly confidence?: ConfidenceComponents;
   /**
    * Claims the evidence ledger did not support: the draft was retried once, and anything that
    * survived was stripped from the answer (research-contract validation).
@@ -265,10 +314,25 @@ export async function runAdaptiveResearch(
     plan.requirements !== undefined && plan.requirements.length > 0
       ? buildRequirements(plan.requirements)
       : requirementsFromTasks(plan.tasks);
+  // RESEARCH CONTRACT (§2, §3): the model may propose requirements, but it cannot omit a
+  // dimension the question type requires. The engine completes the ledger from the question's
+  // own decision type and subject market class, and every run carries a CHALLENGE requirement
+  // so disconfirmation is an engine action rather than a prompt convention. Added dimensions
+  // are marked engineRequired and enter the same coverage, floor and recovery laws.
+  requirements = completeRequirements(objective, requirements, {
+    ...(resolvedAsset !== undefined ? { subject: resolvedAsset } : {}),
+    marketClass: engineMarketClass(objective, resolvedAsset),
+  });
   /** Wrong-target observations discarded at ingestion (diagnostic; never user-facing noise). */
   let rejectedAtIngestion = 0;
   /** Capabilities for the NEXT round when it is a gap-recovery round (engine-scheduled). */
   let recoveryRoundCapabilities: readonly string[] | undefined;
+  /**
+   * REQUIREMENT-SCOPED RETRIEVAL OBJECTIVE for the recovery round: what the recovery workers are
+   * asked to find. The whole question is not a work order — an unresolved requirement is. This is
+   * the objective handed to every capability in a gap-recovery round.
+   */
+  let recoveryRoundObjective: string | undefined;
   /** Capabilities the engine's floor added to round 1 beyond the model's plan (diagnostic). */
   let floorCapabilities: readonly string[] = [];
   /**
@@ -279,6 +343,9 @@ export async function runAdaptiveResearch(
   const capabilityUsable = (cap: string): boolean =>
     options.registry.resolve(cap as Parameters<typeof options.registry.resolve>[0]).length > 0 &&
     (resolvedAsset !== undefined || !SUBJECT_REQUIRED_CAPABILITIES.includes(cap));
+  // CHALLENGE ROUTE: when this deployment registers no disconfirmation-capable provider, the
+  // challenge requirement becomes UNAVAILABLE (recorded blocker) instead of an unresolvable gap.
+  requirements = markUnattemptableChallenges(requirements, capabilityUsable);
   let recoveryRoundsUsed = 0;
   const MAX_RECOVERY_ROUNDS = options.maxRecoveryRounds ?? 2;
 
@@ -287,7 +354,7 @@ export async function runAdaptiveResearch(
     // recovery capabilities; later rounds = the decision's nextTasks.
     const roundTasks: { objective: string; capabilities: readonly string[]; completion: string }[] =
       recoveryRoundCapabilities !== undefined
-        ? [{ objective, capabilities: [...recoveryRoundCapabilities], completion: "recover the uncovered research requirements" }]
+        ? [{ objective: recoveryRoundObjective ?? objective, capabilities: [...recoveryRoundCapabilities], completion: "recover the uncovered research requirements" }]
         : round === 1
           ? plan.tasks.map((t) => ({ objective: t.objective, capabilities: t.capabilities, completion: t.completion }))
           : [...(rounds[rounds.length - 1]?.decision.nextTasks ?? [])];
@@ -328,6 +395,7 @@ export async function runAdaptiveResearch(
     if (recoveryRoundCapabilities !== undefined) {
       recoveryRoundsUsed += 1;
       recoveryRoundCapabilities = undefined;
+      recoveryRoundObjective = undefined;
     }
 
     const executions: RoundExecution[] = [];
@@ -394,7 +462,14 @@ export async function runAdaptiveResearch(
       }
     }
 
-    // 2b. Requirement coverage from THIS run's evidence (engine-assessed; never the model).
+    // 2b. CHALLENGE-ATTEMPT LAW: record that disconfirmation was actually attempted (which
+    // capabilities have run is engine knowledge; whether counterevidence was found is judged
+    // by coverage). Then assess requirement coverage from THIS run's evidence (engine-assessed,
+    // never the model).
+    requirements = markChallengeAttempted(
+      requirements,
+      executions.filter((e) => e.result.failure.type === "NONE").map((e) => e.capability),
+    );
     requirements = assessCoverage(requirements, coverageEvidenceOf(workspace, researchRef), {
       ...(subjectTerms !== undefined ? { subjectTerms } : {}),
       now: at(),
@@ -490,6 +565,7 @@ export async function runAdaptiveResearch(
           verdict.blocking.some((b) => b.id === r.id) ? { ...r, recoveryAttempts: r.recoveryAttempts + 1 } : r,
         );
         recoveryRoundCapabilities = recoveryCaps;
+        recoveryRoundObjective = retrievalBrief(objective, verdict.blocking);
         options.onProgress?.(
           progressEvent("capability_started", at(), `recovering uncovered requirements via ${recoveryCaps.join(", ")}`, { capability: recoveryCaps[0] ?? "recovery" }),
         );
@@ -522,6 +598,7 @@ export async function runAdaptiveResearch(
           verdict.blocking.some((b) => b.id === r.id) ? { ...r, recoveryAttempts: r.recoveryAttempts + 1 } : r,
         );
         recoveryRoundCapabilities = recoveryCaps;
+        recoveryRoundObjective = retrievalBrief(objective, verdict.blocking);
         options.onProgress?.(
           progressEvent("capability_started", at(), `model reported insufficient evidence; recovering uncovered requirements via ${recoveryCaps.join(", ")}`, { capability: recoveryCaps[0] ?? "recovery" }),
         );
@@ -646,7 +723,17 @@ export async function runAdaptiveResearch(
         options.onProgress?.(progressEvent("capability_started", at(), `direct capabilities could not answer the question; invoking ${label} with the exact question`, { capability }));
         const result = await options.registry.execute(
           capability,
-          { ...(options.capabilityParams ?? {}), question: objective },
+          {
+            ...(options.capabilityParams ?? {}),
+            question: objective,
+            // REQUIREMENT-SCOPED RETRIEVAL: the agent is told WHICH unresolved requirement it is
+            // being asked to close, with the evidence classes wanted — not merely "research this
+            // topic". The engine passes the requirement brief it already computed.
+            requirement: retrievalBrief(
+              objective,
+              requirements.filter((r) => r.status !== "SATISFIED" && r.role !== "CONTEXT"),
+            ),
+          },
           systemOrigin,
           at(),
         );
@@ -714,11 +801,22 @@ export async function runAdaptiveResearch(
   // used instead and nothing is fabricated.
   let answer: string | undefined;
   let synthesis: AnswerSynthesis | undefined;
+  // DETERMINISTIC CONFIDENCE (research contract §13): computed from the engine's own coverage,
+  // freshness, challenge and recovery state — never chosen by the model. The synthesis is told
+  // the computed level and any model-stated confidence is capped by it, so a run with an
+  // unresolved CORE requirement cannot present high conviction on good prose alone.
+  const confidence = computeConfidence({
+    requirements,
+    stoppedBecause,
+    failedPaths: allExecutions.filter((e) => e.result.failure.type !== "NONE").length,
+    calculationsMissing: requirements.filter((r) => r.calculation !== undefined && r.status !== "SATISFIED").length,
+  });
   if (collected.length > 0 && stoppedBecause !== "MODEL_FAILURE") {
     synthesis = await synthesizeAnswer({
       provider: options.provider,
       question: currentRun()?.userQuestion ?? objective,
       context: finalContext,
+      computedConfidence: confidence.level,
       // RESEARCH-CONTRACT STATE (decision-quality contract): the model synthesizes, the engine
       // states what was actually covered and retrieved, so a draft cannot claim counterevidence
       // that was never searched for, a comparison period that was never retrieved, or earnings
@@ -738,6 +836,9 @@ export async function runAdaptiveResearch(
       },
     });
     if (synthesis !== undefined) {
+      // The engine's computed level is a CEILING on the model's stated confidence.
+      const bounded = boundConfidence(synthesis.confidence, confidence.level);
+      synthesis = { ...synthesis, confidence: bounded };
       answer = renderAnswerSynthesis(synthesis, {
         disconfirmationAttempted: allExecutions.some((e) => e.capability === "FALSIFICATION"),
       });
@@ -756,6 +857,7 @@ export async function runAdaptiveResearch(
     ...(synthesis !== undefined ? { synthesis } : {}),
     context: finalContext,
     requirements,
+    confidence,
     ...(floorCapabilities.length > 0 ? { floorCapabilities } : {}),
     recoveryRounds: recoveryRoundsUsed,
     ...(synthesis?.contractViolations !== undefined ? { contractViolations: synthesis.contractViolations } : {}),

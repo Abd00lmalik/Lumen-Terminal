@@ -272,7 +272,7 @@ export function buildResearchContext(
      * synthesis models SEE which requirements are covered, which are stale-only, and which
      * are exhausted. The model cannot upgrade an uncovered requirement to satisfied.
      */
-    readonly requirements?: readonly { readonly id: string; readonly description: string; readonly importance: string; readonly timeSensitivity: string; readonly status: string; readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[]; readonly missingReason?: string }[];    /** TOOL_RESULTs from this session, for failure/limitation reporting. */
+    readonly requirements?: readonly { readonly id: string; readonly description: string; readonly role?: string; readonly engineRequired?: boolean; readonly evidenceClasses?: readonly string[]; readonly importance: string; readonly timeSensitivity: string; readonly status: string; readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[]; readonly missingReason?: string }[];    /** TOOL_RESULTs from this session, for failure/limitation reporting. */
     readonly executions?: readonly { readonly capability: string; readonly result: ToolResult }[];
     /** Set when the caller already knows evidence is insufficient (valid completion state). */
     readonly insufficientEvidence?: string;
@@ -322,6 +322,13 @@ export function buildResearchContext(
         (r as { domains?: readonly EvidenceDomain[] }).domains ?? domainsOfRequirement(r.description);
       return {
         id: r.id, description: r.description,
+        role: (r.role ?? "CORE") as ResearchRequirement["role"],
+        // The matcher's declared-evidence-class path applies to engine-inferred requirements
+        // only, so the probe must carry that provenance; dropping it made an engine dimension
+        // match nothing here while it matched in coverage — the two gates disagreed about the
+        // same item and the run's evidence was admitted nowhere (hollow-complete recovery).
+        engineRequired: r.engineRequired === true,
+        evidenceClasses: r.evidenceClasses ?? [],
         timeSensitivity: r.timeSensitivity as ResearchRequirement["timeSensitivity"],
         domains: domains.length > 0 ? domains : (["GENERAL"] as const),
       };
@@ -362,6 +369,9 @@ export function buildResearchContext(
       admissionRequirements.some((req) => {
         const probe: ResearchRequirement = {
           id: req.id, description: req.description, importance: "CRITICAL",
+          role: req.role,
+          ...(req.engineRequired ? { engineRequired: true } : {}),
+          ...(req.evidenceClasses.length > 0 ? { evidenceClasses: req.evidenceClasses } : {}),
           timeSensitivity: req.timeSensitivity,
           domains: req.domains,
           status: "PENDING", evidenceRefs: [], staleOnlyRefs: [], recoveryAttempts: 0,

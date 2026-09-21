@@ -132,6 +132,11 @@ export interface SynthesizeAnswerOptions {
   readonly context: ResearchContext;
   /** The engine's epistemic state: what the run covered and actually retrieved. */
   readonly contract?: ContractState;
+  /**
+   * The engine's COMPUTED confidence ceiling for this run (coverage/freshness/challenge/
+   * recovery). The model is told what it is and the engine caps any stated level at it.
+   */
+  readonly computedConfidence?: string;
 }
 
 /**
@@ -150,6 +155,11 @@ export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promis
       prompt: [
         `Trader question (answer THIS): "${question}"`,
         "Validated research context follows. Evidence ids in brackets are the ONLY citable refs.",
+        ...(options.computedConfidence !== undefined
+          ? [
+              `ENGINE-COMPUTED CONFIDENCE for this run: ${options.computedConfidence}. It is derived from requirement coverage, evidence freshness, whether disconfirmation ran, and recovery outcomes. State at most this level; never a higher one.`,
+            ]
+          : []),
         "---",
         renderResearchContext(context),
         "---",

@@ -68,8 +68,9 @@ interface Scenario {
 
 const DIMENSIONS = [
   "QUESTION UNDERSTANDING", "SUBJECT RESOLUTION", "TEMPORAL CORRECTNESS", "CORE REQUIREMENTS",
-  "EVIDENCE RELEVANCE", "FRESHNESS", "ANALYTICAL CORRECTNESS", "CROSS-SIGNAL SYNTHESIS",
-  "COUNTEREVIDENCE", "UNCERTAINTY", "DECISION USEFULNESS", "TRACEABILITY", "NO CONTAMINATION", "RECOVERY",
+  "CHALLENGE EXECUTION", "EVIDENCE RELEVANCE", "FRESHNESS", "ANALYTICAL CORRECTNESS",
+  "CROSS-SIGNAL SYNTHESIS", "COUNTEREVIDENCE", "UNCERTAINTY", "DECISION USEFULNESS",
+  "TRACEABILITY", "NO CONTAMINATION", "RECOVERY",
 ] as const;
 
 function plan(question: string, requirements: unknown[], capabilities: string[]): string {
@@ -239,11 +240,30 @@ function score(run: { outcome: AdaptiveLoopOutcome; params: Record<string, unkno
     currentReqs.every((r) => r.staleOnlyRefs.length === 0) && outcome.stoppedBecause !== "TIME_BUDGET_EXHAUSTED",
     `${currentReqs.length} CURRENT requirement(s), ${currentReqs.filter((r) => r.staleOnlyRefs.length > 0).length} stale-only`);
 
-  const core = ledger.filter((r) => r.importance === "CRITICAL");
+  // ROLE LAW: CORE requirements are the decision-critical ones — they must all be satisfied,
+  // or the gap must be explicitly named. CHALLENGE requirements are scored separately: they
+  // must be ATTEMPTED (an attempt that finds nothing is a complete outcome), never silently
+  // skipped.
+  const core = ledger.filter((r) => r.role === "CORE" && r.importance === "CRITICAL");
   const coreCovered = core.filter((r) => r.status === "SATISFIED").length;
   const coreNamed = outcome.stoppedBecause === "REQUIREMENT_GAPS_UNRESOLVED" || outcome.stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE";
-  set("CORE REQUIREMENTS", core.length > 0 && coreCovered === core.length && (coreCovered > 0 || coreNamed),
-    `${coreCovered}/${core.length} CORE satisfied`);
+  // A question whose only decision dimension IS the challenge ("what could prove me wrong?") has
+  // no CORE row by construction: the ledger must then hold an attempted CHALLENGE requirement
+  // instead of nothing at all.
+  const corePass =
+    core.length === 0
+      ? ledger.some((r) => r.role === "CHALLENGE") && coreNamed === false
+      : coreCovered === core.length && (coreCovered > 0 || coreNamed);
+  set("CORE REQUIREMENTS", corePass,
+    core.length === 0
+      ? `no CORE dimension by construction; ledger roles ${[...new Set(ledger.map((r) => r.role))].join(",")}`
+      : `${coreCovered}/${core.length} CORE satisfied${core.length > coreCovered ? ` (unresolved: ${core.filter((r) => r.status !== "SATISFIED").map((r) => `${r.id} ${r.status} "${r.description.slice(0, 60)}"`).join(" | ")})` : ""}`);
+
+  const challenge = ledger.filter((r) => r.role === "CHALLENGE");
+  const challengeAttempted = challenge.filter((r) => r.recoveryAttempts > 0 || r.status === "SATISFIED").length;
+  set("CHALLENGE EXECUTION",
+    challenge.length > 0 && challengeAttempted === challenge.length,
+    `${challengeAttempted}/${challenge.length} CHALLENGE requirement(s) attempted`);
 
   set("EVIDENCE RELEVANCE", golden.expectedEvidence.some((p) => p.test(allEvidence)),
     `expected classes present: ${golden.expectedEvidence.filter((p) => p.test(allEvidence)).length}/${golden.expectedEvidence.length}`);
@@ -450,7 +470,15 @@ const SCENARIOS: readonly Scenario[] = [
 // ------------------------------------------------------------------------------------------
 // ADVERSARIAL FAILURE MODES: the engine must recover or name the exact unresolved requirement.
 // ------------------------------------------------------------------------------------------
+/**
+ * Adversarial failure modes AND the question-type generalization cases (thesis, falsification,
+ * historical, cross-asset, held-out subject). Every case is scored on all dimensions; only the
+ * explicitly listed ones are allowed to fail a dimension, and only because failing it correctly
+ * IS their assertion (stale evidence must not complete a current question).
+ */
 const ADVERSARIAL: readonly Scenario[] = [
+  // The held-out and adversarial cases below are scored on every dimension; the STALE case is
+  // the one that must visibly FAIL coverage.
   {
     name: "ADVERSARIAL: only STALE evidence for a current question",
     golden: {
@@ -492,6 +520,131 @@ const ADVERSARIAL: readonly Scenario[] = [
       ["NEWS_ANALYSIS", [{ content: "Bitcoin ETF flows hit a record as crypto markets rally.", about: "BTC" }]],
     ]),
     capabilityParams: { asset: "TSLA" },
+  },
+  // ---------------------------------------------------------------------------------------
+  // QUESTION-TYPE GENERALIZATION (decision-quality mandate §10): the same engine must derive a
+  // usable research contract for belief-testing, falsification, historical-analogue,
+  // cross-asset and held-out-subject questions it was never given rules for.
+  // ---------------------------------------------------------------------------------------
+  {
+    name: "THESIS: does my NVDA weakening thesis still hold",
+    golden: {
+      question: "Does my thesis that NVDA is weakening still hold?",
+      subject: "NVDA", windowDays: 7,
+      coreDimensions: [
+        { label: "thesis support", pattern: /support|confirm|consistent/ },
+        { label: "thesis challenge", pattern: /challeng|contradict|weaken/ },
+      ],
+      expectedEvidence: [/NVDA|semiconductor/i],
+      forbiddenEvidence: [/bitcoin|crude oil/i],
+      counterevidence: "REQUIRED",
+    },
+    plan: plan("Does my thesis that NVDA is weakening still hold?", [
+      { description: "evidence that supports the thesis that NVDA is weakening", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+    ], ["EQUITY_NEWS", "MACRO_ANALYSIS"]),
+    providers: new Map([
+      ["EQUITY_NEWS", [{ content: "NVDA traded lower as datacenter order growth decelerated and margin guidance was trimmed.", about: "NVDA" }]],
+      ["FALSIFICATION", [{ content: "NVDA counter-case: hyperscaler capital spending remained strong and supplier lead times lengthened, which argues against weakening demand.", about: "NVDA" }]],
+      ["MACRO_ANALYSIS", [{ content: "Semiconductor sector breadth narrowed while the 10-year yield held near 5 percent.", about: "NVDA" }]],
+    ]),
+    capabilityParams: { asset: "NVDA" },
+  },
+  {
+    name: "FALSIFICATION: what could prove the NVDA thesis wrong",
+    golden: {
+      question: "What could prove my NVDA thesis wrong?",
+      subject: "NVDA", windowDays: 7,
+      coreDimensions: [{ label: "falsification", pattern: /falsif|disconfirm|wrong|invalidate|weaken/ }],
+      expectedEvidence: [/NVDA/i],
+      forbiddenEvidence: [/bitcoin|gold/i],
+      counterevidence: "REQUIRED",
+    },
+    plan: plan("What could prove my NVDA thesis wrong?", [
+      { description: "disconfirming evidence that would falsify the NVDA weakening thesis", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+    ], ["EQUITY_NEWS"]),
+    providers: new Map([
+      ["EQUITY_NEWS", [{ content: "NVDA falsification check: accelerating accelerator demand and rising backlog would invalidate the weakening thesis.", about: "NVDA" }]],
+      ["FALSIFICATION", [{ content: "NVDA counter-case: cloud capex guidance was raised, which would prove the weakening thesis wrong.", about: "NVDA" }]],
+    ]),
+    capabilityParams: { asset: "NVDA" },
+  },
+  {
+    name: "HISTORICAL: has the current TSLA setup happened before",
+    golden: {
+      question: "Has the current TSLA setup happened before?",
+      subject: "TSLA", windowDays: 365,
+      coreDimensions: [{ label: "episodes", pattern: /episode|analog|similar|historical/ }],
+      expectedEvidence: [/episode|analog|TSLA/i],
+      forbiddenEvidence: [/bitcoin|crypto/i],
+      counterevidence: "OPTIONAL",
+    },
+    plan: plan("Has the current TSLA setup happened before?", [
+      { description: "comparable historical episodes for the current TSLA setup", importance: "CRITICAL", timeSensitivity: "HISTORICAL" },
+    ], ["HISTORICAL_COMPARISON"]),
+    providers: new Map([
+      ["HISTORICAL_COMPARISON", [
+        { content: "TSLA historical episodes: three comparable drawdown-and-reclaim setups since 2021, matched on 20-day trend, momentum and volatility state.", about: "TSLA" },
+        { content: "TSLA episode outcomes: after the comparable analog episodes, the forward 20-day return ranged from minus 8 to plus 14 percent across a sample of three.", about: "TSLA" },
+      ]],
+    ]),
+    capabilityParams: { asset: "TSLA" },
+    // A historical question is answered from genuinely historical observations: the fixture's
+    // observations are dated well beyond a year, so they classify as historical rather than
+    // current (a CURRENT-tagged item cannot satisfy a HISTORICAL requirement).
+    staleDaysAgo: 800,
+  },
+  {
+    name: "CROSS-ASSET: how oil prices could reach inflation and equities",
+    golden: {
+      question: "How could oil prices affect inflation and equities?",
+      subject: null, windowDays: 30,
+      coreDimensions: [
+        { label: "oil", pattern: /oil|crude/ },
+        { label: "inflation", pattern: /inflation|cpi/ },
+        { label: "equities", pattern: /equit|stock|index|s&p/ },
+      ],
+      expectedEvidence: [/oil|crude/i, /inflation|cpi/i, /equit|stock|s&p/i],
+      forbiddenEvidence: [/bitcoin|ethereum/i],
+      counterevidence: "OPTIONAL",
+    },
+    plan: plan("How could oil prices affect inflation and equities?", [
+      { description: "current oil price transmission into inflation and equity valuations", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+      { description: "inflation expectations and equity index response channel", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+    ], ["MACRO_ANALYSIS", "NEWS_ANALYSIS"]),
+    providers: new Map([
+      ["MACRO_ANALYSIS", [
+        { content: "Oil price pass-through: crude at 96 dollars keeps headline CPI inflation elevated, while the 10-year yield near 5 percent pressures equity valuations." },
+      ]],
+      ["NEWS_ANALYSIS", [
+        { content: "Energy costs feed inflation expectations; equity index earnings face margin pressure when crude stays above 90 dollars." },
+      ]],
+    ]),
+  },
+  {
+    name: "UNSEEN SUBJECT (held out): what is driving platinum prices",
+    golden: {
+      question: "What is driving platinum prices this week?",
+      subject: "PL=F", windowDays: 7,
+      coreDimensions: [
+        { label: "price action", pattern: /price|action/ },
+        { label: "supply side", pattern: /supply|producer|production|output/ },
+        { label: "demand side", pattern: /demand|inventor|consumption/ },
+      ],
+      expectedEvidence: [/platinum|PL=F/i],
+      forbiddenEvidence: [/bitcoin|nvda/i],
+      counterevidence: "OPTIONAL",
+    },
+    plan: plan("What is driving platinum prices this week?", [
+      { description: "current platinum price action", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+    ], ["MARKET_DATA_ANALYSIS", "NEWS_ANALYSIS"]),
+    providers: new Map([
+      ["MARKET_DATA_ANALYSIS", [{ content: "PL=F platinum futures trade at 1,045, up 2.1 percent on the week.", about: "PL=F" }]],
+      ["NEWS_ANALYSIS", [
+        { content: "Platinum supply tightened as South African mine output fell and smelter maintenance cut refined production.", about: "PL=F" },
+        { content: "Platinum demand and inventories: autocatalyst demand firmed while exchange inventories drew down.", about: "PL=F" },
+      ]],
+    ]),
+    capabilityParams: { asset: "PL=F" },
   },
   {
     name: "ADVERSARIAL: the primary provider fails (timeout) - recovery must try another path",
@@ -537,7 +690,13 @@ describe("decision-quality benchmark (dimensions scored independently)", () => {
       // engine never reports success it cannot support, and never admits forbidden evidence.
       expect(dimensions["NO CONTAMINATION"]?.pass, "forbidden evidence reached the admitted context").toBe(true);
       expect(dimensions["FRESHNESS"]?.pass, "stale evidence satisfied a current requirement").toBe(true);
-      if (scenario.staleDaysAgo !== undefined) {
+      // Every other case (including the generalization and held-out ones) must pass all of its
+      // dimensions: a dimension failure there is a real engine defect, not an expected outcome.
+      if (!scenario.name.includes("only STALE evidence")) {
+        const failed = DIMENSIONS.filter((d) => dimensions[d]?.pass !== true);
+        expect(failed, `failing dimensions: ${failed.join(", ")}`).toHaveLength(0);
+      }
+      if (scenario.name.includes("only STALE evidence")) {
         // Stale-only evidence for a CURRENT question must not complete as covered.
         expect(run.outcome.stoppedBecause).not.toBe("EVIDENCE_SUFFICIENT");
         const gaps = (run.outcome.requirements ?? []).filter((r) => r.status !== "SATISFIED");

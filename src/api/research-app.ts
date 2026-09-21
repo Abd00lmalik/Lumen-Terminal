@@ -29,6 +29,8 @@ import {
   type ResearchResponseDTO, type ResearchDiagnosticsDTO, type RequirementDiagnosticDTO, type AnswerDTO, type EvidenceDTO, type JudgmentDTO,
 } from "./dto.js";
 import { InvalidRequestError, ModelFailureError, PersistenceFailureError, NotFoundError } from "./errors.js";
+import { renderConfidence, type ConfidenceComponents } from "../research/confidence.js";
+import { questionTypeOf } from "../research/requirements.js";
 
 /** F0 session stub (FRONTEND_ARCHITECTURE.md §18): one local trader identity, server-side only. */
 export const TRADER_ORIGIN: ProvenanceOrigin = { kind: "trader", detail: "F0 API session (local trader identity)" };
@@ -302,11 +304,13 @@ export class ResearchApp {
       readonly stoppedBecause?: string;
       readonly requirements?: readonly {
         readonly id: string; readonly description: string; readonly importance: string; readonly timeSensitivity: string;
+        readonly role?: string;
         readonly status: string; readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[];
         readonly recoveryAttempts: number; readonly missingReason?: string;
       }[];
       readonly floorCapabilities?: readonly string[];
       readonly recoveryRounds?: number;
+      readonly confidence?: ConfidenceComponents;
     }
     const loopOutcomes = [
       result.research,
@@ -317,6 +321,13 @@ export class ResearchApp {
       .map((outcome) => outcome as unknown as OutcomeLike);
     const executionRecords = loopOutcomes.flatMap((o) => o.executions ?? []);
     const requirementLedger = loopOutcomes.flatMap((o) => o.requirements ?? []);
+    // Engine-computed confidence: the most conservative value across this request's outcomes
+    // (a request that ran several loops is only as confident as its weakest gate).
+    const computed = loopOutcomes
+      .map((o) => o.confidence)
+      .filter((c): c is ConfidenceComponents => c !== undefined)
+      .sort((a, b) => a.coreCoverage - b.coreCoverage)[0];
+    const questionText = result.request?.objective;
     const evidenceCount = evidence.length;
     const researchDiagnostics: ResearchDiagnosticsDTO | undefined =
       loopOutcomes.length === 0
@@ -330,6 +341,7 @@ export class ResearchApp {
               seen.add(key);
               requirements.push({
                 description: r.description,
+                role: r.role ?? "CORE",
                 importance: r.importance,
                 timeSensitivity: r.timeSensitivity,
                 status: r.status,
@@ -363,6 +375,13 @@ export class ResearchApp {
                   : evidenceCount === 0 || satisfied === 0
                     ? "INSUFFICIENT"
                     : "PARTIAL",
+              // CONFIDENCE (engine-owned): when a loop computed it, that value is exposed with
+              // its basis; a flow-only run (no ledger) exposes no confidence rather than a guess.
+              ...(computed !== undefined
+                ? { confidence: computed.level, confidenceBasis: renderConfidence(computed) }
+                : {}),
+              ...(questionText !== undefined ? { questionType: questionTypeOf(questionText) } : {}),
+              requirementRoles: [...new Set(requirements.map((r) => r.role ?? "CORE"))],
             };
           })();
     // Honest outcome mapping: a pure interpretation failure (no research ran) is a MODEL_FAILURE;

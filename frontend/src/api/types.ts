@@ -254,6 +254,8 @@ export type ResearchOutcomeDto = "COMPLETED" | "AWAITING_CONFIRMATION" | "REJECT
 
 export interface RequirementDiagnosticDto {
   readonly description: string;
+  /** CORE | SUPPORTING | CHALLENGE | CONTEXT (research-contract role). */
+  readonly role?: string;
   readonly importance: string;
   readonly timeSensitivity: string;
   readonly status: string;
@@ -279,6 +281,14 @@ export interface ResearchDiagnosticsDto {
   readonly completionGates?: readonly string[];
   readonly completionGate: string;
   readonly coverage: "COMPLETE" | "PARTIAL" | "INSUFFICIENT";
+  /** Engine-COMPUTED confidence ceiling (never the model's own claim). */
+  readonly confidence?: string;
+  /** Why that level: coverage/freshness/challenge/recovery components. */
+  readonly confidenceBasis?: string;
+  /** The decision type the engine inferred from the question (research contract). */
+  readonly questionType?: string;
+  /** Requirement roles present in the ledger. */
+  readonly requirementRoles?: readonly string[];
 }
 
 export interface ResearchResponseDto {
