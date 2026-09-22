@@ -85,6 +85,11 @@ function fakeRest(hosts: Record<string, () => unknown>) {
   const transport = {
     calls,
     rawCapture: { capture: (_k: string, label: string, _b: string) => `raw:${label}` },
+    // The Yahoo cookie/crumb handshake is part of the transport boundary (the adapter uses the
+    // TRANSPORT's fetch, never the global one), so the double must serve it. Relying on the live
+    // network here made the suite pass or fail depending on connectivity.
+    fetchImpl: async (input: string | URL | Request): Promise<Response> =>
+      new Response(String(input).includes("getcrumb") ? "testcrumb" : "", { status: 200 }),
     async get(path: string, options: Record<string, unknown> = {}) {
       const url = `${path}`;
       calls.push({ url, options });
@@ -201,6 +206,25 @@ describe("equity capabilities through the generic registry", () => {
     await registry.execute("EQUITY_MARKET_DATA", { symbol: "TSLA" }, origin);
     const chartCall = rest.calls.find((c) => c.url.includes("v8/finance/chart"));
     expect((chartCall!.options.params as { range: string }).range).toBe("1mo");
+  });
+
+  it("the Yahoo cookie/crumb handshake uses the transport's injected fetch, never the global one", async () => {
+    // Regression (determinism): the handshake used the GLOBAL fetch, so whether this suite passed
+    // depended on live network reachability of fc.yahoo.com / getcrumb — it flaked run to run.
+    // The transport's fetch is the seam; a global call here now fails loudly.
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (() => {
+      throw new Error("the adapter must use the transport's fetch, not the global one");
+    }) as typeof fetch;
+    try {
+      const registry = new CapabilityRegistry();
+      registry.register(new EquityFundamentalsAdapter(fakeRest(yahooHosts())));
+      const result = await registry.execute("EQUITY_FUNDAMENTALS", { symbol: "AAPL" }, origin);
+      expect(result.failure.type).toBe("NONE");
+      expect(result.normalizedOutput.length).toBeGreaterThan(0);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 
   it("EQUITY_FUNDAMENTALS: every field carries kind; estimates never presented as actuals", async () => {

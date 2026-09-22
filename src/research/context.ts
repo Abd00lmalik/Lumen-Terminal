@@ -272,7 +272,7 @@ export function buildResearchContext(
      * synthesis models SEE which requirements are covered, which are stale-only, and which
      * are exhausted. The model cannot upgrade an uncovered requirement to satisfied.
      */
-    readonly requirements?: readonly { readonly id: string; readonly description: string; readonly role?: string; readonly engineRequired?: boolean; readonly evidenceClasses?: readonly string[]; readonly importance: string; readonly timeSensitivity: string; readonly status: string; readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[]; readonly missingReason?: string }[];
+    readonly requirements?: readonly { readonly id: string; readonly description: string; readonly role?: string; readonly engineRequired?: boolean; readonly evidenceClasses?: readonly string[]; readonly importance: string; readonly timeSensitivity: string; readonly status: string; readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[]; readonly missingReason?: string; readonly targetTerms?: readonly string[]; readonly transmissionTargets?: readonly string[]; readonly relationshipType?: ResearchRequirement["relationshipType"] }[];
     readonly executions?: readonly { readonly capability: string; readonly result: ToolResult }[];
     /** Set when the caller already knows evidence is insufficient (valid completion state). */
     readonly insufficientEvidence?: string;
@@ -335,6 +335,12 @@ export function buildResearchContext(
         evidenceClasses: r.evidenceClasses ?? [],
         timeSensitivity: r.timeSensitivity as ResearchRequirement["timeSensitivity"],
         domains: domains.length > 0 ? domains : (["GENERAL"] as const),
+        // TRANSMISSION LINKS (research contract §3): the probe must carry the link targets the
+        // requirement declares, or the context gate would reject the very evidence about a
+        // target the question explicitly named (the exemption is per-requirement).
+        targetTerms: r.targetTerms,
+        transmissionTargets: r.transmissionTargets,
+        ...(r.relationshipType !== undefined ? { relationshipType: r.relationshipType } : {}),
       };
     })
     .filter((r) => isDiscriminatingRequirement(r));
@@ -380,6 +386,9 @@ export function buildResearchContext(
           role: req.role,
           ...(req.engineRequired ? { engineRequired: true } : {}),
           ...(req.evidenceClasses.length > 0 ? { evidenceClasses: req.evidenceClasses } : {}),
+          ...(req.targetTerms !== undefined ? { targetTerms: req.targetTerms } : {}),
+          ...(req.transmissionTargets !== undefined ? { transmissionTargets: req.transmissionTargets } : {}),
+          ...(req.relationshipType !== undefined ? { relationshipType: req.relationshipType } : {}),
           timeSensitivity: req.timeSensitivity,
           domains: req.domains,
           status: "PENDING", evidenceRefs: [], staleOnlyRefs: [], recoveryAttempts: 0,
@@ -524,19 +533,43 @@ export function buildResearchContext(
  * provider returning data is NOT coverage; stale-only and exhausted requirement state is
  * stated explicitly so no answer can present an uncovered requirement as answered.
  */
-function renderRequirementCoverage(requirements: readonly { readonly id: string; readonly description: string; readonly importance: string; readonly timeSensitivity: string; readonly status: string; readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[]; readonly missingReason?: string }[]): string {
+function renderRequirementCoverage(requirements: readonly {
+  readonly id: string; readonly description: string; readonly importance: string;
+  readonly role?: string; readonly timeSensitivity: string; readonly status: string;
+  readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[];
+  readonly missingReason?: string; readonly targetTerms?: readonly string[];
+  readonly transmissionTargets?: readonly string[];
+}[]): string {
   const lines = requirements.map((r) => {
     const detail =
       r.status === "SATISFIED" ? `${r.evidenceRefs.length} relevant observation(s)`
       : r.status === "PARTIALLY_SATISFIED" ? `ONLY STALE evidence (${r.staleOnlyRefs.length}) for a ${r.timeSensitivity} requirement`
       : r.status === "EXHAUSTED" ? `EXHAUSTED: ${r.missingReason ?? "no relevant evidence after recovery"}`
       : `${r.status}: no relevant evidence yet`;
-    return `- [${r.id}] (${r.importance}, ${r.timeSensitivity}) ${r.description}: ${r.status} (${detail})`;
+    const role = r.role !== undefined ? `, ${r.role}` : "";
+    return `- [${r.id}] (${r.importance}${role}, ${r.timeSensitivity}) ${r.description}: ${r.status} (${detail})`;
   });
+  // TRANSMISSION LINKS (research contract §3): the model must see the engine's per-arrow state.
+  // Node evidence is not arrow evidence, and the WEAKEST arrow — not the strongest — bounds what
+  // the answer may say about the chain.
+  const links = requirements.flatMap((r) =>
+    [...(r.targetTerms ?? []), ...(r.transmissionTargets ?? [])].map((t) => ({ t, r })),
+  );
+  const linkLines =
+    links.length === 0
+      ? []
+      : [
+          "TRANSMISSION LINKS (engine-assessed; evidence for the nodes is NOT evidence for the arrows):",
+          ...links.map(({ t, r }) =>
+            `- ${t}: ${r.status === "SATISFIED" ? "link backed by the evidence for this requirement" : `NOT ESTABLISHED (${r.status})`}`,
+          ),
+          "LINK LAW: describe a transmission as established only for the arrows that are backed by evidence. An arrow whose requirement is unresolved must be stated as not established — a conditional or hedged statement is allowed, an assertion of causality is not.",
+        ];
   const blocking = requirements.filter((r) => r.importance === "CRITICAL" && r.status !== "SATISFIED");
   return [
     "REQUIREMENT COVERAGE (engine-assessed; a provider returning data is NOT coverage):",
     ...lines,
+    ...linkLines,
     blocking.length === 0
       ? "VERDICT: all CRITICAL requirements are covered by relevant, fresh-enough evidence."
       : `VERDICT: ${blocking.length} CRITICAL requirement(s) remain UNCOVERED (${blocking.map((b) => b.id).join(", ")}). Do NOT present them as answered; if recovery failed, state exactly which requirement could not be satisfied.`,

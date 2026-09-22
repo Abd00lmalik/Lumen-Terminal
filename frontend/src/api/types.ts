@@ -289,6 +289,18 @@ export interface ResearchDiagnosticsDto {
   readonly questionType?: string;
   /** Requirement roles present in the ledger. */
   readonly requirementRoles?: readonly string[];
+  /** Engine-derived transmission-link statuses when the question asked for a causal chain. */
+  readonly causalLinks?: readonly CausalLinkDiagnosticDto[];
+  /** The link that binds the judgment (convenience for single-chain runs). */
+  readonly weakestCausalLink?: string;
+}
+
+export interface CausalLinkDiagnosticDto {
+  readonly target: string;
+  readonly targetLabel: string;
+  readonly status: string;
+  readonly requirementId: string;
+  readonly evidenceRefs: readonly string[];
 }
 
 export interface ResearchResponseDto {

@@ -10,6 +10,7 @@
  * Deterministic and asset-agnostic: nothing here inspects the question text.
  */
 import type { ResearchRequirement } from "./requirements.js";
+import { deriveCausalLinkStatuses, weakestCausalLink, type CausalLinkStatus, type CausalLinkStatusRecord } from "./causal.js";
 
 export type ConfidenceLevel = "HIGH" | "MODERATE" | "LOW" | "UNKNOWN";
 
@@ -38,6 +39,12 @@ export interface ConfidenceComponents {
   readonly failedPaths: number;
   /** Required calculations that could not be performed. */
   readonly calculationsMissing: number;
+  /** Requirements satisfied only by single-source or correlational evidence (quality pressure). */
+  readonly weakQuality: readonly string[];
+  /** Derived transmission links (empty for non-causal questions). */
+  readonly causalLinks: readonly CausalLinkStatusRecord[];
+  /** The weakest transmission link, when the question requested a causal chain. */
+  readonly weakestCausalLink?: CausalLinkStatusRecord;
   /** The computed level before any model input. */
   readonly level: ConfidenceLevel;
 }
@@ -83,6 +90,25 @@ export function computeConfidence(input: ConfidenceInput): ConfidenceComponents 
   if (calculationsMissing > 0) level = cap(level, "MODERATE");
   else if (calculationsMissing > 1) level = cap(level, "LOW");
   if (input.failedPaths > 0) level = cap(level, "MODERATE");
+
+  // EVIDENCE QUALITY: a requirement satisfied only by a single source or a correlational
+  // observation supports interpretation, not conviction.
+  const weakQuality = input.requirements
+    .filter(
+      (r) =>
+        r.status === "SATISFIED" &&
+        (r.evidenceQuality === "CORRELATIONAL" || (r.sourceDiversity !== undefined && r.sourceDiversity <= 1)),
+    )
+    .map((r) => r.id);
+  if (weakQuality.length > 0) level = cap(level, "MODERATE");
+
+  // CAUSAL LINK QUALITY (research contract §3): when the question requested a transmission
+  // chain, the judgment must reflect the WEAKEST material link — an answer with oil and yield
+  // evidence but no inflation evidence may not carry high conviction.
+  const causalLinks = deriveCausalLinkStatuses(input.requirements);
+  const weakest = weakestCausalLink(causalLinks);
+  if (weakest !== undefined) level = cap(level, causalCeiling(weakest.status));
+
   if (honestGap || coreCoverage === 0) level = cap(level, "LOW");
   if (input.requirements.length === 0) level = "UNKNOWN";
 
@@ -94,8 +120,22 @@ export function computeConfidence(input: ConfidenceInput): ConfidenceComponents 
     honestGap,
     failedPaths: input.failedPaths,
     calculationsMissing,
+    weakQuality,
+    causalLinks,
+    ...(weakest !== undefined ? { weakestCausalLink: weakest } : {}),
     level,
   };
+}
+
+/** Confidence ceiling a transmission link permits ("—" means the link is not yet researched). */
+function causalCeiling(status: CausalLinkStatus): ConfidenceLevel {
+  switch (status) {
+    case "SUPPORTED": return "HIGH";
+    case "PARTIALLY_SUPPORTED": return "MODERATE";
+    case "NOT_RESEARCHED": return "LOW";
+    case "STALE_ONLY": return "LOW";
+    case "UNRESOLVED": return "LOW";
+  }
 }
 
 /** One-line provenance for diagnostics (never prose for the trader). */
@@ -108,6 +148,8 @@ export function renderConfidence(c: ConfidenceComponents): string {
     `challenge=${c.challengeAttempted ? "attempted" : "not attempted"}`,
     `failedPaths=${c.failedPaths}`,
     `missingCalculations=${c.calculationsMissing}`,
+    `weakQuality=${c.weakQuality.length === 0 ? "none" : c.weakQuality.join(",")}`,
+    `weakestLink=${c.weakestCausalLink === undefined ? "n/a" : `${c.weakestCausalLink.target}:${c.weakestCausalLink.status}`}`,
     `honestGap=${c.honestGap ? "yes" : "no"}`,
   ].join(" ");
 }

@@ -66,10 +66,22 @@ export interface RequirementSeed {
   readonly evidenceClasses?: readonly string[];
   /** Relationship type this requirement represents in the causal chain. */
   readonly relationshipType?: RelationshipType;
+  /** Transmission targets this seed's causal link points into (question-derived links only). */
+  readonly targetTerms?: readonly string[];
 }
 
 export interface ResearchRequirement {
   readonly id: string;
+  /** The market/market-class names this requirement's transmission link points into. */
+  readonly targetTerms?: readonly string[];
+  /**
+   * TRANSMISSION LINKS CARRIED BY A DIMENSION ROW: when a question's causal wording names a
+   * target whose dimension the ledger ALREADY requires ("inflation" was required as the
+   * inflation regime), the arrow is attached to that same row instead of adding a duplicate
+   * dimension. One row per dimension, one arrow per named link — the arrow's status is derived
+   * from the row's coverage, so "the chain is established" still needs evidence for THIS arrow.
+   */
+  readonly transmissionTargets?: readonly string[];
   readonly description: string;
   readonly importance: "CRITICAL" | "SUPPORTING";
   readonly role: RequirementRole;
@@ -365,6 +377,7 @@ export function buildRequirements(seeds: readonly RequirementSeed[]): readonly R
         ? { evidenceClasses: [...seed.evidenceClasses] }
         : {}),
       ...(seed.relationshipType !== undefined ? { relationshipType: seed.relationshipType } : {}),
+      ...(seed.targetTerms !== undefined && seed.targetTerms.length > 0 ? { targetTerms: [...seed.targetTerms] } : {}),
       retrievalObjective: retrievalObjectiveFor(description, timeSensitivity, role),
     };
   });
@@ -656,6 +669,80 @@ export function completeRequirements(
     });
   }
   
+    // TRANSMISSION TARGETS (research contract §3): whenever the question's own wording names
+    // causal links ("how did oil transmit through inflation, yields and risk assets"), each
+    // named target is a CRITICAL requirement with the target as its declared subject scope, so
+    // the subject gate admits evidence about the link target (the question names it) while the
+    // generic anti-contamination gates stay fully in force. Gated on the PRESENCE of
+    // transmission wording, not on the question's overall type: a question can ask what drove
+    // oil AND how it transmitted ("macro regime" wording classifies it as MACRO_REGIME, and
+    // the transmission leg is still explicit and required).
+    const linkTargets = [...new Set(
+      causalLinksOf(question, subject !== "the subject" ? subject : undefined).map((l) => l.target),
+    )];
+    if (linkTargets.length > 0) {
+      for (const target of linkTargets) {
+        // The dimension is already required: attach the ARROW to that row rather than adding a
+        // duplicate dimension. The link's status then comes from the same coverage assessment,
+        // so an unresearched inflation leg is visible even though "inflation" was already a
+        // required dimension of the question.
+        const carrier = out.findIndex((r) => requirementCarriesTarget(r, target));
+        if (carrier !== -1) {
+          const row = out[carrier]!;
+          out[carrier] = {
+            ...row,
+            transmissionTargets: [...new Set([...(row.transmissionTargets ?? []), target])],
+          };
+          continue;
+        }
+        const description = `evidence of how the move in ${subject} transmitted into ${targetLabel(target)}`;
+        const domains = domainsOfRequirement(description);
+        out.push({
+          id: requirementId(out.length),
+          description,
+          importance: "CRITICAL",
+          role: "CORE",
+          timeSensitivity: "CURRENT",
+          domains: domains.length > 0 ? domains : (["GENERAL"] as const),
+          status: "PENDING",
+          evidenceRefs: [],
+          staleOnlyRefs: [],
+          recoveryAttempts: 0,
+          engineRequired: true,
+          relationshipType: "TRANSMISSION",
+          evidenceClasses: ["MACRO", "RATE", "YIELD", "EQUITY", "INDEX", "INFLATION", "PRICE", "NEWS", "MARKET_DATA"],
+          targetTerms: [target],
+          retrievalObjective: retrievalObjectiveFor(description, "CURRENT", "CORE"),
+        });
+      }
+
+      // ALTERNATIVE EXPLANATIONS (research contract §8): a transmission question is only answered
+      // honestly if a materially plausible competing explanation for the same observations is
+      // represented. Non-blocking unless the question explicitly asks whether the explanation
+      // could be something else — then it is a CORE decision dimension, not a footnote.
+      const wantsAlternatives = asksForAlternatives(question);
+      if (!out.some((r) => /alternativ\w*|competing|other (?:driver|explanation|factor)/i.test(r.description))) {
+        const description = `material alternative explanations for the ${subject} move and for the transmission links (competing drivers that could account for the same observations)`;
+        const domains = domainsOfRequirement(description);
+        out.push({
+          id: requirementId(out.length),
+          description,
+          importance: wantsAlternatives ? "CRITICAL" : "SUPPORTING",
+          role: wantsAlternatives ? "CORE" : "SUPPORTING",
+          timeSensitivity: "CURRENT",
+          domains: domains.length > 0 ? domains : (["GENERAL"] as const),
+          status: "PENDING",
+          evidenceRefs: [],
+          staleOnlyRefs: [],
+          recoveryAttempts: 0,
+          engineRequired: true,
+          relationshipType: "DRIVER",
+          evidenceClasses: ["NEWS", "ANALYSIS", "DRIVER", "CATALYST", "POLICY"],
+          retrievalObjective: retrievalObjectiveFor(description, "CURRENT", wantsAlternatives ? "CORE" : "SUPPORTING"),
+        });
+      }
+    }
+
     // CAUSAL CHAIN REQUIREMENTS (research contract): for CAUSAL questions, add requirements
     // that represent the causal chain structure. This ensures the engine retrieves evidence
     // for each link in the chain, not just the observation.
@@ -709,7 +796,32 @@ export function completeRequirements(
         });
       }
     }
-    
+
+    // WATCH-NEXT AS A DECISION DIMENSION (research contract §10): when the question explicitly
+    // asks what to watch, the watchlist is a CORE requirement the research must ground — not a
+    // generic indicator list generated after synthesis. The requirement's evidence is the
+    // forward-looking conditions the retrieved evidence actually supports monitoring.
+    if (asksWhatToWatchNext(question)) {
+      const description = `forward-looking conditions and indicators to watch next, with what would confirm and what would weaken the current assessment`;
+      const domains = domainsOfRequirement(description);
+      out.push({
+        id: requirementId(out.length),
+        description,
+        importance: "CRITICAL",
+        role: "CORE",
+        timeSensitivity: "CURRENT",
+        domains: domains.length > 0 ? domains : (["GENERAL"] as const),
+        status: "PENDING",
+        evidenceRefs: [],
+        staleOnlyRefs: [],
+        recoveryAttempts: 0,
+        engineRequired: true,
+        relationshipType: "IMPLICATION",
+        evidenceClasses: ["NEWS", "CATALYST", "EVENT", "POLICY", "PRICE", "MARKET_DATA"],
+        retrievalObjective: retrievalObjectiveFor(description, "CURRENT", "CORE"),
+      });
+    }
+
     return out;
   }
 
@@ -740,10 +852,67 @@ export function requirementsFromTasks(tasks: readonly { readonly objective: stri
 export interface MatchOptions {
   /** Subject terms of the question (instrument/tickers). When set, items must concern them. */
   readonly subjectTerms?: ReadonlySet<string>;
+  /**
+   * TRANSMISSION-LINK TARGETS the question explicitly names (research contract §3): evidence
+   * about a named link target is admitted like subject evidence (the question asked for it),
+   * while everything else stays gated. Parsed from the question's transmission wording —
+   * never a domain whitelist.
+   */
+  readonly admittedTargets?: ReadonlySet<string>;
   readonly now?: Date;
 }
 
 export type MatchResult = "SATISFIES" | "STALE_ONLY" | "NO_MATCH";
+
+/**
+ * Which link targets (if any) does this requirement admit through the subject gate? A
+ * transmission requirement admits evidence concerning its own declared targets; all other
+ * requirements admit none, so the exemption is exactly as wide as the question's wording.
+ */
+export function admittedTargetsOf(
+  req: Pick<ResearchRequirement, "targetTerms" | "relationshipType" | "transmissionTargets">,
+): ReadonlySet<string> {
+  const targets = [...(req.targetTerms ?? []), ...(req.transmissionTargets ?? [])];
+  if (targets.length === 0) return new Set<string>();
+  return new Set(targets.map((t) => t.toUpperCase()));
+}
+
+/**
+ * Canonical market folds an observation's text can be attributed to (for target admission):
+ * the observation's own tokens folded through the shared concept vocabulary. A yield quote
+ * folds to RATES, an inflation print to INFLATION.
+ */
+function foldsOfText(text: string): ReadonlySet<string> {
+  return foldMention(text, 3);
+}
+
+/**
+ * Folds that name an ATTRIBUTE of a market rather than a market itself. "Higher oil prices"
+ * mentions oil AND the word prices; only oil is a party to a transmission link, so attribute
+ * folds are never link sources or targets.
+ */
+const NON_MARKET_FOLDS: ReadonlySet<string> = new Set(["PRICE", "QUOTE", "HISTORICAL"]);
+
+/** Fold a phrase onto the shared market vocabulary, dropping attribute words and short tokens. */
+function foldMention(text: string, minLength = 1): Set<string> {
+  const folds = new Set<string>();
+  for (const raw of text.toUpperCase().split(/[^A-Z]+/)) {
+    if (raw.length < minLength) continue;
+    const folded = TRANSMISSION_TARGET_FOLDS[raw] ?? CONCEPT_SYNONYMS[raw];
+    if (folded !== undefined && !NON_MARKET_FOLDS.has(folded)) folds.add(folded);
+  }
+  return folds;
+}
+
+/**
+ * Does the item concern an ADMITTED transmission target (question-named)? At least one of
+ * the item's market folds must be a target the question's transmission wording named.
+ */
+export function concernsAdmittedTarget(itemText: string, admittedTargets: ReadonlySet<string>): boolean {
+  if (admittedTargets.size === 0) return false;
+  for (const fold of foldsOfText(itemText)) if (admittedTargets.has(fold)) return true;
+  return false;
+}
 
 /**
  * Whole-word subject check shared with the context gate (quote pairs included). Exported so
@@ -808,10 +977,19 @@ export function freshnessSufficient(req: Pick<ResearchRequirement, "timeSensitiv
 export function matchRequirement(req: ResearchRequirement, item: CoverageEvidence, opts: MatchOptions = {}): MatchResult {
   const now = opts.now ?? new Date();
   const declaredSubject = item.subject ?? "";
+  // TARGET-SCOPED SUBJECT GATE (research contract §3): a question-named transmission link
+  // target counts as the question's subject for evidence about THAT target — the question
+  // explicitly asked how its subject transmits into it. Everything else stays gated.
+  // The requirement's OWN declared link targets are always admitted (the question named them);
+  // a caller may add run-level targets on top. No caller-side wiring is required, so the
+  // exemption cannot silently disappear if a gate forgets to pass it.
+  const admittedTargets = new Set<string>([...(opts.admittedTargets ?? []), ...admittedTargetsOf(req)]);
+  const concernsTarget = concernsAdmittedTarget(`${item.text} ${declaredSubject}`, admittedTargets);
   if (
     opts.subjectTerms !== undefined &&
     opts.subjectTerms.size > 0 &&
-    !concernsSubject(`${item.text} ${declaredSubject}`, opts.subjectTerms)
+    !concernsSubject(`${item.text} ${declaredSubject}`, opts.subjectTerms) &&
+    !concernsTarget
   ) {
     return "NO_MATCH";
   }
@@ -1343,5 +1521,164 @@ export function causalChainRequirements(
       relationshipType: "IMPLICATION",
       evidenceClasses: ["NEWS", "CATALYST", "EVENT", "POLICY"],
     },
+    {
+      description: `material alternative explanations for the ${subject} move (competing drivers that could account for the same observation)`,
+      importance: "SUPPORTING",
+      timeSensitivity: "CURRENT",
+      role: "SUPPORTING",
+      relationshipType: "DRIVER",
+      evidenceClasses: ["NEWS", "ANALYSIS", "DRIVER", "CATALYST"],
+    },
   ];
+}
+
+// ---------------------------------------------------------------------------
+// TRANSMISSION ANALYSIS (research contract §3: causal/transmission validation)
+// ---------------------------------------------------------------------------
+
+/**
+ * Link target vocabulary (market CLASSES, not questions): how a market name in the question's
+ * transmission wording folds onto the shared concept vocabulary. Generic — any market word in
+ * a transmission clause resolves through this map plus CONCEPT_SYNONYMS; unseen assets of a
+ * known class behave identically.
+ */
+const TRANSMISSION_TARGET_FOLDS: Readonly<Record<string, string>> = {
+  OIL: "OIL", CRUDE: "OIL", WTI: "OIL", BRENT: "OIL",
+  GOLD: "GOLD", COPPER: "COPPER", SILVER: "SILVER", COMMODITY: "COMMODITY", COMMODITIES: "COMMODITY",
+  INFLATION: "INFLATION", CPI: "INFLATION",
+  YIELD: "RATES", YIELDS: "RATES", TREASURY: "RATES", TREASURIES: "RATES", RATES: "RATES", BONDS: "RATES",
+  DOLLAR: "DOLLAR", DXY: "DOLLAR", USD: "DOLLAR", CURRENCY: "DOLLAR", FX: "DOLLAR",
+  EQUITIES: "EQUITIES", EQUITY: "EQUITIES", STOCKS: "EQUITIES", STOCK: "EQUITIES", SHARES: "EQUITIES",
+  RISK: "RISK_ASSETS", EMERGING: "EMERGING_MARKETS", CRYPTO: "CRYPTO", BITCOIN: "CRYPTO", BTC: "CRYPTO",
+};
+
+/**
+ * Transmission wording (question SHAPES, not questions): "how did X transmit through/into Y",
+ * "how did X affect Y", "the impact of X on Y", "X feed into Y", "flow through". Each match
+ * is a causal link the question explicitly requests; the engine derives requirements for it.
+ */
+const TRANSMISSION_CLAUSES: readonly { readonly pattern: RegExp; readonly fromIndex: number; readonly toIndex: number }[] = [
+  { pattern: /\b(?:how (?:did|does|could|would|might)|what (?:impact|effect) (?:did|does|could|would|might))?[^.?!]{1,80}?\btransmit\w*\s+(?:through|into|to)\s+([^.?!]{3,90})/i, fromIndex: 0, toIndex: 1 },
+  { pattern: /\b(?:how (?:did|does|could|would|might))[^.?!]{1,80}?\b(?:affect|impact|hit|drive|move)\s+([^.?!]{3,90})/i, fromIndex: 0, toIndex: 1 },
+  { pattern: /\b(?:impact|effect|effect[s]?|influence)\s+(?:of|on)\s+([^.?!]{3,60})\s+(?:on|into|through)\s+([^.?!]{3,90})/i, fromIndex: 1, toIndex: 2 },
+  { pattern: /\b(?:feed|feeds|fed|flow|flows|flowed|feeds through|spill|spills|spilled)\w*\s+(?:through|into|to|over)\s+(?:to\s+)?([^.?!]{3,90})/i, fromIndex: 0, toIndex: 1 },
+];
+
+/**
+ * Parse the market/market-class names a question's transmission wording points INTO.
+ * Returns canonical target folds (INFLATION, RATES, EQUITIES, ...). Generic: reads the
+ * question's own causal grammar, never a question list. Empty when the question requests
+ * no transmission.
+ */
+export function transmissionTargetsOf(question: string): readonly string[] {
+  const targets = new Set<string>();
+  for (const clause of TRANSMISSION_CLAUSES) {
+    const match = question.match(clause.pattern);
+    if (match === null) continue;
+    for (const folded of foldMention(match[clause.toIndex] ?? "")) targets.add(folded);
+  }
+  return [...targets];
+}
+
+/**
+ * Does the question EXPLICITLY ask what to watch next / what would change the view? A generic
+ * forward-looking IMPLICATION requirement is already added to every causal chain; this detects
+ * the questions that make monitoring a DECISION dimension ("what should a trader watch next",
+ * "what would confirm or invalidate").
+ */
+export function asksWhatToWatchNext(question: string): boolean {
+  return /\b(what should (?:a |the )?(?:trader|i|we) (?:watch|monitor)|what to watch|watch next|monitor next|what would (?:confirm|invalidate|change)|what(?:'s| is) the signal|key (?:levels?|indicator[s]?|signs?) to watch)\b/i.test(question);
+}
+
+/**
+ * Does the question explicitly ask whether the explanation could be different (alternative
+ * explanations / competing drivers)?
+ */
+export function asksForAlternatives(question: string): boolean {
+  return /\b(alternativ\w* explanation|other (?:explanation|driver|factor)|what else could|competing (?:driver|explanation|theory))\b/i.test(question);
+}
+
+/** One derived causal link between two named parties in the question's transmission wording. */
+export interface CausalLinkSpec {
+  /** Canonical source market fold (the driver side). */
+  readonly source: string;
+  /** Canonical target market fold (the receiver side). */
+  readonly target: string;
+}
+
+/**
+ * Derive the causal links a question's transmission wording explicitly requests, as ordered
+ * (source -> target) pairs of canonical folds. "How could higher oil prices affect inflation
+ * and emerging markets" derives OIL->INFLATION and OIL->EMERGING_MARKETS. Generic: pure
+ * grammar over the question's own nouns; no question list.
+ */
+export function causalLinksOf(question: string, subject?: string): readonly CausalLinkSpec[] {
+  const links: { source: string; target: string }[] = [];
+  const subjectFold =
+    subject !== undefined && subject.trim() !== "" ? (TRANSMISSION_TARGET_FOLDS[subject.toUpperCase()] ?? CONCEPT_SYNONYMS[subject.toUpperCase()]) : undefined;
+  for (const clause of TRANSMISSION_CLAUSES) {
+    const match = question.match(clause.pattern);
+    if (match === null) continue;
+    const head = (match[clause.fromIndex] ?? "").toUpperCase();
+    const tail = (match[clause.toIndex] ?? "").toUpperCase();
+    const foldTail = (text: string): Set<string> => foldMention(text);
+    const headFolds = foldTail(head);
+    if (headFolds.size === 0 && subjectFold !== undefined) headFolds.add(subjectFold);
+    if (headFolds.size === 0) {
+      // The clause head names no market ("how did those drivers transmit ..."): the source
+      // side is the market(s) the question named BEFORE the transmission clause — the
+      // question's subject side. Folds that also appear in the tail are targets, not sources.
+      const tailFolds = foldTail(tail);
+      for (const f of foldTail(question.slice(0, match.index ?? 0).toUpperCase())) {
+        if (!tailFolds.has(f)) headFolds.add(f);
+      }
+    }
+    for (const target of foldTail(tail)) {
+      for (const source of headFolds) {
+        if (source !== target) links.push({ source, target });
+      }
+    }
+  }
+  // Deterministic de-dup, preserving question order.
+  const seen = new Set<string>();
+  return links.filter((l) => {
+    const key = `${l.source}->${l.target}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** Human label for a canonical transmission-target fold (diagnostics + requirement wording). */
+export function targetLabel(target: string): string {
+  switch (target) {
+    case "RATES": return "Treasury yields and rate markets";
+    case "EQUITIES": return "broader equity and risk-asset markets";
+    case "RISK_ASSETS": return "broader risk assets";
+    case "EMERGING_MARKETS": return "emerging-market assets";
+    case "INFLATION": return "inflation";
+    case "DOLLAR": return "the dollar";
+    case "CRYPTO": return "crypto markets";
+    case "OIL": return "crude oil";
+    case "GOLD": return "gold";
+    case "COPPER": return "copper";
+    case "SILVER": return "silver";
+    case "COMMODITY": return "commodity markets";
+    default: return target.toLowerCase().replace(/_/g, " ");
+  }
+}
+
+/**
+ * Does this ledger row already own the dimension a transmission target names? Prevents
+ * duplicating a dimension the ledger already asks for (the arrow is attached to the existing
+ * row instead). Both sides fold through the same concept vocabulary ("RATES" target vs a
+ * requirement naming "yields").
+ */
+function requirementCarriesTarget(row: ResearchRequirement, target: string): boolean {
+  const canonical = TRANSMISSION_TARGET_FOLDS[target] ?? CONCEPT_SYNONYMS[target] ?? target;
+  const declared = [...(row.targetTerms ?? []), ...(row.transmissionTargets ?? [])];
+  return (
+    declared.some((t) => (TRANSMISSION_TARGET_FOLDS[t] ?? CONCEPT_SYNONYMS[t] ?? t) === canonical) ||
+    meaningfulTokens(row.description).has(canonical)
+  );
 }

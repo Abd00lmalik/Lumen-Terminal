@@ -866,6 +866,15 @@ export async function runAdaptiveResearch(
           importance: r.importance,
           status: r.status,
           timeSensitivity: r.timeSensitivity,
+          // Transmission rows carry their link targets so causal-claim validation can
+          // bind assertive language to the link's actual evidence status. A link whose
+          // dimension was already required rides on that row (transmissionTargets), so both
+          // fields travel — and with them the quality signals that decide the arrow's status.
+          ...(r.relationshipType !== undefined ? { relationshipType: r.relationshipType } : {}),
+          ...(r.targetTerms !== undefined ? { targetTerms: r.targetTerms } : {}),
+          ...(r.transmissionTargets !== undefined ? { transmissionTargets: r.transmissionTargets } : {}),
+          ...(r.evidenceQuality !== undefined ? { evidenceQuality: r.evidenceQuality } : {}),
+          ...(r.sourceDiversity !== undefined ? { sourceDiversity: r.sourceDiversity } : {}),
         })),
         evidenceText: collected
           .map((e) => `${e.observation} ${e.subject ?? ""}`)

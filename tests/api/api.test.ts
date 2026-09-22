@@ -119,6 +119,10 @@ describe("request handling", () => {
         recoveryRounds: number;
         completionGate: string;
         coverage: string;
+        questionType?: string;
+        requirementRoles?: string[];
+        causalLinks?: { target: string; targetLabel: string; status: string; requirementId: string }[];
+        weakestCausalLink?: string;
       };
     };
 
@@ -133,6 +137,14 @@ describe("request handling", () => {
     expect(diagnostics!.recoveryRounds).toBeGreaterThanOrEqual(0);
     expect(["COMPLETE", "PARTIAL", "INSUFFICIENT"]).toContain(diagnostics!.coverage);
     expect(typeof diagnostics!.completionGate).toBe("string");
+    // TRANSMISSION SURFACE (research contract §3): an external benchmark must be able to score
+    // each arrow the question asked for, not just the nodes. This question names no transmission
+    // target, so the engine must derive NO links — inventing causality is a failure too.
+    expect(Array.isArray(diagnostics!.causalLinks)).toBe(true);
+    expect(diagnostics!.causalLinks).toHaveLength(0);
+    expect(diagnostics!.weakestCausalLink).toBeUndefined();
+    expect(Array.isArray(diagnostics!.requirementRoles)).toBe(true);
+    expect(typeof diagnostics!.questionType).toBe("string");
     await app.close();
   });
 

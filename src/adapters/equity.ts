@@ -564,10 +564,13 @@ export class EquityFundamentalsAdapter implements ProviderAdapter {
   /** Cookie + crumb handshake, cached per adapter instance. */
   private async ensureCrumb(): Promise<{ value: string; cookie: string }> {
     if (this.crumbCache !== undefined) return this.crumbCache;
-    // fc.yahoo.com sets the consent cookie; getcrumb returns the crumb bound to it.
-    const cookieResp = await fetch("https://fc.yahoo.com", { headers: { "user-agent": YAHOO_UA } }).catch(() => undefined);
+    // fc.yahoo.com sets the consent cookie; getcrumb returns the crumb bound to it. The
+    // transport's OWN fetch is used (never the global one), so the handshake honors the
+    // injected test seam and the deterministic suite does not depend on the network.
+    const doFetch = this.yahoo.fetchImpl;
+    const cookieResp = await doFetch("https://fc.yahoo.com", { headers: { "user-agent": YAHOO_UA } }).catch(() => undefined);
     const cookieHeader = cookieResp?.headers.getSetCookie?.().map((c) => c.split(";")[0]).join("; ") ?? "";
-    const crumbResp = await fetch("https://query1.finance.yahoo.com/v1/test/getcrumb", {
+    const crumbResp = await doFetch("https://query1.finance.yahoo.com/v1/test/getcrumb", {
       headers: { "user-agent": YAHOO_UA, ...(cookieHeader !== "" ? { cookie: cookieHeader } : {}) },
     });
     if (!crumbResp.ok) throw new Error(`HTTP ${crumbResp.status}`);
@@ -740,9 +743,11 @@ export class EarningsCalendarAdapter implements ProviderAdapter {
 
   private async ensureCrumb(): Promise<{ value: string; cookie: string }> {
     if (this.crumbCache !== undefined) return this.crumbCache;
-    const cookieResp = await fetch("https://fc.yahoo.com", { headers: { "user-agent": YAHOO_UA } }).catch(() => undefined);
+    // Same law as the fundamentals adapter: the transport's injected fetch, never the global one.
+    const doFetch = this.yahoo.fetchImpl;
+    const cookieResp = await doFetch("https://fc.yahoo.com", { headers: { "user-agent": YAHOO_UA } }).catch(() => undefined);
     const cookieHeader = cookieResp?.headers.getSetCookie?.().map((c) => c.split(";")[0]).join("; ") ?? "";
-    const crumbResp = await fetch("https://query1.finance.yahoo.com/v1/test/getcrumb", {
+    const crumbResp = await doFetch("https://query1.finance.yahoo.com/v1/test/getcrumb", {
       headers: { "user-agent": YAHOO_UA, ...(cookieHeader !== "" ? { cookie: cookieHeader } : {}) },
     });
     if (!crumbResp.ok) throw new Error(`HTTP ${crumbResp.status}`);

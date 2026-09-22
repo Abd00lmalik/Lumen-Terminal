@@ -76,7 +76,13 @@ export class RestTransport {
   private readonly retryPolicy: RetryPolicy;
   private readonly throttler: Throttler;
   private readonly retryOptions: Pick<RetryOptions, "now" | "sleep" | "onRetry">;
-  private readonly fetchImpl: typeof fetch;
+  /**
+   * The HTTP fetch this transport uses. Public so adapters that need an out-of-band handshake
+   * (a cookie/crumb exchange on another host) keep the SAME injected fetch as the transport
+   * instead of reaching for the global one — a global fetch in an adapter silently bypasses the
+   * test seam and makes the deterministic suite depend on the network.
+   */
+  readonly fetchImpl: typeof fetch;
   private readonly defaultHeaders: Record<string, string>;
 
   readonly rawCapture: RawCapture;

@@ -382,6 +382,18 @@ export class ResearchApp {
                 : {}),
               ...(questionText !== undefined ? { questionType: questionTypeOf(questionText) } : {}),
               requirementRoles: [...new Set(requirements.map((r) => r.role ?? "CORE"))],
+              // TRANSMISSION LINKS (research contract §3): derived from the ledger, exposed so an
+              // external benchmark can score each arrow rather than trusting the prose.
+              causalLinks: computed?.causalLinks.map((l) => ({
+                target: l.target,
+                targetLabel: l.targetLabel,
+                status: l.status,
+                requirementId: l.requirementId,
+                evidenceRefs: l.evidenceRefs,
+              })) ?? [],
+              ...(computed?.weakestCausalLink !== undefined
+                ? { weakestCausalLink: computed.weakestCausalLink.target }
+                : {}),
             };
           })();
     // Honest outcome mapping: a pure interpretation failure (no research ran) is a MODEL_FAILURE;

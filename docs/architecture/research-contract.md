@@ -67,6 +67,36 @@ subject-scoped evidence only — an item of a declared class can satisfy the req
 class match in `matchRequirement`, after the subject, temporal and freshness gates. Model-authored
 requirements keep the strict vocabulary rule.
 
+## Transmission / causal links
+
+When the question's own wording names a causal chain ("how did those drivers transmit through
+inflation, Treasury yields and broader risk assets"), `transmissionTargetsOf` / `causalLinksOf`
+fold the named markets onto the shared market vocabulary and every named target becomes a required
+dimension:
+
+- if the ledger does not yet ask about that dimension, it gets its own **TRANSMISSION** row
+  (`targetTerms`);
+- if the dimension is already required ("inflation" was already a required dimension), the arrow is
+  **attached to that row** (`transmissionTargets`) — one row per dimension, one arrow per named link.
+
+**Node evidence is not arrow evidence.** `deriveCausalLinkStatuses` reads the ledger and derives each
+arrow's status (`SUPPORTED`, `PARTIALLY_SUPPORTED`, `STALE_ONLY`, `UNRESOLVED`, `NOT_RESEARCHED`), and
+`weakestCausalLink` names the arrow that binds the judgment:
+
+- `confidence.ts` caps confidence with the weakest link (`SUPPORTED → HIGH`, `PARTIALLY → MODERATE`,
+  unresolved/stale/never-researched → `LOW`), so oil + yield + risk-asset evidence with no inflation
+  evidence cannot read as high conviction;
+- `contract-checks.ts` rejects **assertive** causal prose about an unresolved arrow
+  (`CAUSAL_CLAIM_WITHOUT_LINK_EVIDENCE`); hedged or conditional language stays admissible;
+- the synthesis context states the per-arrow status and the link law, so the model interprets the
+  engine's epistemic state rather than guessing it;
+- `researchDiagnostics.causalLinks` exposes the same state for external scoring.
+
+The subject gate is widened **only** by the targets the question itself named (`admittedTargetsOf`,
+applied per requirement inside `matchRequirement`): evidence about a named target is admitted, and
+nothing else is. A question that names no transmission derives no links at all — inventing causality
+is a failure too.
+
 ## Requirement-scoped retrieval
 
 Recovery rounds and deep-research workers receive a **retrieval brief** (`retrievalBrief`), not the
@@ -78,4 +108,8 @@ instruction not to answer the whole question or substitute unrelated material.
 - Trader-facing answer: answer → confidence → key findings → support/opposition → what would change
   the view (no plumbing).
 - `researchDiagnostics` (API): per-requirement status including role, engine-computed confidence and
-  its basis, question type, requirement roles, capability floor, recovery rounds, completion gates.
+  its basis, question type, requirement roles, capability floor, recovery rounds, completion gates,
+  derived transmission links and the weakest link.
+- Frontend ("What Lumen checked" panel): question type, coverage, engine-computed confidence, gate,
+  requirements by role, the transmission links with the weakest arrow called out, and the collapsed
+  research diagnostics (requirement ledger + confidence basis).

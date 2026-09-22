@@ -145,6 +145,77 @@ export function ActiveResearchPage() {
   );
 }
 
+/**
+ * RESEARCH QUALITY (structured research state, not chain-of-thought): what the engine had to
+ * know, which decision role each requirement plays, how the run ended, and — when the question
+ * named a transmission chain — the engine's per-arrow status, with the weakest arrow called out.
+ * Collapsed by default: the trader's answer stays the main surface.
+ */
+function ResearchQuality({ result }: { result: ResearchResponseDto }) {
+  const d = result.researchDiagnostics;
+  if (d === undefined) return null;
+  const byRole = new Map<string, { covered: number; total: number }>();
+  for (const r of d.requirements) {
+    const role = r.role ?? "CORE";
+    const entry = byRole.get(role) ?? { covered: 0, total: 0 };
+    entry.total += 1;
+    if (r.status === "SATISFIED") entry.covered += 1;
+    byRole.set(role, entry);
+  }
+  const links = d.causalLinks ?? [];
+  return (
+    <Panel kicker="research quality" title="What Lumen checked">
+      <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 12.5 }}>
+          {d.questionType !== undefined && <StatusBadge status={d.questionType} />}
+          <span className="counts">coverage {d.coverage.toLowerCase()}</span>
+          {d.confidence !== undefined && <span className="counts">confidence {d.confidence.toLowerCase()} (engine-computed)</span>}
+          <span className="counts">gate {d.completionGate}</span>
+          {d.recoveryRounds > 0 && <span className="counts">{d.recoveryRounds} recovery round(s)</span>}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {[...byRole.entries()].map(([role, c]) => (
+            <div key={role} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
+              <span style={{ color: "var(--text-2)" }}>{role.toLowerCase()} requirements</span>
+              <span className="counts">{c.covered}/{c.total} established</span>
+            </div>
+          ))}
+        </div>
+        {links.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ fontSize: 12, color: "var(--text-3)" }}>transmission links (evidence for the nodes is not evidence for the arrows)</div>
+            {links.map((l) => (
+              <div key={l.requirementId} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12.5 }}>
+                <span style={{ color: "var(--text-2)" }}>
+                  {l.targetLabel}
+                  {l.target === d.weakestCausalLink ? " · weakest link" : ""}
+                </span>
+                <span className="counts" style={l.status === "SUPPORTED" ? undefined : { color: "var(--warn)" }}>
+                  {l.status.toLowerCase().replace(/_/g, " ")}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        <details>
+          <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--text-3)" }}>Research diagnostics (requirements, capabilities, provenance)</summary>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+            {d.requirements.map((r) => (
+              <div key={r.description} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12 }}>
+                <span style={{ color: "var(--text-2)" }}>{r.role ?? "CORE"} · {r.description}</span>
+                <span className="counts">{r.status}{r.status === "SATISFIED" ? ` (${r.evidenceCount})` : ""}</span>
+              </div>
+            ))}
+            {d.confidenceBasis !== undefined && (
+              <div className="mono" style={{ fontSize: 11.5, color: "var(--text-3)" }}>{d.confidenceBasis}</div>
+            )}
+          </div>
+        </details>
+      </div>
+    </Panel>
+  );
+}
+
 /** Renders the backend's final ResearchResponseDTO verbatim. */
 function ResultView({ result, onInspectEvidence }: { result: ResearchResponseDto; onInspectEvidence: () => void }) {
   return (
@@ -186,6 +257,8 @@ function ResultView({ result, onInspectEvidence }: { result: ResearchResponseDto
           </Panel>
         );
       })()}
+
+      <ResearchQuality result={result} />
 
       {result.evidence.length > 0 && (
         <Panel kicker="traceability" title="Evidence" right={<button className="btn sm ghost" onClick={onInspectEvidence}>Inspect all evidence →</button>}>

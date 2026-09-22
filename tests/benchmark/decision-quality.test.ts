@@ -52,6 +52,14 @@ interface GoldenContract {
   readonly requiredCalculation?: RegExp;
   readonly requiredCapabilities?: readonly string[];
   readonly counterevidence: "REQUIRED" | "OPTIONAL";
+  /**
+   * TRANSMISSION CONTRACT (research contract §3): the links the question's own wording must
+   * yield, and the status the collected evidence permits for each. An UNDEFINED list is itself
+   * an expectation: a question that asked for no transmission must derive no causal links.
+   */
+  readonly expectedLinks?: readonly { readonly target: string; readonly status: string }[];
+  /** Highest engine-computed confidence the evidence set permits. */
+  readonly confidenceCeiling?: string;
 }
 
 interface Scenario {
@@ -70,8 +78,11 @@ const DIMENSIONS = [
   "QUESTION UNDERSTANDING", "SUBJECT RESOLUTION", "TEMPORAL CORRECTNESS", "CORE REQUIREMENTS",
   "CHALLENGE EXECUTION", "EVIDENCE RELEVANCE", "FRESHNESS", "ANALYTICAL CORRECTNESS",
   "CROSS-SIGNAL SYNTHESIS", "COUNTEREVIDENCE", "UNCERTAINTY", "DECISION USEFULNESS",
-  "TRACEABILITY", "NO CONTAMINATION", "RECOVERY",
+  "TRACEABILITY", "NO CONTAMINATION", "RECOVERY", "CAUSAL LINK VALIDATION",
 ] as const;
+
+/** Ordered confidence levels, for the causal-link confidence ceiling check. */
+const CONFIDENCE_ORDER: Readonly<Record<string, number>> = { UNKNOWN: 0, LOW: 1, MODERATE: 2, HIGH: 3 };
 
 function plan(question: string, requirements: unknown[], capabilities: string[]): string {
   return JSON.stringify({
@@ -318,6 +329,25 @@ function score(run: { outcome: AdaptiveLoopOutcome; params: Record<string, unkno
   const attempted = capabilities.length;
   const failures = outcome.executions.filter((e) => e.result.failure?.type !== undefined && e.result.failure.type !== "NONE").length;
   set("RECOVERY", attempted > failures || failures === 0, `${failures} failed path(s) out of ${attempted}`);
+
+  // CAUSAL LINK VALIDATION (research contract §3): node evidence is not arrow evidence. The
+  // links are derived from the run's own ledger, and the weakest link caps the confidence the
+  // evidence set permits — an answer cannot carry high conviction over an unresearched leg.
+  const derivedLinks = outcome.confidence?.causalLinks ?? [];
+  const linksPass =
+    golden.expectedLinks === undefined
+      ? derivedLinks.length === 0
+      : golden.expectedLinks.every((e) =>
+          derivedLinks.some((l) => l.target === e.target && (e.status === "ANY" || l.status === e.status)),
+        );
+  const weakestLink = outcome.confidence?.weakestCausalLink;
+  const ceilingPass =
+    golden.confidenceCeiling === undefined ||
+    (CONFIDENCE_ORDER[outcome.confidence?.level ?? "UNKNOWN"] ?? 0) <= (CONFIDENCE_ORDER[golden.confidenceCeiling] ?? 0);
+  set("CAUSAL LINK VALIDATION", linksPass && ceilingPass,
+    golden.expectedLinks === undefined
+      ? `no transmission was asked for; derived links: ${derivedLinks.length === 0 ? "none" : derivedLinks.map((l) => l.target).join(",")}`
+      : `links ${derivedLinks.map((l) => `${l.target}:${l.status}`).join(", ") || "none"}; weakest ${weakestLink?.target ?? "n/a"}; confidence ${outcome.confidence?.level ?? "n/a"}${golden.confidenceCeiling !== undefined ? ` (ceiling ${golden.confidenceCeiling})` : ""}`);
 
   return dimensions;
 }
@@ -606,6 +636,13 @@ const ADVERSARIAL: readonly Scenario[] = [
       expectedEvidence: [/oil|crude/i, /inflation|cpi/i, /equit|stock|s&p/i],
       forbiddenEvidence: [/bitcoin|ethereum/i],
       counterevidence: "OPTIONAL",
+      // The question's own wording names both transmission legs, so both must be derived as
+      // links and both must be backed by the evidence the run retrieves.
+      expectedLinks: [
+        { target: "INFLATION", status: "ANY" },
+        { target: "EQUITIES", status: "ANY" },
+      ],
+      confidenceCeiling: "MODERATE",
     },
     plan: plan("How could oil prices affect inflation and equities?", [
       { description: "current oil price transmission into inflation and equity valuations", importance: "CRITICAL", timeSensitivity: "CURRENT" },
@@ -732,6 +769,71 @@ describe("decision-quality benchmark (dimensions scored independently)", () => {
       ...base,
       ledger: [{ description: "current monetary policy trajectory", importance: "CRITICAL", status: "EXHAUSTED", timeSensitivity: "CURRENT" }],
     }).map((v) => v.type)).toContain("COVERAGE_CLAIM_OVER_UNRESOLVED_REQUIREMENT");
+  });
+
+  it("CROSS-DOMAIN TRANSMISSION: the weakest leg binds the judgment (oil → inflation → yields → risk assets)", async () => {
+    // The exact product failure: oil, yields and risk assets are all evidenced, the inflation
+    // transmission leg is NOT — and the run must not describe the chain as established, must
+    // not call itself confident, and must derive every arrow from the ledger.
+    const question =
+      "What drove the move in crude oil this week, how did those drivers transmit through inflation, Treasury yields and broader risk assets and what should a trader watch next if this macro regime persists";
+    const scenario: Scenario = {
+      name: "CROSS-DOMAIN TRANSMISSION: missing inflation leg",
+      golden: {
+        question, subject: "CL=F", windowDays: 7,
+        coreDimensions: [
+          { label: "oil", pattern: /oil|crude/ },
+          { label: "inflation", pattern: /inflation|cpi/ },
+          { label: "yields", pattern: /yield|rate/ },
+          { label: "risk assets", pattern: /risk|equit|index/ },
+        ],
+        expectedEvidence: [/crude|oil|WTI/i, /yield|treasury/i],
+        forbiddenEvidence: [/bitcoin|ethereum|solana/i],
+        counterevidence: "REQUIRED",
+        expectedLinks: [
+          { target: "INFLATION", status: "ANY" },
+          { target: "RATES", status: "ANY" },
+          { target: "RISK_ASSETS", status: "ANY" },
+        ],
+        confidenceCeiling: "LOW",
+      },
+      plan: plan(question, [
+        { description: "current crude oil price movement this week", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+        { description: "oil supply and demand drivers this week", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+        { description: "Treasury yields and broader risk assets response", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+      ], ["EQUITY_MARKET_DATA", "NEWS_ANALYSIS"]),
+      providers: new Map([
+        ["EQUITY_MARKET_DATA", [
+          { content: JSON.stringify({ symbol: "CL=F", price: 96.08, previousClose: 100.05, changePct: -3.97 }), about: "CL=F" },
+          { content: JSON.stringify({ symbol: "^TNX", price: 4.998, previousClose: 4.96, changePct: 0.77 }), about: "^TNX" },
+          { content: JSON.stringify({ symbol: "^GSPC", price: 6312.4, previousClose: 6390.1, changePct: -1.22 }), about: "^GSPC" },
+        ]],
+        ["NEWS_ANALYSIS", [
+          { content: "Crude oil supply disruption tightened the physical market while Treasury yields rose as rate markets repriced policy and the S&P 500 fell as risk assets weakened.", about: "CL=F" },
+        ]],
+      ]),
+      capabilityParams: { asset: "CL=F" },
+    };
+
+    const run = await execute(scenario);
+    const dimensions = score(run, scenario.golden);
+    report(scenario.name, dimensions);
+
+    // Every arrow the question named is derived from the ledger, and the unresearched leg is
+    // reported as such rather than skipped.
+    const links = run.outcome.confidence?.causalLinks ?? [];
+    expect(links.map((l) => l.target)).toEqual(expect.arrayContaining(["INFLATION", "RATES", "RISK_ASSETS"]));
+    // NOT_RESEARCHED when nothing served the leg, UNRESOLVED once recovery was attempted and
+    // exhausted — either way it is NOT a supported arrow.
+    expect(["NOT_RESEARCHED", "UNRESOLVED", "STALE_ONLY"]).toContain(
+      links.find((l) => l.target === "INFLATION")!.status,
+    );
+    expect(run.outcome.confidence?.weakestCausalLink?.target).toBe("INFLATION");
+    expect(run.outcome.confidence?.level).toBe("LOW");
+    // The engine may not declare sufficiency over an unresolved CORE leg it could not recover.
+    expect(run.outcome.stoppedBecause).not.toBe("EVIDENCE_SUFFICIENT");
+    expect(dimensions["NO CONTAMINATION"]?.pass).toBe(true);
+    expect(dimensions["CAUSAL LINK VALIDATION"]?.pass).toBe(true);
   });
 
   it("surviving violations are stripped, and the engine states the gap instead", async () => {

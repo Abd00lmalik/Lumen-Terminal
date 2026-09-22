@@ -595,6 +595,24 @@ export interface ResearchDiagnosticsDTO {
   readonly questionType?: string;
   /** Requirement roles present in the ledger (CORE/SUPPORTING/CHALLENGE/CONTEXT). */
   readonly requirementRoles?: readonly string[];
+  /**
+   * TRANSMISSION LINKS (research contract §3): the engine-derived status of every causal link
+   * the question's wording requested. Empty for questions that did not ask for a chain. Node
+   * evidence is not arrow evidence, so this is what binds the judgment to the weakest link.
+   */
+  readonly causalLinks?: readonly CausalLinkDiagnosticDTO[];
+  /** The link that binds the judgment (convenience for single-chain runs). */
+  readonly weakestCausalLink?: string;
+}
+
+export interface CausalLinkDiagnosticDTO {
+  /** Canonical target fold of the link (INFLATION, RATES, RISK_ASSETS, ...). */
+  readonly target: string;
+  readonly targetLabel: string;
+  /** SUPPORTED | PARTIALLY_SUPPORTED | STALE_ONLY | UNRESOLVED | NOT_RESEARCHED. */
+  readonly status: string;
+  readonly requirementId: string;
+  readonly evidenceRefs: readonly string[];
 }
 
 export interface ResearchResponseDTO {
