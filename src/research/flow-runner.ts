@@ -20,6 +20,7 @@
 import type { CapabilityRegistry } from "../adapters/capability-registry.js";
 import { PLANNER_CAPABILITIES, partialDecision, engineMarketClass, retrievalBrief } from "./adaptive.js";
 import { computeConfidence, type ConfidenceComponents } from "./confidence.js";
+import { validateContractOutcome } from "./contract-boundary.js";
 import type { ModelProvider } from "../model/provider.js";
 import { ModelFailure } from "../model/provider.js";
 import {
@@ -168,6 +169,10 @@ export interface FlowOutcome {
   readonly recoveryRounds: number;
   /** Engine-COMPUTED confidence and its components (never the model's own claim). */
   readonly confidence?: ConfidenceComponents;
+  /** Claims the SHARED contract boundary stripped from the flow's own prose (never swallowed). */
+  readonly contractViolations?: readonly { readonly type: string; readonly detail: string; readonly action: "STRIPPED" | "REJECTED_PROSE" }[];
+  /** The engine's gap statement for violations that survived (appended to the flow response). */
+  readonly contractGap?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -492,6 +497,54 @@ export async function runFlow(
     calculationsMissing: requirements.filter((r) => r.calculation !== undefined && r.status !== "SATISFIED").length,
   });
   return finish(workspace, researchRef, flow, objective, subjectTerms, plan, rounds, allExecutions, finalDecision, stoppedBecause, modelFailure, at, requirements, floorCapabilities, recoveryRoundsUsed, confidence);
+}
+
+/**
+ * Validate a flow's assembled outcome through the SHARED contract boundary (the same law the
+ * adaptive loop answers to): the flow's user-visible response is checked for claims the ledger
+ * does not support, EVIDENCE_SUFFICIENT is demoted when a CRITICAL requirement stayed uncovered,
+ * and confidence is capped at the engine-computed ceiling. Called by each flow after it builds
+ * its response, so the boundary applies wherever the response is produced — not per-flow copies.
+ */
+export function validateFlowOutcome<F extends { outcome: FlowOutcome; response: string }>(
+  result: F,
+  options: { readonly failedPaths: number; readonly calculationsMissing?: number },
+): F {
+  const outcome = result.outcome;
+  // The prose under validation is the FLOW'S OWN user-visible answer (`response`), never the
+  // question text: the boundary checks claims the flow is about to show the trader.
+  const enforced = validateContractOutcome<FlowOutcome>(
+    {
+      prose: result.response,
+      ledger: outcome.requirements,
+      evidenceText: outcome.evidence.map((e) => `${e.observation} ${e.subject ?? ""}`).join(" "),
+      executedCapabilities: [...new Set(outcome.executions.map((e) => e.capability))],
+      stoppedBecause: outcome.stoppedBecause,
+      failedPaths: options.failedPaths,
+      ...(options.calculationsMissing !== undefined ? { calculationsMissing: options.calculationsMissing } : {}),
+      ...(outcome.confidence !== undefined ? { computedConfidence: outcome.confidence } : {}),
+    },
+    (patch) => ({
+      ...outcome,
+      ...(patch.contractViolations !== undefined ? { contractViolations: patch.contractViolations } : {}),
+      ...(patch.contractGap !== undefined ? { contractGap: patch.contractGap } : {}),
+    }),
+  );
+  // COMPLETION + CONFIDENCE LAWS: the boundary's demotion and ceiling replace the flow's own
+  // values (engine-owned, identical to the adaptive path — never per-flow).
+  const validatedOutcome: FlowOutcome = {
+    ...enforced.outcome,
+    stoppedBecause: enforced.stoppedBecause as FlowOutcome["stoppedBecause"],
+    ...(enforced.contractGap !== undefined ? { contractGap: enforced.contractGap } : {}),
+  };
+  // APPLY THE STRIPPING: the flow shows the contract-valid prose. When every claim was
+  // unsupported the engine substitutes its own deterministic gap statement (never the
+  // rejected prose, never a fabricated answer).
+  const response =
+    enforced.prose !== ""
+      ? enforced.prose
+      : enforced.contractGap ?? result.response;
+  return { ...result, response, outcome: validatedOutcome };
 }
 
 /**

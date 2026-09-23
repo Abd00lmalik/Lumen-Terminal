@@ -764,6 +764,19 @@ export function completeRequirements(
         );
         if (textCovered) continue;
 
+        // 2. Same-ROLE + same-RELATIONSHIP overlap: the chain seeds describe dimensions in the
+        // loop's own vocabulary ("counter-evidence that would weaken the leading explanation",
+        // relationshipType COUNTER_EVIDENCE), while completeRequirements already added the
+        // generic CHALLENGE dimension ("evidence that weakens or contradicts ...",
+        // relationshipType unset). They are the SAME decision dimension in different words, and
+        // treating them as two requirements manufactured a permanently-PENDING CRITICAL row that
+        // blocked completion even when the challenge had executed and found evidence.
+        const sameRoleAndRelationship = out.some(
+          (r) => r.role === seedRole && seed.role !== undefined &&
+            seed.relationshipType !== undefined && r.relationshipType === seed.relationshipType,
+        );
+        if (sameRoleAndRelationship) continue;
+
         // 2. For CORE DRIVER-type seeds: skip if existing CORE requirements already
         //    cover the same evidence class territory (e.g. supply/demand questions
         //    already have CORE requirements with SUPPLY/DEMAND/NEWS evidence classes).
@@ -983,15 +996,24 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
   // The requirement's OWN declared link targets are always admitted (the question named them);
   // a caller may add run-level targets on top. No caller-side wiring is required, so the
   // exemption cannot silently disappear if a gate forgets to pass it.
-  const admittedTargets = new Set<string>([...(opts.admittedTargets ?? []), ...admittedTargetsOf(req)]);
+  const declaredTargets = admittedTargetsOf(req);
+  const admittedTargets = new Set<string>([...(opts.admittedTargets ?? []), ...declaredTargets]);
   const concernsTarget = concernsAdmittedTarget(`${item.text} ${declaredSubject}`, admittedTargets);
-  if (
-    opts.subjectTerms !== undefined &&
-    opts.subjectTerms.size > 0 &&
-    !concernsSubject(`${item.text} ${declaredSubject}`, opts.subjectTerms) &&
-    !concernsTarget
-  ) {
-    return "NO_MATCH";
+  // NODE vs ARROW (research contract §3): a link row (`targetTerms`) is ABOUT its target. Evidence
+  // about the question's subject establishes a NODE of the chain, never the arrow into another
+  // market, so a link row admits only evidence that itself concerns the link's target (run-level
+  // admitted targets still count). Rows that merely carry an attached arrow alongside their own
+  // dimension (`transmissionTargets`) keep their dimension's own subject gate.
+  const isArrowRow = (req.targetTerms ?? []).length > 0;
+  if (opts.subjectTerms !== undefined && opts.subjectTerms.size > 0) {
+    if (isArrowRow) {
+      if (!concernsTarget) return "NO_MATCH";
+    } else if (
+      !concernsSubject(`${item.text} ${declaredSubject}`, opts.subjectTerms) &&
+      !concernsTarget
+    ) {
+      return "NO_MATCH";
+    }
   }
   const itemDomain = domainOfEvidenceType(item.evidenceType);
   const reqTokens = meaningfulTokens(req.description);
@@ -1069,7 +1091,7 @@ export function assessCoverage(
   items: readonly CoverageEvidence[],
   opts: MatchOptions = {},
 ): readonly ResearchRequirement[] {
-  return requirements.map((req) => {
+  return foldDuplicateChallengeRows(requirements).map((req) => {
     if (req.status === "EXHAUSTED" || req.status === "UNAVAILABLE") return req;
     const satisfied: string[] = [];
     const staleOnly: string[] = [];
@@ -1158,6 +1180,43 @@ export function markChallengeAttempted(
       ? { ...r, recoveryAttempts: Math.max(r.recoveryAttempts, 1) }
       : r,
   );
+}
+
+/**
+ * CHALLENGE DIMENSION IDENTITY: the loop's own causal-chain vocabulary describes the challenge
+ * dimension in different words ("counter-evidence that would weaken the leading explanation",
+ * relationshipType COUNTER_EVIDENCE) than the generic CHALLENGE requirement ("evidence that
+ * weakens or contradicts ..."). They are the SAME decision dimension: when a chain seed names
+ * the challenge role, fold its attempt/satisfaction state into the existing CHALLENGE rows
+ * instead of keeping a second permanently-pending CRITICAL row that blocks completion even
+ * after disconfirmation executed and found nothing. Role — not wording — owns identity.
+ */
+function foldDuplicateChallengeRows(requirements: readonly ResearchRequirement[]): readonly ResearchRequirement[] {
+  const challengeRows = requirements.filter((r) => r.role === "CHALLENGE");
+  if (challengeRows.length <= 1) return requirements;
+  const primary = challengeRows.reduce((best, r) =>
+    r.status === "SATISFIED" || best.status === "SATISFIED"
+      ? (r.status === "SATISFIED" ? r : best)
+      : (r.recoveryAttempts > best.recoveryAttempts ? r : best),
+  );
+  const primaryId = primary.id;
+  return requirements
+    .filter((r) => r.role !== "CHALLENGE" || r.id === primaryId)
+    .map((r) =>
+      r.id === primaryId
+        ? {
+            ...r,
+            recoveryAttempts: Math.max(...challengeRows.map((c) => c.recoveryAttempts)),
+            evidenceRefs: [...new Set(challengeRows.flatMap((c) => c.evidenceRefs))],
+            staleOnlyRefs: [...new Set(challengeRows.flatMap((c) => c.staleOnlyRefs))],
+            status: challengeRows.some((c) => c.status === "SATISFIED")
+              ? "SATISFIED"
+              : challengeRows.every((c) => c.status === "EXHAUSTED" || c.status === "UNAVAILABLE")
+                ? primary.status
+                : r.status,
+          }
+        : r,
+    );
 }
 
 /** The engine's completion verdict: complete only when no CRITICAL requirement is blocking. */

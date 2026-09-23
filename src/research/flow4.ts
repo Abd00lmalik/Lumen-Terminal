@@ -24,7 +24,7 @@
 import type { ModelProvider } from "../model/provider.js";
 import { ModelFailure } from "../model/provider.js";
 import { validateModelOutput, type OutputSchema } from "../model/provider.js";
-import { runFlow, type FlowObjective, type FlowOutcome } from "./flow-runner.js";
+import { runFlow, validateFlowOutcome, type FlowObjective, type FlowOutcome } from "./flow-runner.js";
 import { renderResearchContext } from "./context.js";
 import type { Workspace } from "../domain/workspace.js";
 import type { WorkspaceStore } from "../persistence/index.js";
@@ -281,11 +281,15 @@ export async function runFlow4(objective: string, options: Flow4Options): Promis
     at(),
   );
 
-  return {
-    outcome: { ...flowOutcome, analysisId: analysis.id, judgmentId: judgment.id },
-    evaluation,
-    response: buildFlow4Response(evaluation, flowOutcome, thesis),
-  };
+  // SHARED CONTRACT BOUNDARY: same validation law as the adaptive loop (no per-flow validator).
+  return validateFlowOutcome(
+    {
+      outcome: { ...flowOutcome, analysisId: analysis.id, judgmentId: judgment.id },
+      evaluation,
+      response: buildFlow4Response(evaluation, flowOutcome, thesis),
+    },
+    { failedPaths: flowOutcome.executions.filter((e) => e.result.failure.type !== "NONE").length },
+  );
 }
 
 // ---------------------------------------------------------------------------

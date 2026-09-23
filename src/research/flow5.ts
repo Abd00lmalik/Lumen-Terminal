@@ -17,7 +17,7 @@
 
 import type { ModelProvider } from "../model/provider.js";
 import { ModelFailure } from "../model/provider.js";
-import { runFlow, type FlowObjective, type FlowOutcome, type FlowMode } from "./flow-runner.js";
+import { runFlow, validateFlowOutcome, type FlowObjective, type FlowOutcome, type FlowMode } from "./flow-runner.js";
 import { analyzeEpisodes, renderEpisodeAnalysis, type EpisodeAnalysis } from "./episode-analysis.js";
 import type { Workspace } from "../domain/workspace.js";
 import type { WorkspaceStore } from "../persistence/index.js";
@@ -296,11 +296,15 @@ export async function runFlow5(objective: string, options: Flow5Options): Promis
   };
   workspace.addJudgment(judgmentInput, systemOrigin, at());
 
-  return {
-    outcome: scoped,
-    response: buildFlow5Response(scoped, excludedCapabilities, analysis),
-    ...(analysis !== undefined ? { historicalAnalysis: analysis } : {}),
-  };
+  // SHARED CONTRACT BOUNDARY: same validation law as the adaptive loop (no per-flow validator).
+  return validateFlowOutcome(
+    {
+      outcome: scoped,
+      response: buildFlow5Response(scoped, excludedCapabilities, analysis),
+      ...(analysis !== undefined ? { historicalAnalysis: analysis } : {}),
+    },
+    { failedPaths: scoped.executions.filter((e) => e.result.failure.type !== "NONE").length },
+  );
 }
 
 /** Analyze the retrieved historical record (shared by the response builder and the judgment). */

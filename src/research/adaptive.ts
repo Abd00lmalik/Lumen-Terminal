@@ -28,6 +28,7 @@ import { subjectTermsOf, resolveInstrument } from "../domain/instruments.js";
 import { currentRun } from "../domain/run-context.js";
 import { synthesizeAnswer, renderAnswerSynthesis, type AnswerSynthesis } from "./synthesis.js";
 import { boundConfidence, computeConfidence, type ConfidenceComponents } from "./confidence.js";
+import { validateContractOutcome } from "./contract-boundary.js";
 import {
   assessCoverage,
   buildRequirements,
@@ -844,10 +845,11 @@ export async function runAdaptiveResearch(
   // freshness, challenge and recovery state — never chosen by the model. The synthesis is told
   // the computed level and any model-stated confidence is capped by it, so a run with an
   // unresolved CORE requirement cannot present high conviction on good prose alone.
+  const failedPaths = allExecutions.filter((e) => e.result.failure.type !== "NONE").length;
   const confidence = computeConfidence({
     requirements,
     stoppedBecause,
-    failedPaths: allExecutions.filter((e) => e.result.failure.type !== "NONE").length,
+    failedPaths,
     calculationsMissing: requirements.filter((r) => r.calculation !== undefined && r.status !== "SATISFIED").length,
   });
   if (collected.length > 0 && stoppedBecause !== "MODEL_FAILURE") {
@@ -860,22 +862,11 @@ export async function runAdaptiveResearch(
       // states what was actually covered and retrieved, so a draft cannot claim counterevidence
       // that was never searched for, a comparison period that was never retrieved, or earnings
       // facts with no earnings evidence.
+      // Transmission rows carry their link targets so causal-claim validation can bind
+      // assertive language to the link's actual evidence status; the full rows travel so the
+      // validator, the completion law and the confidence policy all read ONE ledger object.
       contract: {
-        ledger: requirements.map((r) => ({
-          description: r.description,
-          importance: r.importance,
-          status: r.status,
-          timeSensitivity: r.timeSensitivity,
-          // Transmission rows carry their link targets so causal-claim validation can
-          // bind assertive language to the link's actual evidence status. A link whose
-          // dimension was already required rides on that row (transmissionTargets), so both
-          // fields travel — and with them the quality signals that decide the arrow's status.
-          ...(r.relationshipType !== undefined ? { relationshipType: r.relationshipType } : {}),
-          ...(r.targetTerms !== undefined ? { targetTerms: r.targetTerms } : {}),
-          ...(r.transmissionTargets !== undefined ? { transmissionTargets: r.transmissionTargets } : {}),
-          ...(r.evidenceQuality !== undefined ? { evidenceQuality: r.evidenceQuality } : {}),
-          ...(r.sourceDiversity !== undefined ? { sourceDiversity: r.sourceDiversity } : {}),
-        })),
+        ledger: requirements,
         evidenceText: collected
           .map((e) => `${e.observation} ${e.subject ?? ""}`)
           .join(" ")
@@ -887,9 +878,35 @@ export async function runAdaptiveResearch(
       // The engine's computed level is a CEILING on the model's stated confidence.
       const bounded = boundConfidence(synthesis.confidence, confidence.level);
       synthesis = { ...synthesis, confidence: bounded };
+      // SHARED CONTRACT BOUNDARY (system-wide law): the loop's rendered prose passes the SAME
+      // final validation as every flow outcome — the renderAnswerSynthesis output (which the
+      // key-factor rendering joins into sentences) is checked for claims the ledger does not
+      // support, so a factor sentence asserting an unsupported transmission cannot stand.
       answer = renderAnswerSynthesis(synthesis, {
         disconfirmationAttempted: allExecutions.some((e) => e.capability === "FALSIFICATION"),
       });
+      const enforced = validateContractOutcome<AnswerSynthesis>(
+        {
+          prose: answer,
+          ledger: requirements,
+          evidenceText: collected.map((e) => `${e.observation} ${e.subject ?? ""}`).join(" ").slice(0, 40000),
+          executedCapabilities: [...new Set(allExecutions.map((e) => e.capability))],
+          stoppedBecause,
+          failedPaths,
+          calculationsMissing: requirements.filter((r) => r.calculation !== undefined && r.status !== "SATISFIED").length,
+          computedConfidence: confidence,
+        },
+        (patch) => ({
+          ...synthesis!,
+          directAnswer: patch.prose,
+          ...(patch.contractViolations !== undefined
+            ? { contractViolations: patch.contractViolations.map((v) => ({ type: v.type, detail: v.detail })) }
+            : {}),
+        }),
+      );
+      synthesis = enforced.outcome;
+      answer = enforced.prose;
+      if (enforced.stoppedBecause !== stoppedBecause) stoppedBecause = enforced.stoppedBecause as typeof stoppedBecause;
     }
   }
   return {

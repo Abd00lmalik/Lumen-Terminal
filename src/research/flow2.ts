@@ -21,7 +21,7 @@
 import type { ModelProvider } from "../model/provider.js";
 import { ModelFailure } from "../model/provider.js";
 import { validateModelOutput, type OutputSchema } from "../model/provider.js";
-import { FLOW_OBJECTIVES, runFlow, type FlowOutcome } from "./flow-runner.js";
+import { FLOW_OBJECTIVES, runFlow, validateFlowOutcome, type FlowOutcome } from "./flow-runner.js";
 import type { Workspace } from "../domain/workspace.js";
 import type { WorkspaceStore } from "../persistence/index.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
@@ -204,7 +204,15 @@ export async function runFlow2(objective: string, options: Flow2Options): Promis
 
   const response = buildFlow2Response(synthesis, flowOutcome);
 
-  return { outcome: { ...flowOutcome, judgmentId: judgment.id, ...(analysis !== undefined ? { analysisId: analysis.id } : {}) }, synthesis, response };
+  // SHARED CONTRACT BOUNDARY (system-wide law): the flow's user-visible prose answers to the
+  // same validator as the adaptive loop's synthesis — causal claims over unsupported links are
+  // rejected, EVIDENCE_SUFFICIENT over an uncovered ledger is demoted, confidence is capped.
+  return validateFlowOutcome(
+    { outcome: { ...flowOutcome, judgmentId: judgment.id, ...(analysis !== undefined ? { analysisId: analysis.id } : {}) }, synthesis, response },
+    {
+      failedPaths: flowOutcome.executions.filter((e) => e.result.failure.type !== "NONE").length,
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------

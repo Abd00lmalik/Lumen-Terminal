@@ -22,7 +22,7 @@
 import type { ModelProvider } from "../model/provider.js";
 import { ModelFailure } from "../model/provider.js";
 import { validateModelOutput, type OutputSchema } from "../model/provider.js";
-import { FLOW_OBJECTIVES, runFlow, type FlowOutcome } from "./flow-runner.js";
+import { FLOW_OBJECTIVES, runFlow, validateFlowOutcome, type FlowOutcome } from "./flow-runner.js";
 import { renderResearchContext } from "./context.js";
 import type { Workspace } from "../domain/workspace.js";
 import type { WorkspaceStore } from "../persistence/index.js";
@@ -239,14 +239,18 @@ export async function runFlow7(objective: string, options: Flow7Options): Promis
   );
 
   const response = buildFlow7Response(assessment, flowOutcome, beliefStatement);
-  return {
-    outcome: { ...flowOutcome, analysisId: analysis.id, judgmentId: judgment.id },
-    assessment,
-    // Monitoring is a PROPOSAL only (FLOW 7 §8): conditions listed for the trader; no monitor
-    // object is created and nothing is activated (M5 + confirmation territory).
-    ...(monitoringToWatch(assessment).length > 0 ? { monitoringProposal: monitoringToWatch(assessment) } : {}),
-    response,
-  };
+  // SHARED CONTRACT BOUNDARY: same validation law as the adaptive loop (no per-flow validator).
+  return validateFlowOutcome(
+    {
+      outcome: { ...flowOutcome, analysisId: analysis.id, judgmentId: judgment.id },
+      assessment,
+      // Monitoring is a PROPOSAL only (FLOW 7 §8): conditions listed for the trader; no monitor
+      // object is created and nothing is activated (M5 + confirmation territory).
+      ...(monitoringToWatch(assessment).length > 0 ? { monitoringProposal: monitoringToWatch(assessment) } : {}),
+      response,
+    },
+    { failedPaths: flowOutcome.executions.filter((e) => e.result.failure.type !== "NONE").length },
+  );
 }
 
 // ---------------------------------------------------------------------------

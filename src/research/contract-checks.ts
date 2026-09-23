@@ -18,15 +18,13 @@ import type { ResearchRequirement } from "./requirements.js";
 import { deriveCausalLinkStatuses, type CausalLinkStatus } from "./causal.js";
 
 export interface ContractState {
-  /** The engine's requirement ledger for this run (link-bearing rows carry their targets). */
-  readonly ledger: readonly Pick<
-    ResearchRequirement,
-    | "description" | "importance" | "status" | "timeSensitivity"
-    | "relationshipType" | "targetTerms" | "transmissionTargets"
-    // Link status is derived from the row's own coverage: quality and source diversity decide
-    // whether an arrow reads SUPPORTED or merely PARTIALLY_SUPPORTED.
-    | "evidenceQuality" | "sourceDiversity"
-  >[];
+  /**
+   * The engine's requirement ledger for this run (link-bearing rows carry their targets). The
+   * FULL rows, not a projection: the same rows feed link-status derivation, the completion law
+   * (blockingRequirements) and the confidence policy, so one ledger object serves all three and
+   * no validator can be handed a shape that the laws cannot read.
+   */
+  readonly ledger: readonly ResearchRequirement[];
   /** Text of the evidence the answer is allowed to draw on (observations + declared subjects). */
   readonly evidenceText: string;
   /** Capabilities the run actually executed. */
@@ -48,10 +46,16 @@ export interface ContractViolation {
   readonly detail: string;
 }
 
-/** Sentence split that keeps the sentence-ending punctuation attached. */
+/**
+ * Claim split that keeps the sentence-ending punctuation attached. A LINE boundary is also a
+ * claim boundary: flow responses and structured answers render one claim per line (headings,
+ * bullets, labelled sections) with no prose punctuation, so splitting on sentences alone would
+ * fuse a whole answer into one "claim" and let a single unsupported clause condemn every
+ * supported one around it.
+ */
 export function sentencesOf(text: string): readonly string[] {
   return text
-    .split(/(?<=[.!?])\s+/)
+    .split(/(?<=[.!?])\s+|\n+/)
     .map((s) => s.trim())
     .filter((s) => s !== "");
 }
@@ -155,12 +159,21 @@ export function contractViolations(answerText: string, state: ContractState): re
   return violations;
 }
 
-/** Strip the sentences that carry unsupported claims; used when a corrective retry also fails. */
+/**
+ * Strip the claims the ledger does not support; used when a corrective retry also fails. Removal
+ * preserves the document's own layout (lines, bullets, headings) instead of re-joining sentences
+ * into one paragraph, so a flow's structured answer keeps every claim it can actually support.
+ */
 export function stripUnsupportedClaims(answerText: string, violations: readonly ContractViolation[]): string {
-  const offending = new Set(violations.filter((v) => v.type !== "COVERAGE_CLAIM_OVER_UNRESOLVED_REQUIREMENT").map((v) => v.sentence));
+  const offending = new Set(
+    violations
+      .filter((v) => v.type !== "COVERAGE_CLAIM_OVER_UNRESOLVED_REQUIREMENT")
+      .map((v) => v.sentence),
+  );
   if (offending.size === 0) return answerText;
-  const kept = sentencesOf(answerText).filter((s) => !offending.has(s));
-  return kept.join(" ");
+  let stripped = answerText;
+  for (const sentence of offending) stripped = stripped.split(sentence).join("");
+  return stripped.trim();
 }
 
 /** The engine's own gap statement for a violation that survives correction. */

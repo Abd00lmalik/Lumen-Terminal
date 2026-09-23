@@ -97,6 +97,41 @@ applied per requirement inside `matchRequirement`): evidence about a named targe
 nothing else is. A question that names no transmission derives no links at all — inventing causality
 is a failure too.
 
+The gate also enforces the arrow law at the row level: a **link row** (`targetTerms`) is *about its
+target*, so it admits only evidence that itself concerns the link's target. Evidence about the
+question's subject establishes a node of the chain, never the arrow into another market, so a yield
+quote mentioning a class word can no longer satisfy the inflation arrow. Rows that merely carry an
+attached arrow alongside their own dimension (`transmissionTargets`) keep their dimension's gate.
+
+## The shared final contract boundary
+
+The contract is a system-wide invariant, not an adaptive-loop-only one. Every research path that
+produces a user-visible judgment passes through ONE boundary — `validateContractOutcome`
+(`src/research/contract-boundary.ts`):
+
+```
+                      adaptive loop  ──┐
+                                       ├──> validateContractOutcome ──> validated outcome
+                      flow runner  ────┘       (one violation set, one confidence ceiling,
+                                                one completion gate)
+```
+
+The adaptive loop calls it around its rendered answer; the flow runner calls it through
+`validateFlowOutcome` on each flow's own user-visible response (Flows 2-8). There is one validator
+(`contract-checks.ts`) and one completion law (`blockingRequirements`), so no path can be validated
+by a second, weaker rule:
+
+- unsupported causal prose is stripped from the response and reported (`contractViolations`);
+- `EVIDENCE_SUFFICIENT` is demoted to `REQUIREMENT_GAPS_UNRESOLVED` whenever the engine's coverage
+  verdict still reports a blocking requirement;
+- confidence is pinned to the engine-computed ceiling (`computeConfidence` over the ledger, including
+the weakest-link cap);
+- violations that survive stripping become the engine's `contractGap` statement, which replaces a
+  fully-rejected answer rather than letting the rejected prose stand.
+
+Claim boundaries are sentences *and lines*, and stripping preserves the document's layout, so a
+structured flow answer loses only the uncompensated claim — not every supported one around it.
+
 ## Requirement-scoped retrieval
 
 Recovery rounds and deep-research workers receive a **retrieval brief** (`retrievalBrief`), not the
