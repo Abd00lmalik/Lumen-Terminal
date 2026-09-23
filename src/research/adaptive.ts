@@ -353,9 +353,16 @@ export async function runAdaptiveResearch(
   // own decision type and subject market class, and every run carries a CHALLENGE requirement
   // so disconfirmation is an engine action rather than a prompt convention. Added dimensions
   // are marked engineRequired and enter the same coverage, floor and recovery laws.
-  requirements = completeRequirements(objective, requirements, {
+  // CONTRACT QUESTION (research contract §1): the requirement ledger is derived from the
+  // TRADER'S VERBATIM QUESTION when a run is active, never from the LUI's reformulated objective.
+  // The objective paraphrases ("Identify the primary macroeconomic transmission channels from
+  // crude oil") and drops the trader's own grammar, so a transmission question lost its links
+  // and a broad question could silently gain another domain's dimension. The verbatim question
+  // is already stamped on the run (run-context); the objective remains the planning/prompt text.
+  const contractQuestion = currentRun()?.userQuestion ?? objective;
+  requirements = completeRequirements(contractQuestion, requirements, {
     ...(resolvedAsset !== undefined ? { subject: resolvedAsset } : {}),
-    marketClass: engineMarketClass(objective, resolvedAsset),
+    marketClass: engineMarketClass(contractQuestion, resolvedAsset),
   });
   /** Wrong-target observations discarded at ingestion (diagnostic; never user-facing noise). */
   let rejectedAtIngestion = 0;

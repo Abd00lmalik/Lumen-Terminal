@@ -35,6 +35,7 @@ import { progressEvent, type ProgressListener } from "./progress.js";
 import type { WorkspaceStore } from "../persistence/index.js";
 import type { ToolResult } from "../domain/tool-result.js";
 import { subjectTermsOf } from "../domain/instruments.js";
+import { currentRun } from "../domain/run-context.js";
 import {
   assessCoverage,
   buildRequirements,
@@ -304,9 +305,12 @@ export async function runFlow(
     plan.requirements !== undefined && plan.requirements.length > 0
       ? buildRequirements(plan.requirements)
       : requirementsFromTasks(plan.tasks);
-  requirements = completeRequirements(objective, requirements, {
+  // Same CONTRACT QUESTION law as the adaptive loop: the ledger is derived from the trader's
+  // verbatim question when a run is active (the objective is planning text, not the contract).
+  const contractQuestion = currentRun()?.userQuestion ?? objective;
+  requirements = completeRequirements(contractQuestion, requirements, {
     ...(resolvedAsset !== undefined ? { subject: resolvedAsset } : {}),
-    marketClass: engineMarketClass(objective, resolvedAsset),
+    marketClass: engineMarketClass(contractQuestion, resolvedAsset),
   });
   // Can this capability actually run for THIS question? Same predicate as the adaptive loop:
   // a registered provider AND, for symbol-scoped capabilities, a subject the question earned.
