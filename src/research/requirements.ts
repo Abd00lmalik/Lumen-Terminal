@@ -753,7 +753,10 @@ export function completeRequirements(
       // could be something else — then it is a CORE decision dimension, not a footnote.
       const wantsAlternatives = asksForAlternatives(question);
       if (!out.some((r) => /alternativ\w*|competing|other (?:driver|explanation|factor)/i.test(r.description))) {
-        const description = `material alternative explanations for the ${subject} move and for the transmission links (competing drivers that could account for the same observations)`;
+        // The default subject already carries its article ("the subject"); a resolved instrument
+        // does not, so the article is added here exactly once (live: "for the the subject move").
+        const subjectPhrase = /^the /.test(subject) ? subject : `the ${subject}`;
+        const description = `material alternative explanations for ${subjectPhrase} move and for the transmission links (competing drivers that could account for the same observations)`;
         const domains = domainsOfRequirement(description);
         out.push({
           id: requirementId(out.length),
