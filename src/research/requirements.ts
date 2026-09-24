@@ -716,8 +716,13 @@ export function completeRequirements(
       seenTargets.add(link.target);
       // The wording carries the DATA TYPE the requirement needs (transmission/relationship),
       // so capability ranking schedules a capability that can actually return it instead of a
-      // generic endpoint feed.
-      const description = `transmission evidence for how the move in ${subject} reached ${targetLabel(link.target)}`;
+      // generic endpoint feed. The description states the LINK'S OWN source fold, never the
+      // question's resolved subject: the transmission clause's head can name a market other
+      // than the instrument ("How does inflation transmit into Treasury yields?" where the
+      // instrument side resolved to Treasury yields) — describing the arrow as "the move in
+      // Treasury yields reached Treasury yields" sent retrieval after the wrong transmission.
+      const sourceLabel = targetLabel(link.source);
+      const description = `transmission evidence for how the move in ${sourceLabel} reached ${targetLabel(link.target)}`;
       const domains = domainsOfRequirement(description);
       out.push({
         id: requirementId(out.length),

@@ -175,6 +175,29 @@ describe("D2. an arrow is researchable: it schedules a capability that can retur
   });
 });
 
+describe("D3. the arrow's description states the LINK's own source, never the question's resolved instrument", () => {
+  it("describes INFLATION -> RATES even when the instrument side resolved to Treasury yields", () => {
+    // Live defect: the clause head names inflation, but the question's subject resolved to
+    // "Treasury yields", and the arrow row described "the move in Treasury yields reached
+    // Treasury yields" — sending retrieval after a transmission the question never asked for.
+    const ledger = ledgerFor(INFLATION_RATES, "treasury yields");
+    const arrow = row(ledger, "RATES");
+    expect(arrow.relationshipSource).toBe("INFLATION");
+    expect(arrow.description).toBe("transmission evidence for how the move in inflation reached Treasury yields and rate markets");
+    expect(arrow.description).not.toContain("the move in Treasury yields reached");
+    // The derived link and the row's wording must agree on both ends.
+    const link = deriveCausalLinkStatuses(ledger).find((l) => l.target === "RATES")!;
+    expect(link.source).toBe("INFLATION");
+  });
+
+  it("keeps subject-sourced arrows unchanged", () => {
+    const ledger = ledgerFor(OIL_INFLATION, "oil");
+    const arrow = row(ledger, "INFLATION");
+    expect(arrow.relationshipSource).toBe("OIL");
+    expect(arrow.description).toBe("transmission evidence for how the move in crude oil reached inflation");
+  });
+});
+
 describe("E. evidence attaches to the arrow row, not to an endpoint node", () => {
   it("keeps the relationship observation on the arrow and endpoint observations on the nodes", () => {
     const ledger = ledgerFor(OIL_INFLATION, "oil");

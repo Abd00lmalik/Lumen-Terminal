@@ -123,7 +123,10 @@ time horizon), and the arrow row's declared evidence classes are RELATIONSHIP cl
 engine's class path cannot admit an endpoint item either.
 
 The arrow row is also researchable: its description declares the data type it needs
-(`transmission evidence for how the move in X reached Y`), and the relationship-capable
+(`transmission evidence for how the move in X reached Y`, where X is the LINK'S OWN source fold,
+not the question's resolved instrument — the transmission clause's head can name a market other
+than the instrument, e.g. "How does inflation transmit into Treasury yields?" derives
+`INFLATION -> RATES`, not a Treasury-yields-to-Treasury-yields arrow), and the relationship-capable
 capabilities (`WEB_SEARCH`, `CROSS_DOMAIN_SYNTHESIS`, `NEWS_ANALYSIS`, `MACRO_ANALYSIS`) declare
 that data type — so capability ranking schedules a relationship route instead of an endpoint feed.
 An arrow is therefore `PENDING` until researched, `EXHAUSTED` only after bounded research spent
