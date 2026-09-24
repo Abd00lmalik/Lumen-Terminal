@@ -277,6 +277,26 @@ const CONCEPT_SYNONYMS: Readonly<Record<string, string>> = {
   HISTORICAL: "HISTORICAL", HISTORICALLY: "HISTORICAL", HISTORY: "HISTORICAL", PRIOR: "HISTORICAL",
 };
 
+/**
+ * CRYPTO-DOMAIN VOCABULARY (shared language, not a question list): tokens that mark an
+ * observation as concerning the crypto asset class — asset names/tickers plus crypto-native
+ * market vocabulary. Used by the SEMANTIC DOMAIN GATE in matchRequirement: when the question
+ * derives a non-crypto semantic domain, a crypto-asset observation is not ABOUT the question
+ * and cannot satisfy its requirements. It is a property of the EVIDENCE, so a macro question
+ * that legitimately names Bitcoin keeps matching (the vocabulary is only foreign when the
+ * question's own domain is elsewhere).
+ */
+const CRYPTO_DOMAIN_TOKENS: ReadonlySet<string> = new Set([
+  "BTC", "BITCOIN", "ETH", "ETHEREUM", "SOL", "SOLANA", "XRP", "RIPPLE", "DOGE", "DOGECOIN",
+  "ADA", "CARDANO", "LTC", "LITECOIN", "AVAX", "AVALANCHE", "CHAINLINK", "DOT",
+  "POLKADOT", "TRON", "TRX", "ZEC", "ZCASH", "CRYPTO", "CRYPTOCURRENCY", "ALTCOIN",
+  "ONCHAIN", "WHALE", "WHALES", "WALLET", "WALLETS", "STAKING", "TOKEN", "TOKENS",
+  "BINANCE", "COINBASE", "DEFI", "TVL", "HALVING", "MEMECOIN", "NFT",
+]);
+
+/** Evidence-class names that declare a requirement wants crypto-domain evidence (exempt from the gate). */
+const CRYPTO_REQUIREMENT_CLASSES: ReadonlySet<string> = new Set(["CRYPTO", "DERIVATIVES", "ONCHAIN", "DEFI"]);
+
 function canonicalToken(token: string): string {
   if (CONCEPT_SYNONYMS[token] !== undefined) return CONCEPT_SYNONYMS[token]!;
   // Naive plural folding for content words: "margins" -> "MARGIN", "drivers" -> "DRIVER".
@@ -407,6 +427,11 @@ export function subjectMarketClassOf(question: string): SubjectMarketClass {
   if (/\bdollar|\bdxy\b|\beur|\busd\b|\bjpy\b|\bgbp\b|\bcurrency|\bforex|\bfx\b|\bpair\b|\byen\b|\bpound\b|\beuro\b/.test(q)) return "FX";
   if (/\bs\s*&\s*p\b|\bnasdaq|\bdow\b|\bindex|\bindices|\bequit|\bstocks?\b|\bshares\b|\bsemiconductor|\bsector/.test(q)) return "INDEX";
   if (/\bearnings|\bcompany|\bguidance|\brevenue|\bmargins?\b/.test(q)) return "EQUITY";
+  // ABSTRACT SEMANTIC TARGET (no-instrument ≠ no-subject): a broad macro / risk-regime
+  // question names no instrument but still names its domain — "macro conditions", "risk
+  // assets", "financial conditions". The class constrains which provider output is ABOUT
+  // the question; it is derived from the question's own wording, never a question list.
+  if (/\bmacro\b|\bmacroeconomic\b|\brisk[- ]?assets?\b|\brisk[- ]?on\b|\brisk[- ]?off\b|\bfinancial conditions\b|\bliquidity conditions\b|\bgrowth conditions\b|\binflation (regime|conditions|outlook)\b|\bthe ( broad )?markets?\b/.test(q)) return "MACRO";
   return "UNKNOWN";
 }
 
@@ -440,7 +465,7 @@ export function questionTypeOf(question: string): QuestionType {
  * declared per dimension rather than assumed. Derived from the question's own subject (never
  * from a question list), so an unseen asset of a known class is handled identically.
  */
-export type SubjectMarketClass = "COMMODITY" | "METAL" | "FX" | "INDEX" | "VOLATILITY" | "RATES" | "EQUITY" | "CRYPTO" | "UNKNOWN";
+export type SubjectMarketClass = "COMMODITY" | "METAL" | "FX" | "INDEX" | "VOLATILITY" | "RATES" | "EQUITY" | "CRYPTO" | "MACRO" | "UNKNOWN";
 
 interface EngineRequirementSpec {
   readonly description: (subject: string) => string;
@@ -686,7 +711,7 @@ export function completeRequirements(
         // duplicate dimension. The link's status then comes from the same coverage assessment,
         // so an unresearched inflation leg is visible even though "inflation" was already a
         // required dimension of the question.
-        const carrier = out.findIndex((r) => requirementCarriesTarget(r, target));
+        const carrier = out.findIndex((r) => requirementCarriesTarget(r, target, question));
         if (carrier !== -1) {
           const row = out[carrier]!;
           out[carrier] = {
@@ -866,6 +891,17 @@ export interface MatchOptions {
   /** Subject terms of the question (instrument/tickers). When set, items must concern them. */
   readonly subjectTerms?: ReadonlySet<string>;
   /**
+   * SEMANTIC SUBJECT GATE (no-instrument ≠ no-subject): the question's abstract market class
+   * derived from its own wording (MACRO, RATES, COMMODITY, …). When set and not CRYPTO, an
+   * observation whose vocabulary is crypto-native is not ABOUT the question and cannot
+   * satisfy its requirements — a provider returning abundant crypto data must not define the
+   * target of a broad macro question merely because no instrument resolved to gate it.
+   * A MACRO question that explicitly names Bitcoin keeps matching (its own wording puts it
+   * in the CRYPTO class or names BTC as a subject term), so this is a property of the
+   * QUESTION's domain, never a forbidden-provider list.
+   */
+  readonly questionMarketClass?: SubjectMarketClass;
+  /**
    * TRANSMISSION-LINK TARGETS the question explicitly names (research contract §3): evidence
    * about a named link target is admitted like subject evidence (the question asked for it),
    * while everything else stays gated. Parsed from the question's transmission wording —
@@ -876,6 +912,24 @@ export interface MatchOptions {
 }
 
 export type MatchResult = "SATISFIES" | "STALE_ONLY" | "NO_MATCH";
+
+/**
+ * Whether the requirement ITSELF names a crypto party — a declared link target, a crypto
+ * evidence class, or a description that folds onto the shared crypto vocabulary.
+ *
+ * The semantic domain gate exists to stop a crypto provider from defining a NON-crypto
+ * question. It must never suppress the crypto evidence a question explicitly asked about:
+ * live benchmark F2 ("How could a stronger dollar affect crypto and emerging markets?") had
+ * its CRYPTO arrow row reported EXHAUSTED because the crypto-native item was rejected for a
+ * question that named crypto as the affected party. The question's own wording is the licence.
+ */
+function requirementDeclaresCryptoParty(req: ResearchRequirement): boolean {
+  if ((req.evidenceClasses ?? []).some((c) => CRYPTO_REQUIREMENT_CLASSES.has(c.toUpperCase()))) {
+    return true;
+  }
+  if ([...admittedTargetsOf(req)].some((t) => CRYPTO_REQUIREMENT_CLASSES.has(t))) return true;
+  return foldMention(req.description).has("CRYPTO");
+}
 
 /**
  * Which link targets (if any) does this requirement admit through the subject gate? A
@@ -1016,6 +1070,23 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
     }
   }
   const itemDomain = domainOfEvidenceType(item.evidenceType);
+  // SEMANTIC SUBJECT GATE (no-instrument ≠ no-subject): when the question derives an abstract
+  // non-crypto domain, crypto-native observations are not about the question. The declared
+  // subject counts as vocabulary too (a provider tags a BTC payload "BTC" without naming it
+  // in text). A requirement that ITSELF declares crypto evidence classes is exempt — the
+  // question asked for crypto evidence. Never a provider list: the item's own vocabulary
+  // decides, and the question's wording decides the domain.
+  if (
+    opts.questionMarketClass !== undefined &&
+    opts.questionMarketClass !== "UNKNOWN" &&
+    opts.questionMarketClass !== "CRYPTO" &&
+    !requirementDeclaresCryptoParty(req)
+  ) {
+    const itemVocab = `${item.text} ${declaredSubject}`.toUpperCase();
+    const itemTokenSet2 = new Set(itemVocab.split(/[^A-Z0-9]+/));
+    const cryptoNative = [...CRYPTO_DOMAIN_TOKENS].some((t) => itemTokenSet2.has(t)) || itemDomain === "ONCHAIN" || itemDomain === "DEFI";
+    if (cryptoNative) return "NO_MATCH";
+  }
   const reqTokens = meaningfulTokens(req.description);
   // CURRENCY-UNIT GUARD (VALID ≠ RELEVANT): when the observation concerns a crypto asset the
   // question is NOT about (subject terms resolved but lacking it, or no subject resolved at
@@ -1733,11 +1804,33 @@ export function targetLabel(target: string): string {
  * row instead). Both sides fold through the same concept vocabulary ("RATES" target vs a
  * requirement naming "yields").
  */
-function requirementCarriesTarget(row: ResearchRequirement, target: string): boolean {
+function requirementCarriesTarget(row: ResearchRequirement, target: string, question?: string): boolean {
   const canonical = TRANSMISSION_TARGET_FOLDS[target] ?? CONCEPT_SYNONYMS[target] ?? target;
   const declared = [...(row.targetTerms ?? []), ...(row.transmissionTargets ?? [])];
-  return (
-    declared.some((t) => (TRANSMISSION_TARGET_FOLDS[t] ?? CONCEPT_SYNONYMS[t] ?? t) === canonical) ||
-    meaningfulTokens(row.description).has(canonical)
-  );
+  if (
+    declared.some((t) => (TRANSMISSION_TARGET_FOLDS[t] ?? CONCEPT_SYNONYMS[t] ?? t) === canonical)
+  ) {
+    return true;
+  }
+  // NODE vs ARROW (research contract §3): a row whose description IS the question (or a
+  // fragment/restatement of it) mentions every target the question names without being ABOUT
+  // any one of them — it is the question-derived base dimension, a NODE requirement. Letting it
+  // claim the arrow attached the link to a row that node evidence then satisfied: a crude-oil
+  // observation marked the INFLATION arrow PARTIALLY_SUPPORTED with no inflation evidence at
+  // all. Only a genuine DIMENSION label ("current inflation conditions") may carry an arrow.
+  if (question !== undefined && textIsQuestionOrFragment(row.description, question)) return false;
+  return meaningfulTokens(row.description).has(canonical);
+}
+
+/**
+ * Whether `text` is the question itself, a fragment of it, or a restatement containing it —
+ * compared on normalized vocabulary so punctuation/wording changes do not evade the check.
+ */
+function textIsQuestionOrFragment(text: string, question: string): boolean {
+  const normalize = (value: string): string =>
+    value.toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
+  const a = normalize(text);
+  const b = normalize(question);
+  if (a.length === 0 || b.length === 0) return false;
+  return a.includes(b) || b.includes(a);
 }

@@ -17,7 +17,7 @@
 import type { Evidence, EvidenceClass, Freshness, Claim, Hypothesis } from "../domain/objects.js";
 import type { Workspace } from "../domain/workspace.js";
 import type { ToolResult } from "../domain/tool-result.js";
-import { matchRequirement, domainsOfRequirement, isDiscriminatingRequirement, concernsSubject, type CoverageEvidence, type EvidenceDomain, type ResearchRequirement } from "./requirements.js";
+import { matchRequirement, domainsOfRequirement, isDiscriminatingRequirement, concernsSubject, type CoverageEvidence, type EvidenceDomain, type ResearchRequirement, type SubjectMarketClass } from "./requirements.js";
 
 /** One context item; every item keeps its architecture object type and epistemic class. */
 export interface ContextItem {
@@ -268,6 +268,12 @@ export function buildResearchContext(
      */
     readonly subjectTerms?: readonly string[];
     /**
+     * SEMANTIC SUBJECT GATE for no-instrument questions: the question's abstract market class.
+     * Passed into requirement matching so crypto-native output cannot satisfy a broad macro
+     * question's requirements merely because no instrument resolved to gate it.
+     */
+    readonly questionMarketClass?: SubjectMarketClass;
+    /**
      * Requirement coverage (engine-assessed): rendered into the context so the decision and
      * synthesis models SEE which requirements are covered, which are stale-only, and which
      * are exhausted. The model cannot upgrade an uncovered requirement to satisfied.
@@ -398,7 +404,10 @@ export function buildResearchContext(
           ...(e.subject !== undefined ? { subject: e.subject } : {}),
           ...(e.timestamp !== undefined ? { observedAt: e.timestamp } : {}),
         };
-        return matchRequirement(probe, candidate, gateTerms !== undefined ? { subjectTerms: gateTerms } : {}) !== "NO_MATCH";
+        return matchRequirement(probe, candidate, {
+          ...(gateTerms !== undefined ? { subjectTerms: gateTerms } : {}),
+          ...(options.questionMarketClass !== undefined ? { questionMarketClass: options.questionMarketClass } : {}),
+        }) !== "NO_MATCH";
       });
     if (!matchesAnyRequirement) {
       rejectedNoRequirement += 1;

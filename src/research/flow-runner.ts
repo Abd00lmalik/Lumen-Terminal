@@ -370,6 +370,7 @@ export async function runFlow(
     );
     requirements = assessCoverage(requirements, coverageEvidenceOfFlow(workspace, researchRef), {
       ...(subjectTerms !== undefined ? { subjectTerms } : {}),
+      questionMarketClass: engineMarketClass(currentRun()?.userQuestion ?? objective, resolvedAsset),
       now: at(),
     });
 
@@ -385,6 +386,7 @@ export async function runFlow(
       researchRef,
       relevantTo: objective,
       ...(subjectTerms !== undefined ? { subjectTerms: [...subjectTerms] } : {}),
+      questionMarketClass: engineMarketClass(currentRun()?.userQuestion ?? objective, resolvedAsset),
       executions: allExecutions.map((e) => ({ capability: e.capability, result: e.result })),
     });
     let decision: AdaptiveDecision;

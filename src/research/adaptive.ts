@@ -33,6 +33,7 @@ import {
   assessCoverage,
   buildRequirements,
   CAPABILITY_SUPPORT,
+  blockingRequirements,
   completeRequirements,
   coverageVerdict,
   mandatoryCapabilities,
@@ -60,6 +61,38 @@ import type { ToolResult } from "../domain/tool-result.js";
 import { buildResearchContext, renderResearchContext, type ResearchContext } from "./context.js";
 
 export const MAX_RESEARCH_ROUNDS = 3;
+
+/**
+ * MINIMUM RECOVERY BUDGET (engine-owned, link-aware): the wall-clock headroom and round
+ * headroom a scheduled recovery round must have before it starts. Multi-link questions
+ * schedule one task per link and each task waits on a full provider chain, so "2 minutes
+ * left" is not enough headroom for another deep recovery round — starting it guarantees the
+ * platform kills the request and the partial state is lost. Spending ~15% of the budget on
+ * a doomed round is worse than finalizing the honest partial now.
+ */
+const RECOVERY_MIN_HEADROOM_MS = 45_000;
+const RECOVERY_MIN_HEADROOM_ROUNDS = 1;
+
+/**
+ * Whether a scheduled recovery round may still start under the research budget. A run without
+ * a deadline always recovers (the round cap alone bounds it); a deadline that is already past
+ * or lacks the minimum headroom does not — recovery would be killed mid-flight and the
+ * evidence collected so far would be lost with it.
+ */
+function recoveryHasBudget(
+  deadlineMs: number | undefined,
+  at: () => Date,
+  recoveryRoundsUsed: number,
+  maxRecoveryRounds: number,
+  round: number,
+  maxRounds: number,
+): boolean {
+  if (recoveryRoundsUsed >= maxRecoveryRounds) return false;
+  if (round >= maxRounds) return false;
+  if (deadlineMs === undefined) return true;
+  const remaining = deadlineMs - at().getTime();
+  return remaining > RECOVERY_MIN_HEADROOM_MS && maxRounds - round > RECOVERY_MIN_HEADROOM_ROUNDS;
+}
 
 /**
  * The question's subject market class, used by the research contract to decide which
@@ -446,7 +479,23 @@ export async function runAdaptiveResearch(
     }
 
     const executions: RoundExecution[] = [];
+    /** Set when the in-round budget check stopped this round; the round loop must exit too. */
+    let roundsSkippedByBudget = false;
     for (const task of roundTasks) {
+      // ENGINE-OWNED BUDGET (in-round): the wall-clock deadline is checked not only between
+      // rounds but BEFORE EVERY TASK. A deadline that passes mid-round must end the research
+      // with the evidence already collected — never with a platform timeout that destroys the
+      // partial state (multi-link questions schedule one task per link; without this check the
+      // flagship oil question died at the serverless limit with everything it had gathered).
+      if (options.deadlineMs !== undefined && at().getTime() >= options.deadlineMs) {
+        stoppedBecause = "TIME_BUDGET_EXHAUSTED";
+        // `round` (not rounds.length): this round never reached the push, so the count must be
+        // the round the budget interrupted, not the number of committed rounds.
+        finalDecision = partialDecision("TIME_BUDGET_EXHAUSTED", round, allExecutions.flatMap((e) => e.evidenceIds).length, blockingRequirements(requirements).length);
+        options.onProgress?.(progressEvent("research_stopped", at(), `research stopped: ${stoppedBecause}`, { reason: stoppedBecause }));
+        roundsSkippedByBudget = true;
+        break;
+      }
       // Independent capability calls run in PARALLEL (performance mandate §32): the registry
       // executes each through its own provider chain with bounded transport timeouts, and one
       // failure never cancels siblings. Evidence ingestion stays in plan order after all
@@ -519,14 +568,26 @@ export async function runAdaptiveResearch(
     );
     requirements = assessCoverage(requirements, coverageEvidenceOf(workspace, researchRef), {
       ...(subjectTerms !== undefined ? { subjectTerms } : {}),
+      questionMarketClass: engineMarketClass(currentRun()?.userQuestion ?? objective, resolvedAsset),
       now: at(),
     });
+
+    // In-round budget stop: the task loop was cut short by the deadline — skip the model
+    // decision (it asked for research that will not happen) and leave the round loop with the
+    // preserved partial state.
+    if (roundsSkippedByBudget) {
+      // Coverage was just re-assessed for the work that DID run, so the partial rationale can
+      // name exactly what the budget left uncovered.
+      finalDecision = partialDecision("TIME_BUDGET_EXHAUSTED", round, allExecutions.flatMap((e) => e.evidenceIds).length, blockingRequirements(requirements).length);
+      break;
+    }
 
     // 3. Adaptive decision with the updated, validated context (coverage included).
     const context = buildResearchContext(workspace, {
       researchRef,
       relevantTo: objective,
       ...(subjectTerms !== undefined ? { subjectTerms: [...subjectTerms] } : {}),
+      questionMarketClass: engineMarketClass(currentRun()?.userQuestion ?? objective, resolvedAsset),
       requirements,
       executions: allExecutions.map((e) => ({ capability: e.capability, result: e.result })),
     });
@@ -607,7 +668,10 @@ export async function runAdaptiveResearch(
         // satisfy a gap it just failed (re-running it only duplicates evidence).
         exclude: allExecutions.map((e) => e.capability),
       });
-      if (recoveryRoundsUsed < MAX_RECOVERY_ROUNDS && recoveryCaps.length > 0 && round < maxRounds) {
+      if (
+        recoveryCaps.length > 0 &&
+        recoveryHasBudget(options.deadlineMs, at, recoveryRoundsUsed, MAX_RECOVERY_ROUNDS, round, maxRounds)
+      ) {
         requirements = requirements.map((r) =>
           verdict.blocking.some((b) => b.id === r.id) ? { ...r, recoveryAttempts: r.recoveryAttempts + 1 } : r,
         );
@@ -640,7 +704,11 @@ export async function runAdaptiveResearch(
               exclude: allExecutions.map((e) => e.capability),
             })
           : [];
-      if (verdict.blocking.length > 0 && recoveryRoundsUsed < MAX_RECOVERY_ROUNDS && recoveryCaps.length > 0 && round < maxRounds) {
+      if (
+        verdict.blocking.length > 0 &&
+        recoveryCaps.length > 0 &&
+        recoveryHasBudget(options.deadlineMs, at, recoveryRoundsUsed, MAX_RECOVERY_ROUNDS, round, maxRounds)
+      ) {
         requirements = requirements.map((r) =>
           verdict.blocking.some((b) => b.id === r.id) ? { ...r, recoveryAttempts: r.recoveryAttempts + 1 } : r,
         );
@@ -662,13 +730,13 @@ export async function runAdaptiveResearch(
     // dying mid-flight (an in-flight run can never deliver its partial truth to the trader).
     if (options.deadlineMs !== undefined && at().getTime() >= options.deadlineMs) {
       stoppedBecause = "TIME_BUDGET_EXHAUSTED";
-      finalDecision = partialDecision("TIME_BUDGET_EXHAUSTED", rounds.length, allExecutions.flatMap((e) => e.evidenceIds).length);
+      finalDecision = partialDecision("TIME_BUDGET_EXHAUSTED", round, allExecutions.flatMap((e) => e.evidenceIds).length, blockingRequirements(requirements).length);
       options.onProgress?.(progressEvent("research_stopped", at(), `research stopped: ${stoppedBecause}`, { reason: stoppedBecause }));
       break;
     }
     if (round === maxRounds) {
       stoppedBecause = "ROUND_BUDGET_EXHAUSTED";
-      finalDecision = partialDecision("ROUND_BUDGET_EXHAUSTED", rounds.length, allExecutions.flatMap((e) => e.evidenceIds).length);
+      finalDecision = partialDecision("ROUND_BUDGET_EXHAUSTED", round, allExecutions.flatMap((e) => e.evidenceIds).length, blockingRequirements(requirements).length);
       options.onProgress?.(progressEvent("research_stopped", at(), `research stopped: ${stoppedBecause}`, { reason: stoppedBecause }));
       break;
     }
@@ -838,6 +906,7 @@ export async function runAdaptiveResearch(
     researchRef,
     relevantTo: objective,
     ...(subjectTerms !== undefined ? { subjectTerms: [...subjectTerms] } : {}),
+    questionMarketClass: engineMarketClass(currentRun()?.userQuestion ?? objective, resolvedAsset),
     requirements,
     executions: allExecutions.map((e) => ({ capability: e.capability, result: e.result })),
   });
@@ -943,7 +1012,7 @@ export async function runAdaptiveResearch(
  * leaked into the final answer) and the decision stays recoverable rather than declaring the
  * question unanswerable (zero-dead-end mandate §13/§15).
  */
-export function partialDecision(_reason: "ROUND_BUDGET_EXHAUSTED" | "TIME_BUDGET_EXHAUSTED", rounds: number, evidenceCount: number): AdaptiveDecision {
+export function partialDecision(_reason: "ROUND_BUDGET_EXHAUSTED" | "TIME_BUDGET_EXHAUSTED", rounds: number, evidenceCount: number, unresolved = 0): AdaptiveDecision {
   if (evidenceCount === 0) {
     return {
       decision: "INSUFFICIENT_EVIDENCE",
@@ -953,7 +1022,12 @@ export function partialDecision(_reason: "ROUND_BUDGET_EXHAUSTED" | "TIME_BUDGET
   }
   return {
     decision: "COMPLETE",
-    rationale: `Research was completed across ${rounds} round(s) with ${evidenceCount} evidence object(s) gathered before the research budget was reached; the findings below reflect everything collected.`,
+    // A mechanical budget stop is never completeness. When the engine's own ledger still counts
+    // blocking requirements, the partial result must SAY so: the earlier wording ("research was
+    // completed") implied a researched question even with three CRITICAL rows unresolved.
+    rationale: unresolved > 0
+      ? `The research budget was reached after ${rounds} round(s) with ${evidenceCount} evidence object(s) gathered; ${unresolved} material requirement(s) remain unresolved within that budget and are reported as such rather than filled in.`
+      : `Research was completed across ${rounds} round(s) with ${evidenceCount} evidence object(s) gathered before the research budget was reached; the findings below reflect everything collected.`,
     nextTasks: [],
   };
 }

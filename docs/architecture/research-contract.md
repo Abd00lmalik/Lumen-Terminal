@@ -76,8 +76,14 @@ dimension:
 
 - if the ledger does not yet ask about that dimension, it gets its own **TRANSMISSION** row
   (`targetTerms`);
-- if the dimension is already required ("inflation" was already a required dimension), the arrow is
+- if a genuine **dimension row** already asks for it ("the current inflation regime"), the arrow is
   **attached to that row** (`transmissionTargets`) — one row per dimension, one arrow per named link.
+- the **question-derived base row** (whose description IS the question, or a fragment of it) never
+  carries an arrow: its description trivially mentions every target the question names without being
+  ABOUT any one of them. `requirementCarriesTarget` refuses that carrier, so the arrow gets its own
+  dedicated row. Without this, a task-derived row (the planner's objective = the question) claimed the
+  arrow and node evidence satisfied it — crude-oil data marked the INFLATION arrow
+  `PARTIALLY_SUPPORTED` with no inflation evidence at all.
 
 **Node evidence is not arrow evidence.** `deriveCausalLinkStatuses` reads the ledger and derives each
 arrow's status (`SUPPORTED`, `PARTIALLY_SUPPORTED`, `STALE_ONLY`, `UNRESOLVED`, `NOT_RESEARCHED`), and
@@ -102,6 +108,43 @@ target*, so it admits only evidence that itself concerns the link's target. Evid
 question's subject establishes a node of the chain, never the arrow into another market, so a yield
 quote mentioning a class word can no longer satisfy the inflation arrow. Rows that merely carry an
 attached arrow alongside their own dimension (`transmissionTargets`) keep their dimension's gate.
+
+## Abstract targets: no instrument is not no subject
+
+When the question names no concrete instrument ("What macro conditions favor risk assets right
+now?"), the subject gate used to be skipped entirely — so abundant provider output defined the
+research target, and 12 of 15 evidence items in a macro run were crypto.
+
+The contract derives a **semantic domain** from the question's own wording instead
+(`engineMarketClass`, `subjectMarketClassOf`), and `matchRequirement` carries a **semantic domain
+gate**: when the question resolves to a non-crypto class, crypto-native observations (the shared
+`CRYPTO_DOMAIN_TOKENS` vocabulary, or an `ONCHAIN`/`DEFI` evidence type) do not match. Evidence
+volume never decides relevance, and there is no forbidden-provider list — the item's own vocabulary
+decides, and the question's wording decides the domain.
+
+The gate is exactly as wide as the question's wording. A requirement that itself names a crypto
+party is exempt (`requirementDeclaresCryptoParty`: a declared link target, a crypto evidence class,
+or a description folding to `CRYPTO`), so "How could a stronger dollar affect crypto and emerging
+markets?" still admits the crypto evidence it asked about, and "What macro conditions favor
+Bitcoin?" derives crypto-relevant requirements. A broad macro question derives none.
+
+## The research budget
+
+Research is bounded by an engine-owned budget, not by the platform's function timeout:
+
+- the wall-clock deadline is checked **before every capability task** (in-round), not only between
+  rounds — a multi-link question schedules one task per link, and without the in-round check the
+  flagship oil question was killed at the serverless limit with everything it had gathered;
+- recovery rounds additionally require headroom (`recoveryHasBudget`: minimum wall-clock and round
+  headroom), so a doomed recovery is never started `RECOVERY_MIN_HEADROOM_MS` before the deadline;
+- when the budget stops a run, the result is an **honest partial**: `TIME_BUDGET_EXHAUSTED` or
+  `ROUND_BUDGET_EXHAUSTED`, never `EVIDENCE_SUFFICIENT`; evidence already collected, requirement
+  coverage, link statuses, the weakest link, the confidence ceiling and provenance are all preserved;
+- the partial rationale NAMES what the budget left behind ("…N material requirement(s) remain
+  unresolved within that budget and are reported as such rather than filled in"), computed from the
+  engine's own blocking set;
+- a budget stop is distinguishable from a provider failure: no model failure is recorded and every
+  provider call that ran may still have succeeded.
 
 ## The shared final contract boundary
 
