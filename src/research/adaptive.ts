@@ -74,6 +74,30 @@ const RECOVERY_MIN_HEADROOM_MS = 45_000;
 const RECOVERY_MIN_HEADROOM_ROUNDS = 1;
 
 /**
+ * ONE CAPABILITY WAVE (engine-owned budget): the wall clock one batch of independent capability
+ * calls needs to finish. A task is only STARTED when the remaining budget covers a whole wave —
+ * otherwise the request is killed mid-flight by the platform and the partial research state is
+ * destroyed, which is exactly what the budget exists to prevent.
+ *
+ * Production evidence: the flagship oil question started a wave 1s before its deadline and the
+ * function was killed at 301.6s (FUNCTION_INVOCATION_TIMEOUT, HTTP 504) — the old check only asked
+ * whether the deadline had ALREADY passed.
+ */
+export const RESEARCH_TASK_WINDOW_MS = 45_000;
+
+/** Whether the remaining budget covers one whole capability wave. */
+export function withinWaveBudget(
+  deadlineMs: number | undefined,
+  at: () => Date,
+  windowMs?: number,
+): boolean {
+  if (deadlineMs === undefined) return true;
+  return deadlineMs - at().getTime() > (windowMs ?? RESEARCH_TASK_WINDOW_MS);
+}
+
+const hasWaveBudget = withinWaveBudget;
+
+/**
  * Whether a scheduled recovery round may still start under the research budget. A run without
  * a deadline always recovers (the round cap alone bounds it); a deadline that is already past
  * or lacks the minimum headroom does not — recovery would be killed mid-flight and the
@@ -309,6 +333,12 @@ export interface AdaptiveLoopOptions {
    * never treated as a model failure and nothing is fabricated to fill the gap.
    */
   readonly deadlineMs?: number;
+  /**
+   * Wall clock one capability wave needs before it is allowed to START
+   * (`RESEARCH_TASK_WINDOW_MS` by default). Tests inject a small window; production sizes it so a
+   * wave started inside the deadline still completes before the platform's function limit.
+   */
+  readonly taskWindowMs?: number;
   readonly now?: () => Date;
   /** F0 SSE seam: optional listener for REAL lifecycle events (never model reasoning/payloads). */
   readonly onProgress?: ProgressListener;
@@ -483,11 +513,12 @@ export async function runAdaptiveResearch(
     let roundsSkippedByBudget = false;
     for (const task of roundTasks) {
       // ENGINE-OWNED BUDGET (in-round): the wall-clock deadline is checked not only between
-      // rounds but BEFORE EVERY TASK. A deadline that passes mid-round must end the research
-      // with the evidence already collected — never with a platform timeout that destroys the
-      // partial state (multi-link questions schedule one task per link; without this check the
-      // flagship oil question died at the serverless limit with everything it had gathered).
-      if (options.deadlineMs !== undefined && at().getTime() >= options.deadlineMs) {
+      // rounds but BEFORE EVERY TASK — and a task may only START when the remaining budget covers
+      // a whole capability wave. A deadline that passes mid-round must end the research with the
+      // evidence already collected, never with a platform timeout that destroys the partial state
+      // (multi-link questions schedule one task per link; a wave started 1s before the deadline
+      // still killed the flagship oil question at the serverless limit).
+      if (!hasWaveBudget(options.deadlineMs, at, options.taskWindowMs ?? RESEARCH_TASK_WINDOW_MS)) {
         stoppedBecause = "TIME_BUDGET_EXHAUSTED";
         // `round` (not rounds.length): this round never reached the push, so the count must be
         // the round the budget interrupted, not the number of committed rounds.
@@ -728,7 +759,7 @@ export async function runAdaptiveResearch(
     }
     // Honest wall-clock budget: stop before the caller's execution window expires rather than
     // dying mid-flight (an in-flight run can never deliver its partial truth to the trader).
-    if (options.deadlineMs !== undefined && at().getTime() >= options.deadlineMs) {
+    if (!hasWaveBudget(options.deadlineMs, at, options.taskWindowMs ?? RESEARCH_TASK_WINDOW_MS)) {
       stoppedBecause = "TIME_BUDGET_EXHAUSTED";
       finalDecision = partialDecision("TIME_BUDGET_EXHAUSTED", round, allExecutions.flatMap((e) => e.evidenceIds).length, blockingRequirements(requirements).length);
       options.onProgress?.(progressEvent("research_stopped", at(), `research stopped: ${stoppedBecause}`, { reason: stoppedBecause }));
@@ -819,7 +850,7 @@ export async function runAdaptiveResearch(
     (stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE" || budgetStopped || stoppedBecause === "HOLLOW_COMPLETE_RECOVERY" || stoppedBecause === "REQUIREMENT_GAPS_UNRESOLVED") &&
     !allExecutions.some((e) => e.capability === "CROSS_DOMAIN_SYNTHESIS") &&
     options.registry.resolve("CROSS_DOMAIN_SYNTHESIS").length > 0 &&
-    (options.deadlineMs === undefined || at().getTime() < options.deadlineMs);
+    hasWaveBudget(options.deadlineMs, at, options.taskWindowMs ?? RESEARCH_TASK_WINDOW_MS);
   if (deepResearchFired) {
     // Tier 1: research agents (Caesar -> AskHeurist via the registry's provider chain).
     // Tier 2: bounded Exa search when the research agents returned nothing usable. The

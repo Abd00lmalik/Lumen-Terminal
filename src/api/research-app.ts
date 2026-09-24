@@ -181,7 +181,13 @@ export class ResearchApp {
       // Honest wall-clock budget: finish (and persist) before the caller's execution window
       // expires so a run always delivers its real state instead of dying mid-flight. Sized for
       // the 300s serverless function ceiling; local dev keeps the same contract.
-      const deadlineMs = Date.now() + 270_000;
+      // PLATFORM-BOUNDED BUDGET: the function limit is 300s (vercel.json), so the research budget
+      // must leave room for the last capability wave to FINISH plus the response write. Production
+      // evidence: with a 30s tail a wave started just before the deadline overran to 301.6s and the
+      // platform killed the request (HTTP 504 FUNCTION_INVOCATION_TIMEOUT), destroying the partial
+      // research state the budget exists to deliver. 210s keeps the honest TIME_BUDGET_EXHAUSTED
+      // stop comfortably inside the limit.
+      const deadlineMs = Date.now() + 210_000;
       result = await this.engine().handle(trimmed, origin, onProgress, deadlineMs);
     } catch (cause) {
       // The engine itself failing (vs the LUI's internal typed model failures) is unexpected.

@@ -100,6 +100,9 @@ async function run(opts: {
   maxRounds?: number;
   decisions?: string[];
   content?: string;
+  /** Wave window before a task may start. These tests run at a synthetic 10s-per-task scale, so
+   * the default zero window keeps them about the DEADLINE law; the window law has its own cases. */
+  taskWindowMs?: number;
 }): Promise<RunResult> {
   const clock = { now: START };
   const caps = opts.capabilities ?? ["MACRO_ANALYSIS"];
@@ -125,6 +128,7 @@ async function run(opts: {
   const outcome = await runAdaptiveResearch(opts.question, research.id, {
     provider, registry, workspace: ws, store: new MemoryStore(),
     maxRounds: opts.maxRounds ?? 3,
+    taskWindowMs: opts.taskWindowMs ?? 0,
     ...(opts.deadlineMs !== undefined ? { deadlineMs: opts.deadlineMs } : {}),
     now: () => new Date(clock.now),
   });
@@ -204,6 +208,41 @@ describe("in-round budget enforcement", () => {
   it("a deadline that is never crossed never changes the outcome", async () => {
     const { outcome } = await run({ question: YIELDS_Q, deadlineMs: START + 600_000, maxRounds: 3 });
     expect(outcome.stoppedBecause).toBe("EVIDENCE_SUFFICIENT");
+  });
+});
+
+describe("capability-wave window (a wave may only START when the budget covers it)", () => {
+  it("starts NO wave when the remaining budget cannot finish one", async () => {
+    // 40s remaining and a 45s wave: starting any task guarantees the platform kills the request
+    // mid-flight (production: HTTP 504 at 301.6s), so the run finalizes honestly instead.
+    const { outcome, clock } = await run({
+      question: YIELDS_Q,
+      deadlineMs: START + 40_000,
+      taskWindowMs: 45_000,
+      decisions: ["CONTINUE"],
+    });
+    expect(outcome.stoppedBecause).toBe("TIME_BUDGET_EXHAUSTED");
+    expect(outcome.executions).toHaveLength(0);
+    expect(outcome.evidence).toHaveLength(0);
+    expect(clock.now).toBe(START); // nothing was started
+  });
+
+  it("runs the waves that fit, then stops honestly instead of overrunning", async () => {
+    // 60s remaining with a 45s wave: round 1's two 10s tasks fit (20s used). The next wave would
+    // start with 40s left — not enough — so the run stops with the gathered evidence intact.
+    const { outcome, clock } = await run({
+      question: YIELDS_Q,
+      tasks: 2,
+      costPerCap: 10_000,
+      deadlineMs: START + 60_000,
+      taskWindowMs: 45_000,
+      decisions: ["CONTINUE", "COMPLETE"],
+    });
+    expect(outcome.stoppedBecause).toBe("TIME_BUDGET_EXHAUSTED");
+    expect(outcome.executions).toHaveLength(2);
+    expect(outcome.evidence).toHaveLength(2);
+    expect(clock.now - START).toBeLessThanOrEqual(60_000);
+    expect(outcome.finalDecision.rationale).toContain("budget");
   });
 });
 

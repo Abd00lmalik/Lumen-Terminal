@@ -156,6 +156,11 @@ Research is bounded by an engine-owned budget, not by the platform's function ti
 - the wall-clock deadline is checked **before every capability task** (in-round), not only between
   rounds — a multi-link question schedules one task per link, and without the in-round check the
   flagship oil question was killed at the serverless limit with everything it had gathered;
+- a wave of capability calls may only **START** when the remaining budget covers a whole wave
+  (`withinWaveBudget`, `RESEARCH_TASK_WINDOW_MS`): asking only whether the deadline had already
+  passed is not enough — production started a wave 1s before the deadline and the platform killed
+  the request at 301.6s (`FUNCTION_INVOCATION_TIMEOUT`, HTTP 504). The API sizes its research budget
+  (210s) below the function limit (300s) so one last wave plus the response always fit;
 - recovery rounds additionally require headroom (`recoveryHasBudget`: minimum wall-clock and round
   headroom), so a doomed recovery is never started `RECOVERY_MIN_HEADROOM_MS` before the deadline;
 - when the budget stops a run, the result is an **honest partial**: `TIME_BUDGET_EXHAUSTED` or

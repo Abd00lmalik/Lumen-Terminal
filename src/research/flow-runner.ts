@@ -18,7 +18,7 @@
  */
 
 import type { CapabilityRegistry } from "../adapters/capability-registry.js";
-import { PLANNER_CAPABILITIES, partialDecision, engineMarketClass, retrievalBrief } from "./adaptive.js";
+import { PLANNER_CAPABILITIES, partialDecision, engineMarketClass, retrievalBrief, withinWaveBudget } from "./adaptive.js";
 import { computeConfidence, type ConfidenceComponents } from "./confidence.js";
 import { validateContractOutcome } from "./contract-boundary.js";
 import type { ModelProvider } from "../model/provider.js";
@@ -244,6 +244,8 @@ export interface FlowRunnerOptions {
    * never treated as a model failure and nothing is fabricated to fill the gap.
    */
   readonly deadlineMs?: number;
+  /** Wall clock one capability wave needs before it may START (`RESEARCH_TASK_WINDOW_MS`). */
+  readonly taskWindowMs?: number;
   readonly now?: () => Date;
   /** F0 SSE seam: optional listener for REAL lifecycle events (never model reasoning/payloads). */
   readonly onProgress?: ProgressListener;
@@ -443,7 +445,7 @@ export async function runFlow(
     }
     // Honest wall-clock budget: stop before the caller's execution window expires rather than
     // dying mid-flight (an in-flight run can never deliver its partial truth to the trader).
-    if (options.deadlineMs !== undefined && at().getTime() >= options.deadlineMs) {
+    if (!withinWaveBudget(options.deadlineMs, at, options.taskWindowMs)) {
       options.onProgress?.(progressEvent("research_stopped", at(), "research stopped: TIME_BUDGET_EXHAUSTED", { reason: "TIME_BUDGET_EXHAUSTED" }));
       stoppedBecause = "TIME_BUDGET_EXHAUSTED";
       finalDecision = partialDecision("TIME_BUDGET_EXHAUSTED", rounds.length, allExecutions.flatMap((e) => e.evidenceIds).length);
@@ -463,7 +465,7 @@ export async function runFlow(
   // REQUIREMENT-SCOPED retrieval brief — same law as the adaptive loop. Evidence relevance,
   // not provider existence, decides sufficiency.
   const budgetStopped = stoppedBecause === "TIME_BUDGET_EXHAUSTED" || stoppedBecause === "ROUND_BUDGET_EXHAUSTED";
-  if ((stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE" || stoppedBecause === "REQUIREMENT_GAPS_UNRESOLVED" || budgetStopped) && !allExecutions.some((e) => e.capability === "CROSS_DOMAIN_SYNTHESIS") && options.registry.resolve("CROSS_DOMAIN_SYNTHESIS").length > 0 && (options.deadlineMs === undefined || at().getTime() < options.deadlineMs)) {
+  if ((stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE" || stoppedBecause === "REQUIREMENT_GAPS_UNRESOLVED" || budgetStopped) && !allExecutions.some((e) => e.capability === "CROSS_DOMAIN_SYNTHESIS") && options.registry.resolve("CROSS_DOMAIN_SYNTHESIS").length > 0 && withinWaveBudget(options.deadlineMs, at, options.taskWindowMs)) {
     const unresolved = requirements.filter((r) => r.status !== "SATISFIED" && r.role !== "CONTEXT");
     const deepExecutions = await executeBatch(
       [{ capability: "CROSS_DOMAIN_SYNTHESIS" }, ...(options.registry.resolve("WEB_SEARCH").length > 0 ? [{ capability: "WEB_SEARCH" }] : [])],
