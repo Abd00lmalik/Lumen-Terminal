@@ -296,6 +296,8 @@ export interface ResearchDiagnosticsDto {
 }
 
 export interface CausalLinkDiagnosticDto {
+  /** Canonical source (driver) fold of the link, e.g. "OIL" for OIL -> INFLATION. */
+  readonly source?: string;
   readonly target: string;
   readonly targetLabel: string;
   readonly status: string;

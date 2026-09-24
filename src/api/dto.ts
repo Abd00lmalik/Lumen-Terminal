@@ -606,6 +606,8 @@ export interface ResearchDiagnosticsDTO {
 }
 
 export interface CausalLinkDiagnosticDTO {
+  /** Canonical SOURCE fold of the link (the driver side, e.g. OIL for OIL->INFLATION). */
+  readonly source?: string;
   /** Canonical target fold of the link (INFLATION, RATES, RISK_ASSETS, ...). */
   readonly target: string;
   readonly targetLabel: string;

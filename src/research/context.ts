@@ -343,9 +343,10 @@ export function buildResearchContext(
         domains: domains.length > 0 ? domains : (["GENERAL"] as const),
         // TRANSMISSION LINKS (research contract §3): the probe must carry the link targets the
         // requirement declares, or the context gate would reject the very evidence about a
-        // target the question explicitly named (the exemption is per-requirement).
+        // target the question explicitly named (the exemption is per-requirement). The arrow law
+        // itself (relationship evidence only) is applied by the same matcher used in coverage, so
+        // the two gates cannot disagree about an arrow.
         targetTerms: r.targetTerms,
-        transmissionTargets: r.transmissionTargets,
         ...(r.relationshipType !== undefined ? { relationshipType: r.relationshipType } : {}),
       };
     })
@@ -393,7 +394,7 @@ export function buildResearchContext(
           ...(req.engineRequired ? { engineRequired: true } : {}),
           ...(req.evidenceClasses.length > 0 ? { evidenceClasses: req.evidenceClasses } : {}),
           ...(req.targetTerms !== undefined ? { targetTerms: req.targetTerms } : {}),
-          ...(req.transmissionTargets !== undefined ? { transmissionTargets: req.transmissionTargets } : {}),
+
           ...(req.relationshipType !== undefined ? { relationshipType: req.relationshipType } : {}),
           timeSensitivity: req.timeSensitivity,
           domains: req.domains,
@@ -545,10 +546,9 @@ export function buildResearchContext(
 function renderRequirementCoverage(requirements: readonly {
   readonly id: string; readonly description: string; readonly importance: string;
   readonly role?: string; readonly timeSensitivity: string; readonly status: string;
-  readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[];
-  readonly missingReason?: string; readonly targetTerms?: readonly string[];
-  readonly transmissionTargets?: readonly string[];
-}[]): string {
+  readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[];    readonly missingReason?: string; readonly targetTerms?: readonly string[];
+    readonly relationshipSource?: string;
+  }[]): string {
   const lines = requirements.map((r) => {
     const detail =
       r.status === "SATISFIED" ? `${r.evidenceRefs.length} relevant observation(s)`
@@ -561,9 +561,7 @@ function renderRequirementCoverage(requirements: readonly {
   // TRANSMISSION LINKS (research contract §3): the model must see the engine's per-arrow state.
   // Node evidence is not arrow evidence, and the WEAKEST arrow — not the strongest — bounds what
   // the answer may say about the chain.
-  const links = requirements.flatMap((r) =>
-    [...(r.targetTerms ?? []), ...(r.transmissionTargets ?? [])].map((t) => ({ t, r })),
-  );
+  const links = requirements.flatMap((r) => (r.targetTerms ?? []).map((t) => ({ t, r })));
   const linkLines =
     links.length === 0
       ? []

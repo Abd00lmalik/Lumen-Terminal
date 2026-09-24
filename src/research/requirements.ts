@@ -72,16 +72,19 @@ export interface RequirementSeed {
 
 export interface ResearchRequirement {
   readonly id: string;
-  /** The market/market-class names this requirement's transmission link points into. */
+  /**
+   * ARROW ROW (research contract §3): the canonical destination fold this requirement's causal
+   * link points INTO. Present only on a first-class arrow row — the row that owns the link.
+   * A row carrying this is ABOUT the relationship, never about an endpoint market: its coverage
+   * cannot be inherited from either endpoint's node requirement (see `matchRequirement`).
+   */
   readonly targetTerms?: readonly string[];
   /**
-   * TRANSMISSION LINKS CARRIED BY A DIMENSION ROW: when a question's causal wording names a
-   * target whose dimension the ledger ALREADY requires ("inflation" was required as the
-   * inflation regime), the arrow is attached to that same row instead of adding a duplicate
-   * dimension. One row per dimension, one arrow per named link — the arrow's status is derived
-   * from the row's coverage, so "the chain is established" still needs evidence for THIS arrow.
+   * ARROW ROW: the canonical SOURCE fold of the link (the driver side) — "OIL" for
+   * OIL→INFLATION. Diagnostics only; the arrow's admission law reads the relationship, so the
+   * source is never a licence to satisfy the arrow from source-side node evidence.
    */
-  readonly transmissionTargets?: readonly string[];
+  readonly relationshipSource?: string;
   readonly description: string;
   readonly importance: "CRITICAL" | "SUPPORTING";
   readonly role: RequirementRole;
@@ -702,44 +705,42 @@ export function completeRequirements(
     // transmission wording, not on the question's overall type: a question can ask what drove
     // oil AND how it transmitted ("macro regime" wording classifies it as MACRO_REGIME, and
     // the transmission leg is still explicit and required).
-    const linkTargets = [...new Set(
-      causalLinksOf(question, subject !== "the subject" ? subject : undefined).map((l) => l.target),
-    )];
-    if (linkTargets.length > 0) {
-      for (const target of linkTargets) {
-        // The dimension is already required: attach the ARROW to that row rather than adding a
-        // duplicate dimension. The link's status then comes from the same coverage assessment,
-        // so an unresearched inflation leg is visible even though "inflation" was already a
-        // required dimension of the question.
-        const carrier = out.findIndex((r) => requirementCarriesTarget(r, target, question));
-        if (carrier !== -1) {
-          const row = out[carrier]!;
-          out[carrier] = {
-            ...row,
-            transmissionTargets: [...new Set([...(row.transmissionTargets ?? []), target])],
-          };
-          continue;
-        }
-        const description = `evidence of how the move in ${subject} transmitted into ${targetLabel(target)}`;
-        const domains = domainsOfRequirement(description);
-        out.push({
-          id: requirementId(out.length),
-          description,
-          importance: "CRITICAL",
-          role: "CORE",
-          timeSensitivity: "CURRENT",
-          domains: domains.length > 0 ? domains : (["GENERAL"] as const),
-          status: "PENDING",
-          evidenceRefs: [],
-          staleOnlyRefs: [],
-          recoveryAttempts: 0,
-          engineRequired: true,
-          relationshipType: "TRANSMISSION",
-          evidenceClasses: ["MACRO", "RATE", "YIELD", "EQUITY", "INDEX", "INFLATION", "PRICE", "NEWS", "MARKET_DATA"],
-          targetTerms: [target],
-          retrievalObjective: retrievalObjectiveFor(description, "CURRENT", "CORE"),
-        });
-      }
+    const links = causalLinksOf(question, subject !== "the subject" ? subject : undefined);
+    // ONE ARROW PER LINK, ALWAYS ITS OWN ROW. An arrow is never attached to a dimension/node row:
+    // inherited coverage made "the inflation regime was observed" read as "the oil move
+    // transmitted into inflation". The row's own admission law (relationship evidence) is what
+    // keeps endpoint coverage from becoming transmission coverage.
+    const seenTargets = new Set<string>();
+    for (const link of links) {
+      if (seenTargets.has(link.target)) continue;
+      seenTargets.add(link.target);
+      // The wording carries the DATA TYPE the requirement needs (transmission/relationship),
+      // so capability ranking schedules a capability that can actually return it instead of a
+      // generic endpoint feed.
+      const description = `transmission evidence for how the move in ${subject} reached ${targetLabel(link.target)}`;
+      const domains = domainsOfRequirement(description);
+      out.push({
+        id: requirementId(out.length),
+        description,
+        importance: "CRITICAL",
+        role: "CORE",
+        timeSensitivity: "CURRENT",
+        domains: domains.length > 0 ? domains : (["GENERAL"] as const),
+        status: "PENDING",
+        evidenceRefs: [],
+        staleOnlyRefs: [],
+        recoveryAttempts: 0,
+        engineRequired: true,
+        relationshipType: "TRANSMISSION",
+        relationshipSource: link.source,
+        // RELATIONSHIP EVIDENCE CLASSES ONLY: an endpoint observation (a price quote, a macro
+        // print, a dimension headline) can never be admitted through a declared class here.
+        evidenceClasses: [...RELATIONSHIP_EVIDENCE_CLASSES],
+        targetTerms: [link.target],
+        retrievalObjective: retrievalObjectiveFor(description, "CURRENT", "CORE"),
+      });
+    }
+    if (links.length > 0) {
 
       // ALTERNATIVE EXPLANATIONS (research contract §8): a transmission question is only answered
       // honestly if a materially plausible competing explanation for the same observations is
@@ -937,11 +938,56 @@ function requirementDeclaresCryptoParty(req: ResearchRequirement): boolean {
  * requirements admit none, so the exemption is exactly as wide as the question's wording.
  */
 export function admittedTargetsOf(
-  req: Pick<ResearchRequirement, "targetTerms" | "relationshipType" | "transmissionTargets">,
+  req: Pick<ResearchRequirement, "targetTerms">,
 ): ReadonlySet<string> {
-  const targets = [...(req.targetTerms ?? []), ...(req.transmissionTargets ?? [])];
+  const targets = [...(req.targetTerms ?? [])];
   if (targets.length === 0) return new Set<string>();
   return new Set(targets.map((t) => t.toUpperCase()));
+}
+
+/**
+ * RELATIONSHIP EVIDENCE VOCABULARY (shared market language, not a question list):
+ *
+ * - `RELATIONSHIP_EVIDENCE_CLASSES` — evidence-type/class names that declare the observation is
+ *   ABOUT a relationship between markets (a cross-domain/pass-through analysis) rather than a
+ *   single market. Provider lineage carries this: a cross-domain synthesis capability's output is
+ *   relationship evidence by construction.
+ * - `RELATIONSHIP_MARKERS` — the language an observation uses when it actually states a
+ *   transmission/association between markets ("fed into", "passed through", "weighed on",
+ *   "co-movement"). A price quote, a CPI print or a dimension headline matches none of them.
+ *
+ * Both are domain-agnostic: they name relationship grammar, never a market. `oil -> inflation`,
+ * `inflation -> rates`, `rates -> risk assets` and any unseen chain use the same law.
+ */
+const RELATIONSHIP_EVIDENCE_CLASSES: readonly string[] = [
+  "TRANSMISSION", "RELATIONSHIP", "CROSS_DOMAIN", "CROSS_ASSET", "SPILLOVER", "PASS_THROUGH", "MECHANISM",
+];
+
+const RELATIONSHIP_MARKERS: readonly RegExp[] = [
+  /\btransmi(?:t|ts|tted|tting|ssion)\b/i,
+  /\bpass(?:ed|es|ing)?\s*(?:-|\s)?through\b/i,
+  /\bspill(?:s|ed|ing)?\s*over\b/i,
+  /\b(?:fed|feeds|flow(?:s|ed|ing)?)\s+(?:in)?to\b/i,
+  /\brippl(?:e|es|ed|ing)\b/i,
+  /\bknock[- ]on\b/i,
+  /\bcontribut(?:e|es|ed|ing)\s+to\b/i,
+  /\b(?:dr(?:ove|ives|iven|iving)|push(?:ed|es|ing)?|lift(?:ed|s|ing)?|drag(?:ged|s|ing)?|weigh(?:ed|s|ing)?|pressure(?:d|s|ing)?|boost(?:ed|s|ing)?|sap(?:ped|s|ing)?|erode(?:d|s|ing)?|amplif(?:ied|ies|ying)|compress(?:ed|es|ing)?|translat(?:ed|es|ing))\b/i,
+  /\b(?:because of|due to|on the back of|as a result of|in response to|attributed to|thanks to|owing to)\b/i,
+  /\b(?:channel|mechanism|pass-?through|transmission|relationship|correlat(?:ion|ed)|co-?movement|co-?moved|coincided|alongside)\b/i,
+  /\b(?:linked to|tied to|track(?:s|ed|ing)?|follo(?:wed|wing)|mirror(?:s|ed|ing)?|tracking)\b/i,
+];
+
+/**
+ * Does this item carry evidence about a RELATIONSHIP between markets? True when the observation
+ * declares a relationship evidence class/type (provider lineage) or states a transmission/
+ * association in its own language. Deliberately narrow: evidence about one endpoint market —
+ * however strong — is a NODE observation and returns false here.
+ */
+export function isRelationshipEvidence(item: Pick<CoverageEvidence, "text" | "evidenceType" | "subject">): boolean {
+  const lineage = String(item.evidenceType ?? "").toUpperCase();
+  if (RELATIONSHIP_EVIDENCE_CLASSES.some((c) => lineage.includes(c))) return true;
+  const text = `${item.text} ${item.subject ?? ""}`;
+  return RELATIONSHIP_MARKERS.some((m) => m.test(text));
 }
 
 /**
@@ -1053,11 +1099,10 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
   const declaredTargets = admittedTargetsOf(req);
   const admittedTargets = new Set<string>([...(opts.admittedTargets ?? []), ...declaredTargets]);
   const concernsTarget = concernsAdmittedTarget(`${item.text} ${declaredSubject}`, admittedTargets);
-  // NODE vs ARROW (research contract §3): a link row (`targetTerms`) is ABOUT its target. Evidence
-  // about the question's subject establishes a NODE of the chain, never the arrow into another
-  // market, so a link row admits only evidence that itself concerns the link's target (run-level
-  // admitted targets still count). Rows that merely carry an attached arrow alongside their own
-  // dimension (`transmissionTargets`) keep their dimension's own subject gate.
+  // NODE vs ARROW (research contract §3): an ARROW row (`targetTerms`) is ABOUT THE RELATIONSHIP.
+  // Evidence about the question's subject — or about the link's target — establishes an ENDPOINT
+  // NODE of the chain, never the arrow between them, so an arrow row admits only evidence that
+  // itself concerns the link's target AND carries relationship evidence.
   const isArrowRow = (req.targetTerms ?? []).length > 0;
   if (opts.subjectTerms !== undefined && opts.subjectTerms.size > 0) {
     if (isArrowRow) {
@@ -1086,6 +1131,18 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
     const itemTokenSet2 = new Set(itemVocab.split(/[^A-Z0-9]+/));
     const cryptoNative = [...CRYPTO_DOMAIN_TOKENS].some((t) => itemTokenSet2.has(t)) || itemDomain === "ONCHAIN" || itemDomain === "DEFI";
     if (cryptoNative) return "NO_MATCH";
+  }
+  // ARROW ADMISSION LAW (research contract §3): an arrow row has its OWN admission law and never
+  // falls through to the dimension vocabulary/class paths. Endpoint coverage is not transmission
+  // coverage — strong evidence for both endpoints must never make an unsupported arrow supported.
+  //   SATISFIES when the item concerns the link target AND carries relationship evidence;
+  //   STALE_ONLY when that relationship evidence is outside the requirement's time horizon.
+  // Everything else is NO_MATCH, so the arrow stays PENDING until researched, EXHAUSTED after
+  // bounded recovery, and never inherits a node row's refs.
+  if (isArrowRow) {
+    if (!concernsTarget) return "NO_MATCH";
+    if (!isRelationshipEvidence(item)) return "NO_MATCH";
+    return freshnessSufficient(req, item, now) ? "SATISFIES" : "STALE_ONLY";
   }
   const reqTokens = meaningfulTokens(req.description);
   // CURRENCY-UNIT GUARD (VALID ≠ RELEVANT): when the observation concerns a crypto asset the
@@ -1314,14 +1371,14 @@ export const CAPABILITY_SUPPORT: Readonly<Record<string, CapabilitySupport>> = {
   MARKET_DATA_ANALYSIS: { domains: ["PRICE_MARKET", "TECHNICAL"], dataTypes: ["PRICE", "OHLCV", "VOLUME", "QUOTE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   TECHNICAL_ANALYSIS: { domains: ["TECHNICAL", "PRICE_MARKET"], dataTypes: ["INDICATOR", "TREND", "MOMENTUM", "SETUP"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   SENTIMENT_ANALYSIS: { domains: ["SENTIMENT", "PRICE_MARKET"], dataTypes: ["SENTIMENT", "POSITIONING", "PROXY"], freshness: ["CURRENT", "RECENT"] },
-  NEWS_ANALYSIS: { domains: ["NEWS", "MACRO", "PRICE_MARKET"], dataTypes: ["NEWS", "HEADLINE", "EVENT", "DRIVER", "DEVELOPMENT"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
-  MACRO_ANALYSIS: { domains: ["MACRO"], dataTypes: ["POLICY", "RATE", "YIELD", "INFLATION", "GROWTH", "LABOR", "LIQUIDITY", "CREDIT", "USD", "DOLLAR", "VOLATILITY", "REGIME"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
+  NEWS_ANALYSIS: { domains: ["NEWS", "MACRO", "PRICE_MARKET"], dataTypes: ["NEWS", "HEADLINE", "EVENT", "DRIVER", "DEVELOPMENT", "TRANSMISSION", "RELATIONSHIP"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
+  MACRO_ANALYSIS: { domains: ["MACRO"], dataTypes: ["POLICY", "RATE", "YIELD", "INFLATION", "GROWTH", "LABOR", "LIQUIDITY", "CREDIT", "USD", "DOLLAR", "VOLATILITY", "REGIME", "TRANSMISSION", "RELATIONSHIP"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   DERIVATIVES_ANALYSIS: { domains: ["DERIVATIVES"], dataTypes: ["FUNDING", "OPEN_INTEREST", "POSITIONING", "LIQUIDATION"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   HISTORICAL_COMPARISON: { domains: ["HISTORICAL", "PRICE_MARKET", "TECHNICAL", "GENERAL"], dataTypes: ["OHLCV", "EPISODE", "OUTCOME", "CYCLE", "ANALOGUE"], freshness: ["HISTORICAL", "ANY"] },
   FALSIFICATION: { domains: ["GENERAL", "NEWS"], dataTypes: ["DISCONFIRMING", "RISK", "COUNTEREVIDENCE"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
   SOURCE_VALIDATION: { domains: ["GENERAL", "NEWS"], dataTypes: ["PRIMARY", "VERIFICATION", "PROVENANCE"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
-  WEB_SEARCH: { domains: ["GENERAL", "NEWS", "PROJECT", "MACRO", "FUNDAMENTALS"], dataTypes: ["SEARCH", "PRIMARY", "DEVELOPMENT", "NARRATIVE"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
-  CROSS_DOMAIN_SYNTHESIS: { domains: ["GENERAL"], dataTypes: ["BROAD_RESEARCH", "SYNTHESIS", "RECOVERY"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
+  WEB_SEARCH: { domains: ["GENERAL", "NEWS", "PROJECT", "MACRO", "FUNDAMENTALS"], dataTypes: ["SEARCH", "PRIMARY", "DEVELOPMENT", "NARRATIVE", "TRANSMISSION", "RELATIONSHIP"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
+  CROSS_DOMAIN_SYNTHESIS: { domains: ["GENERAL"], dataTypes: ["BROAD_RESEARCH", "SYNTHESIS", "RECOVERY", "TRANSMISSION", "RELATIONSHIP", "CROSS_ASSET", "SPILLOVER", "PASS_THROUGH", "MECHANISM"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
   ONCHAIN_ANALYSIS: { domains: ["ONCHAIN"], dataTypes: ["ADDRESS", "HOLDER", "TRANSACTION", "RESERVE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   DEFI_ANALYSIS: { domains: ["DEFI"], dataTypes: ["TVL", "PROTOCOL", "LIQUIDITY", "STAKING"], freshness: ["CURRENT", "RECENT"] },
   PROJECT_RESEARCH: { domains: ["PROJECT", "NEWS", "ONCHAIN", "DEFI"], dataTypes: ["DESCRIPTION", "ECOSYSTEM", "NARRATIVE", "TEAM", "ROADMAP"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
@@ -1798,39 +1855,6 @@ export function targetLabel(target: string): string {
   }
 }
 
-/**
- * Does this ledger row already own the dimension a transmission target names? Prevents
- * duplicating a dimension the ledger already asks for (the arrow is attached to the existing
- * row instead). Both sides fold through the same concept vocabulary ("RATES" target vs a
- * requirement naming "yields").
- */
-function requirementCarriesTarget(row: ResearchRequirement, target: string, question?: string): boolean {
-  const canonical = TRANSMISSION_TARGET_FOLDS[target] ?? CONCEPT_SYNONYMS[target] ?? target;
-  const declared = [...(row.targetTerms ?? []), ...(row.transmissionTargets ?? [])];
-  if (
-    declared.some((t) => (TRANSMISSION_TARGET_FOLDS[t] ?? CONCEPT_SYNONYMS[t] ?? t) === canonical)
-  ) {
-    return true;
-  }
-  // NODE vs ARROW (research contract §3): a row whose description IS the question (or a
-  // fragment/restatement of it) mentions every target the question names without being ABOUT
-  // any one of them — it is the question-derived base dimension, a NODE requirement. Letting it
-  // claim the arrow attached the link to a row that node evidence then satisfied: a crude-oil
-  // observation marked the INFLATION arrow PARTIALLY_SUPPORTED with no inflation evidence at
-  // all. Only a genuine DIMENSION label ("current inflation conditions") may carry an arrow.
-  if (question !== undefined && textIsQuestionOrFragment(row.description, question)) return false;
-  return meaningfulTokens(row.description).has(canonical);
-}
-
-/**
- * Whether `text` is the question itself, a fragment of it, or a restatement containing it —
- * compared on normalized vocabulary so punctuation/wording changes do not evade the check.
- */
-function textIsQuestionOrFragment(text: string, question: string): boolean {
-  const normalize = (value: string): string =>
-    value.toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
-  const a = normalize(text);
-  const b = normalize(question);
-  if (a.length === 0 || b.length === 0) return false;
-  return a.includes(b) || b.includes(a);
-}
+// (The carrier/parent-node concept for arrows is GONE: `requirementCarriesTarget` used to attach
+// an arrow to whichever row already owned the target dimension, and the arrow then inherited that
+// row's coverage. Every arrow is now its own first-class row with its own admission law.)

@@ -74,16 +74,14 @@ inflation, Treasury yields and broader risk assets"), `transmissionTargetsOf` / 
 fold the named markets onto the shared market vocabulary and every named target becomes a required
 dimension:
 
-- if the ledger does not yet ask about that dimension, it gets its own **TRANSMISSION** row
-  (`targetTerms`);
-- if a genuine **dimension row** already asks for it ("the current inflation regime"), the arrow is
-  **attached to that row** (`transmissionTargets`) — one row per dimension, one arrow per named link.
-- the **question-derived base row** (whose description IS the question, or a fragment of it) never
-  carries an arrow: its description trivially mentions every target the question names without being
-  ABOUT any one of them. `requirementCarriesTarget` refuses that carrier, so the arrow gets its own
-  dedicated row. Without this, a task-derived row (the planner's objective = the question) claimed the
-  arrow and node evidence satisfied it — crude-oil data marked the INFLATION arrow
-  `PARTIALLY_SUPPORTED` with no inflation evidence at all.
+- **every arrow is its own first-class requirement row**, always. There is no carrier/parent-node
+  concept: a row owns either a NODE (evidence about a market) or an ARROW (evidence about the
+  relationship between two markets), never both. Each arrow row carries its own requirement id,
+  source fold (`relationshipSource`), destination fold (`targetTerms`), `relationshipType`
+  (`TRANSMISSION`), role/importance, status, evidence refs, blocking state and diagnostics.
+  The earlier design attached an arrow to whichever dimension row already owned the target, and the
+  arrow then INHERITED that row's coverage: a live oil run reported OIL → INFLATION as
+  `PARTIALLY_SUPPORTED` with 26 inflation-regime references and zero relationship evidence.
 
 **Node evidence is not arrow evidence.** `deriveCausalLinkStatuses` reads the ledger and derives each
 arrow's status (`SUPPORTED`, `PARTIALLY_SUPPORTED`, `STALE_ONLY`, `UNRESOLVED`, `NOT_RESEARCHED`), and
@@ -103,11 +101,34 @@ applied per requirement inside `matchRequirement`): evidence about a named targe
 nothing else is. A question that names no transmission derives no links at all — inventing causality
 is a failure too.
 
-The gate also enforces the arrow law at the row level: a **link row** (`targetTerms`) is *about its
-target*, so it admits only evidence that itself concerns the link's target. Evidence about the
-question's subject establishes a node of the chain, never the arrow into another market, so a yield
-quote mentioning a class word can no longer satisfy the inflation arrow. Rows that merely carry an
-attached arrow alongside their own dimension (`transmissionTargets`) keep their dimension's gate.
+### The arrow admission law
+
+An arrow row has its OWN admission law and never falls through to the dimension vocabulary or
+class paths. It admits an observation only when ALL of these hold:
+
+1. the item passes the subject, semantic-domain, temporal and freshness gates;
+2. **the item concerns the link's target** (`concernsAdmittedTarget` over the arrow's
+   `targetTerms`);
+3. **the item carries relationship evidence** (`isRelationshipEvidence`): either it is produced by
+   a capability that declares relationship data (provider lineage — cross-domain/pass-through
+   analysis), or its own language states the relationship via the shared relationship vocabulary
+   (`transmitted`, `passed through`, `fed into`, `weighed on`, `contributed to`, `because of`,
+   `co-movement`, `mechanism`, …).
+
+Nothing else matches. In particular, an observation about an ENDPOINT market — a price quote, a CPI
+print, a dimension headline — returns `NO_MATCH` no matter how much vocabulary it shares, so
+`oil prices rose` + `inflation was elevated` can never become `oil contributed to inflation`.
+Successful relationship evidence yields `SATISFIES` (`STALE_ONLY` if it is outside the requirement's
+time horizon), and the arrow row's declared evidence classes are RELATIONSHIP classes only, so the
+engine's class path cannot admit an endpoint item either.
+
+The arrow row is also researchable: its description declares the data type it needs
+(`transmission evidence for how the move in X reached Y`), and the relationship-capable
+capabilities (`WEB_SEARCH`, `CROSS_DOMAIN_SYNTHESIS`, `NEWS_ANALYSIS`, `MACRO_ANALYSIS`) declare
+that data type — so capability ranking schedules a relationship route instead of an endpoint feed.
+An arrow is therefore `PENDING` until researched, `EXHAUSTED` only after bounded research spent
+those routes, and never resurrected later by endpoint coverage (`assessCoverage` treats
+`EXHAUSTED`/`UNAVAILABLE` as terminal).
 
 ## Abstract targets: no instrument is not no subject
 

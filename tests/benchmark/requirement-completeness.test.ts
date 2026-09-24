@@ -827,7 +827,9 @@ describe("CATEGORY F: CAUSAL / TRANSMISSION CHAIN", () => {
           { content: "Dollar index at 106.8, highest in two years, as the Fed holds rates elevated.", about: "DX-Y.NYB" },
         ]],
         ["NEWS_ANALYSIS", [
-          { content: "Emerging market outflows accelerated as the dollar strengthened this week.", about: "DX-Y.NYB" },
+          // Relationship evidence for the DOLLAR -> EMERGING_MARKETS arrow (endpoint evidence
+          // alone can no longer satisfy an arrow: node != arrow).
+          { content: "Emerging-market outflows accelerated as a stronger dollar weighed on EM assets this week.", about: "DX-Y.NYB" },
         ]],
       ]),
       assertions: [
@@ -840,7 +842,9 @@ describe("CATEGORY F: CAUSAL / TRANSMISSION CHAIN", () => {
       question: "How would a change in Treasury yields transmit into risk assets?",
       providers: new Map([
         ["MACRO_ANALYSIS", [
-          { content: "Rising Treasury yields increase the discount rate, compressing equity valuations especially in growth stocks.", about: "^TNX" },
+          // Relationship evidence for the RATES -> RISK_ASSETS arrow; a bare equity quote would
+          // be a NODE observation and could not establish the transmission.
+          { content: "Rising Treasury yields raise the discount rate, weighing on risk assets and compressing equity valuations, especially in growth stocks.", about: "^TNX" },
           { content: "Higher yields also strengthen the dollar, creating headwinds for EM and crypto.", about: "^TNX" },
           { content: "The 10-year Treasury yield is at 4.998 percent, up 0.75 percent today.", about: "^TNX" },
           { content: "VIX spiked to 28 as equity volatility surged on the yield move.", about: "^TNX" },

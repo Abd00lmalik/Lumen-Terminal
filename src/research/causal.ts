@@ -21,6 +21,8 @@ export type CausalLinkStatus =
   | "NOT_RESEARCHED";     // requirement still pending (no capability served it yet)
 
 export interface CausalLinkStatusRecord {
+  /** Canonical SOURCE fold of the link (the driver side, e.g. OIL for OIL->INFLATION). */
+  readonly source?: string;
   /** Canonical target fold of the link (INFLATION, RATES, ...). */
   readonly target: string;
   /** Human-readable target label (from the shared target vocabulary). */
@@ -35,13 +37,15 @@ export interface CausalLinkStatusRecord {
 /**
  * Derive the status of every transmission link the contract required. One requirement per
  * canonical target (completeRequirements de-duplicates), so the ledger row IS the link.
+ *
+ * Only an ARROW row (`targetTerms`) declares a link. There is no parent/carrier row any more: an
+ * arrow's status comes from its own coverage, which its own admission law restricts to
+ * relationship evidence — never from the coverage of either endpoint's node requirement.
  */
 export function deriveCausalLinkStatuses(requirements: readonly ResearchRequirement[]): readonly CausalLinkStatusRecord[] {
   const out: CausalLinkStatusRecord[] = [];
   for (const req of requirements) {
-    // A link is declared either as its own TRANSMISSION row (targetTerms) or attached to the
-    // dimension row that already owned the target (transmissionTargets). Both are the arrow.
-    const targets = [...(req.targetTerms ?? []), ...(req.transmissionTargets ?? [])];
+    const targets = [...(req.targetTerms ?? [])];
     if (targets.length === 0) continue;
     for (const target of targets) {
       const status: CausalLinkStatus =
@@ -55,6 +59,7 @@ export function deriveCausalLinkStatuses(requirements: readonly ResearchRequirem
               ? "UNRESOLVED"
               : "NOT_RESEARCHED";
       out.push({
+        ...(req.relationshipSource !== undefined ? { source: req.relationshipSource } : {}),
         target,
         targetLabel: targetLabelOf(target),
         status,

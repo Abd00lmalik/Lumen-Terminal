@@ -187,7 +187,7 @@ function ResearchQuality({ result }: { result: ResearchResponseDto }) {
             {links.map((l) => (
               <div key={l.requirementId} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12.5 }}>
                 <span style={{ color: "var(--text-2)" }}>
-                  {l.targetLabel}
+                  {l.source !== undefined ? `${l.source.toLowerCase()} → ${l.targetLabel}` : l.targetLabel}
                   {l.target === d.weakestCausalLink ? " · weakest link" : ""}
                 </span>
                 <span className="counts" style={l.status === "SUPPORTED" ? undefined : { color: "var(--warn)" }}>

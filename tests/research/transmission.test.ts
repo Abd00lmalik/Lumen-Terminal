@@ -8,6 +8,8 @@
  *
  * These tests pin the generic laws that fix it, using ONLY the question's own wording:
  *   - the named targets become required dimensions and declared links (no question list);
+ *   - every arrow is its OWN row and admits only RELATIONSHIP evidence about a target the
+ *     question explicitly named: endpoint coverage is never transmission coverage;
  *   - the subject gate admits evidence about a target the question explicitly named, and only
  *     that (a link target is not a licence for unrelated evidence);
  *   - each link's status is derived from the ledger, and the weakest link binds the judgment;
@@ -51,7 +53,12 @@ function item(partial: Partial<CoverageEvidence> & { ref: string; text: string }
   return partial;
 }
 
-/** Oil + yields + risk-asset evidence, but NO inflation evidence: the exact failure. */
+/**
+ * ENDPOINT (NODE) evidence only: oil, yields and risk assets are all well observed, and
+transmission is nowhere stated. "Oil prices rose", "Treasury yields rose" and "risk assets fell"
+ * are nodes — none of them establishes an arrow. Under the node/arrow law this pool must leave
+ * EVERY arrow unresolved, however strong the endpoint coverage looks.
+ */
 const NO_INFLATION_EVIDENCE: readonly CoverageEvidence[] = [
   item({
     ref: "ev_oil", text: "WTI crude oil settled 4% higher this week on supply disruption",
@@ -141,14 +148,24 @@ describe("the subject gate is exactly as wide as the question's own wording", ()
   const riskLink = ledger.find((r) => (r.targetTerms ?? []).includes("RISK_ASSETS"))!;
   const growthDimension = ledger.find((r) => /growth regime/i.test(r.description))!;
 
-  it("admits evidence about a target the question explicitly named", () => {
-    const riskItem = item({
+  it("admits RELATIONSHIP evidence about a target the question explicitly named", () => {
+    const relational = item({
+      ref: "ev_rel", text: "Treasury yields rose, weighing on the S&P 500 as risk assets weakened",
+      evidenceType: "OBSERVATION",
+    });
+    expect(
+      matchRequirement(riskLink, relational, { subjectTerms: OIL_SUBJECT_TERMS, now: new Date() }),
+    ).toBe("SATISFIES");
+  });
+
+  it("does NOT admit an endpoint observation about the same target (node != arrow)", () => {
+    const endpoint = item({
       ref: "ev_risk", text: "The S&P 500 fell this week as risk assets weakened",
       evidenceType: "OBSERVATION",
     });
     expect(
-      matchRequirement(riskLink, riskItem, { subjectTerms: OIL_SUBJECT_TERMS, now: new Date() }),
-    ).toBe("SATISFIES");
+      matchRequirement(riskLink, endpoint, { subjectTerms: OIL_SUBJECT_TERMS, now: new Date() }),
+    ).toBe("NO_MATCH");
   });
 
   it("does not let a link target exempt an unrelated dimension", () => {
@@ -182,10 +199,29 @@ describe("link status is derived from the ledger, not from the prose", () => {
     expect(inflation.evidenceRefs).toEqual([]);
   });
 
-  it("reports the researched arrows as supported, with their evidence", () => {
-    const rates = links.find((l) => l.target === "RATES")!;
+  it("leaves EVERY arrow unresolved when only endpoint evidence exists", () => {
+    for (const link of links) {
+      expect(["UNRESOLVED", "NOT_RESEARCHED", "STALE_ONLY"]).toContain(link.status);
+      expect(link.evidenceRefs).toEqual([]);
+    }
+  });
+
+  it("supports an arrow only once relationship evidence exists — and not its neighbours", () => {
+    const withRatesRelation = assessCoverage(ledgerOf(OIL_TRANSMISSION, "oil"), [
+      ...NO_INFLATION_EVIDENCE,
+      item({
+        ref: "ev_rates_rel", text: "Oil-driven input costs pushed Treasury yields higher this week",
+        sourceProvider: "macro-news", sourceType: "SECONDARY",
+      }),
+    ], { subjectTerms: OIL_SUBJECT_TERMS, now: new Date() });
+    const derived = deriveCausalLinkStatuses(withRatesRelation);
+    const rates = derived.find((l) => l.target === "RATES")!;
     expect(["SUPPORTED", "PARTIALLY_SUPPORTED"]).toContain(rates.status);
-    expect(rates.evidenceRefs.length).toBeGreaterThan(0);
+    expect(rates.evidenceRefs).toContain("ev_rates_rel");
+    // The inflation arrow still has endpoint evidence galore and still no relationship evidence.
+    const inflation = derived.find((l) => l.target === "INFLATION")!;
+    expect(inflation.evidenceRefs).toEqual([]);
+    expect(["UNRESOLVED", "NOT_RESEARCHED", "STALE_ONLY"]).toContain(inflation.status);
   });
 
   it("binds the judgment to the weakest material link", () => {
@@ -249,12 +285,34 @@ describe("assertive causal language requires link evidence", () => {
     expect(violations.some((v) => v.type === "CAUSAL_CLAIM_WITHOUT_LINK_EVIDENCE")).toBe(false);
   });
 
-  it("does not flag an assertion about a link whose evidence exists", () => {
+  it("does not flag an assertion about a link whose RELATIONSHIP evidence exists", () => {
+    const covered = assessCoverage(ledgerOf(OIL_TRANSMISSION, "oil"), [
+      ...NO_INFLATION_EVIDENCE,
+      item({
+        ref: "ev_rates_rel", text: "Oil-driven input costs pushed Treasury yields higher this week",
+        sourceProvider: "macro-news", sourceType: "SECONDARY",
+      }),
+    ], { subjectTerms: OIL_SUBJECT_TERMS, now: new Date() });
+    const violations = contractViolations(
+      "Higher crude prices pushed Treasury yields higher this week.",
+      { ...state, ledger: covered.map((r) => ({
+        description: r.description, importance: r.importance, status: r.status,
+        timeSensitivity: r.timeSensitivity,
+        ...(r.relationshipType !== undefined ? { relationshipType: r.relationshipType } : {}),
+        ...(r.targetTerms !== undefined ? { targetTerms: r.targetTerms } : {}),
+        ...(r.evidenceQuality !== undefined ? { evidenceQuality: r.evidenceQuality } : {}),
+        ...(r.sourceDiversity !== undefined ? { sourceDiversity: r.sourceDiversity } : {}),
+      })) },
+    );
+    expect(violations.some((v) => v.type === "CAUSAL_CLAIM_WITHOUT_LINK_EVIDENCE")).toBe(false);
+  });
+
+  it("flags the same assertion when only the endpoints are observed", () => {
     const violations = contractViolations(
       "Higher crude prices pushed Treasury yields higher this week.",
       state,
     );
-    expect(violations.some((v) => v.type === "CAUSAL_CLAIM_WITHOUT_LINK_EVIDENCE")).toBe(false);
+    expect(violations.some((v) => v.type === "CAUSAL_CLAIM_WITHOUT_LINK_EVIDENCE")).toBe(true);
   });
 });
 
