@@ -149,14 +149,27 @@ describe("workspace research graph (research-object-model.md §22/§17, lock §1
     expect(restored.getResearchResponse(research.id)).toEqual(response);
   });
 
-  it("persisted responses are bounded (history depth without unbounded growth)", () => {
+  // HISTORY RETENTION POLICY (Phase B): history must preserve the research record itself.
+  // The previous law evicted the oldest records at 100 runs, so older research silently
+  // degraded to bare summaries (the defect this replaces). Growth is bounded by SHAPE now
+  // (one slim record per run, no duplicated object arrays), never by dropping history.
+  it("retains a record for EVERY completed run, oldest included, across a cold start", async () => {
+    const { MemoryStore } = await import("../../src/persistence/index.js");
     const ids: string[] = [];
-    for (let i = 0; i < 105; i += 1) {
+    for (let i = 0; i < 150; i += 1) {
       const r = ws.addResearch({ objective: `o${i}`, question: `q${i}`, flow: "WHAT_HAPPENED" }, origin);
       ids.push(r.id);
       ws.saveResearchResponse(r.id, { i });
     }
-    expect(ws.getResearchResponse(ids[0]!)).toBeUndefined(); // oldest evicted
-    expect(ws.getResearchResponse(ids[ids.length - 1]!)).toEqual({ i: 104 });
+    expect(ws.getResearchResponse(ids[0]!)).toEqual({ i: 0 }); // oldest NOT evicted
+    expect(ws.getResearchResponse(ids[ids.length - 1]!)).toEqual({ i: 149 });
+
+    // Every retained record survives the snapshot round-trip (process restart / cold instance).
+    const store = new MemoryStore();
+    await store.save(ws.toSnapshot());
+    const restored = (await store.load())!;
+    expect(restored.getResearchResponse(ids[0]!)).toEqual({ i: 0 });
+    expect(restored.getResearchResponse(ids[75]!)).toEqual({ i: 75 });
+    expect(restored.getResearchResponse(ids[ids.length - 1]!)).toEqual({ i: 149 });
   });
 });

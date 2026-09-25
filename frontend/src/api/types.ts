@@ -96,6 +96,107 @@ export interface ResearchDto {
   readonly history: readonly string[];
   /** Present on list endpoints: explicit current-ness; the client never infers it. */
   readonly isCurrent?: boolean;
+  /** The user submission this object belongs to (one question = one run). */
+  readonly runRef?: string;
+  /** The trader's verbatim question for the run; the text history shows. */
+  readonly userQuestion?: string;
+  /** Internal Research objects of the same run (plan steps, flow phases). */
+  readonly internalRefs?: readonly string[];
+}
+
+// ---------------------------------------------------------------------------
+// Research history list + run aggregate (one open = one call)
+// ---------------------------------------------------------------------------
+
+/**
+ * History list entry (GET /api/research): ONE lightweight row per research RUN — question,
+ * timestamps, status, confidence, question-resolution verdict, short previews, save marker,
+ * and whether the full record is retained. Never an object dump.
+ */
+export interface ResearchRunSummaryDto extends ResearchDto {
+  readonly isCurrent: boolean;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+  readonly confidence?: ConfidenceDto;
+  /** ANSWERED | PARTIALLY_ANSWERED | NOT_ANSWERED (engine-owned question-fit verdict). */
+  readonly questionResolutionStatus?: string;
+  readonly insightPreview?: string;
+  readonly judgmentPreview?: string;
+  readonly saved?: boolean;
+  /** True when the full run record is NOT retained: opening it renders honestly degraded. */
+  readonly degraded?: boolean;
+}
+
+/** How completely a run could be reconstructed (the aggregate reports which). */
+export type ResearchRecordTierDto = "FULL" | "JUDGMENT" | "SUMMARY";
+
+/**
+ * GET /api/research/:ref — the single run-level presentation contract. Carries the research
+ * object fields plus the retained response surface, the hoisted presentation fields the run
+ * view renders, provenance, timestamps, saved/thesis associations and the reconstruction tier.
+ */
+export type ResearchRunAggregateDto = ResearchDto &
+  Partial<ResearchResponseDto> & {
+    /** Canonical open identity: ALWAYS the ref this run was opened by. */
+    readonly researchRef: string;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+    readonly provenance: readonly ProvenanceEntryDto[];
+    readonly saved: boolean;
+    readonly recordTier: ResearchRecordTierDto;
+    readonly degraded: boolean;
+    readonly questionResolution?: QuestionResolutionDto;
+    readonly actionableInsight?: QuestionResolutionDto["actionableInsight"];
+    readonly watchNext?: readonly string[];
+    readonly confidence?: string;
+    readonly stoppedBecause?: string;
+    readonly causalLinks?: readonly CausalLinkDiagnosticDto[];
+    readonly weakestCausalLink?: string;
+    readonly summary: {
+      readonly evidenceCount: number;
+      readonly claimCount: number;
+      readonly hypothesisCount: number;
+      readonly judgmentCount: number;
+    };
+    readonly thesisAssessments: readonly ThesisAssessmentDto[];
+  };
+
+export interface ProvenanceEntryDto {
+  readonly at: string;
+  readonly originKind: string;
+  readonly originDetail?: string;
+  readonly note?: string;
+}
+
+/** Engine-owned question resolution; the run view renders it, never re-derives it. */
+export interface QuestionResolutionDto {
+  readonly intent: string;
+  readonly temporalScope: string;
+  readonly status: string;
+  readonly dimensions: readonly { readonly dimension: string; readonly fit: string }[];
+  readonly unresolvedDimensions: readonly string[];
+  readonly materiality: string;
+  readonly evidenceCount: number;
+  readonly relevantEvidenceCount: number;
+  readonly staleEvidenceCount: number;
+  readonly answerClaimCount: number;
+  readonly claimEvidenceLinks: number;
+  readonly actionableInsight: {
+    readonly whatEvidenceShows: readonly string[];
+    readonly whatEvidenceDoesNotShow: readonly string[];
+    readonly whatItMeans: string;
+    readonly whatWouldChangeConclusion: readonly string[];
+    readonly watchItems: readonly string[];
+  };
+}
+
+/** History list query (deliberately plain: window, order, exact status, substring search). */
+export interface ResearchListQuery {
+  readonly limit?: number;
+  readonly offset?: number;
+  readonly sort?: "recent" | "oldest";
+  readonly status?: string;
+  readonly q?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +394,8 @@ export interface ResearchDiagnosticsDto {
   readonly causalLinks?: readonly CausalLinkDiagnosticDto[];
   /** The link that binds the judgment (convenience for single-chain runs). */
   readonly weakestCausalLink?: string;
+  /** QUESTION RESOLUTION: whether this run actually resolves the trader's need. */
+  readonly questionResolution?: QuestionResolutionDto;
 }
 
 export interface CausalLinkDiagnosticDto {

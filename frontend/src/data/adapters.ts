@@ -11,6 +11,7 @@ import type {
   EvidenceDto, JudgmentDto, ResearchDto, ThesisDto, ThesisAssessmentDto,
   MonitorDto, MemoryDto, SavedArtifactDto, ContinuitySnapshotDto, ResearchResponseDto,
 } from "../api/types.js";
+import { isResearchRef } from "./identity.js";
 import type {
   EvidenceItem, JudgmentView, ResearchSummary, ThesisView, ThesisAssessmentView,
   MonitorView, MemoryItem, SavedArtifactView, ChallengeView, WorkspaceListItem,
@@ -53,15 +54,28 @@ export function judgmentFromDto(j: JudgmentDto): JudgmentView {
 // Research list / summaries
 // ---------------------------------------------------------------------------
 
+/**
+ * REAL timestamps only. The research DTO's `history` field holds lifecycle NOTES ("run
+ * started"), not dates — using it as a timestamp made every row read "just now". The history
+ * endpoint supplies provenance-derived createdAt/updatedAt; when a caller has a bare research
+ * DTO instead, the timestamp stays empty and the UI simply omits it.
+ */
+function runTimestamp(r: ResearchDto): string {
+  const stamped = r as { readonly updatedAt?: string; readonly createdAt?: string };
+  return stamped.updatedAt ?? stamped.createdAt ?? "";
+}
+
 export function researchSummaryFromDto(r: ResearchDto): ResearchSummary {
+  const summary = r as { readonly updatedAt?: string; readonly createdAt?: string; readonly confidence?: ResearchSummary["confidence"] };
   return {
     ref: r.ref,
     title: r.question.length > 0 ? r.question : r.objective,
     question: r.question,
     flow: r.flow,
     status: r.status === "ACTIVE" ? "ACTIVE" : "COMPLETED",
-    confidence: "UNKNOWN", // per-research confidence lives on its judgment; not fabricated here
-    updatedAt: r.history.length > 0 ? r.history[r.history.length - 1]! : new Date().toISOString(),
+    // Engine-reported confidence when the summary carries it; never fabricated otherwise.
+    confidence: summary.confidence ?? "UNKNOWN",
+    updatedAt: runTimestamp(r),
     evidenceCount: r.evidenceRefs.length,
     sourceCount: 0, // source counts are not part of the research DTO; rendered as
     ...(r.isCurrent !== undefined ? { isCurrent: r.isCurrent } : {}),
@@ -159,7 +173,10 @@ export function artifactFromDto(a: SavedArtifactDto): SavedArtifactView {
 // ---------------------------------------------------------------------------
 
 export interface HomeData {
+  /** RESEARCH history only (research refs); monitors are never mixed in. */
   readonly research: readonly WorkspaceListItem[];
+  /** Monitor rows, kept as their own list so they can never be opened as research. */
+  readonly monitors: readonly WorkspaceListItem[];
   readonly activeThesis: ThesisView | undefined;
   readonly monitorCounts: { active: number; proposed: number };
   readonly contradictions: readonly string[];
@@ -168,15 +185,19 @@ export interface HomeData {
 }
 
 export function homeDataFromSnapshot(s: ContinuitySnapshotDto, allResearch: readonly ResearchDto[]): HomeData {
+  // RESEARCH HISTORY IS RESEARCH ONLY (B8): monitor rows used to be appended to the research
+  // list, so clicking one navigated to `/research/mon_...` — an unresolvable reference that
+  // produced the "history entry is not available" panel the identity bug was blamed for.
   const researchItems: WorkspaceListItem[] = allResearch
+    .filter((r) => isResearchRef(r.ref))
     .slice()
-    .reverse()
+    .sort((a, b) => runTimestamp(b).localeCompare(runTimestamp(a))) // newest first
     .map((r) => ({
       ref: r.ref,
       title: r.question.length > 0 ? r.question : r.objective,
       kind: "research" as const,
       status: r.isCurrent === true ? "CURRENT" : r.status,
-      updatedAt: r.history.length > 0 ? r.history[r.history.length - 1]! : new Date().toISOString(),
+      updatedAt: runTimestamp(r),
       meta: r.flow.replace(/_/g, " ").toLowerCase(),
     }));
   const monitors: WorkspaceListItem[] = [
@@ -184,7 +205,8 @@ export function homeDataFromSnapshot(s: ContinuitySnapshotDto, allResearch: read
     ...s.activeMonitors.map((m) => ({ ref: m.ref, title: m.target, kind: "monitor" as const, status: m.status, updatedAt: "", meta: `${m.conditions.length} conditions` })),
   ];
   return {
-    research: [...researchItems, ...monitors],
+    research: researchItems,
+    monitors,
     activeThesis: s.activeThesis !== undefined ? thesisFromDto(s.activeThesis, []) : undefined,
     monitorCounts: { active: s.activeMonitors.length, proposed: s.monitorProposals.length },
     contradictions: [...s.importantContradictions],

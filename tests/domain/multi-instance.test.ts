@@ -103,6 +103,21 @@ describe("mergeSnapshots (multi-instance persistence law)", () => {
     expect(ids).toContain("rs_remote");
   });
 
+  it("keeps the LOCAL record for the same run (a stale remote never clobbers a fresh write)", () => {
+    resetIdCounters();
+    const local = seedRun("local run");
+    const remote = seedRun("remote run");
+    local.saveResearchResponse("rs_same", { answer: { answer: "newer local record" } });
+    remote.saveResearchResponse("rs_same", { answer: { answer: "stale remote record" } });
+    remote.saveResearchResponse("rs_only_remote", { answer: { answer: "remote-only run" } });
+    const merged = mergeSnapshots(local.toSnapshot(), remote.toSnapshot());
+    const byId = new Map(
+      (merged.researchResponses ?? []).map((r) => [r.researchId, r.response as { answer: { answer: string } }]),
+    );
+    expect(byId.get("rs_same")!.answer.answer).toBe("newer local record");
+    expect(byId.get("rs_only_remote")!.answer.answer).toBe("remote-only run"); // gaps still filled
+  });
+
   it("merged snapshots round-trip through Workspace.fromSnapshot with intact refs", () => {
     resetIdCounters();
     const a = seedRun("A: AAPL");

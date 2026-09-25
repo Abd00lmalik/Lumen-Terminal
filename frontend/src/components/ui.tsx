@@ -124,8 +124,14 @@ export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boo
   );
 }
 
-export function timeAgo(iso: string): string {
+/**
+ * Relative time for a REAL timestamp. An absent/invalid timestamp renders as nothing rather
+ * than a fabricated "just now" — the UI never invents recency it does not have.
+ */
+export function timeAgo(iso: string | undefined): string {
+  if (iso === undefined || iso === "") return "";
   const d = new Date(iso).getTime();
+  if (Number.isNaN(d)) return "";
   const mins = Math.max(1, Math.round((Date.now() - d) / 60000));
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.round(mins / 60);

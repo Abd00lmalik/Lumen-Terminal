@@ -11,6 +11,7 @@ import { Panel, StatusBadge, Empty, Note, timeAgo } from "../components/ui.js";
 import { BackendDownNote } from "../components/BackendDownNote.js";
 import { listResearch, getWorkspace } from "../api/index.js";
 import { homeDataFromSnapshot, thesisFromDto } from "../data/adapters.js";
+import { isResearchRef } from "../data/identity.js";
 import { listTheses } from "../api/index.js";
 import type { WorkspaceListItem, ThesisView } from "../data/types.js";
 import type { ResearchDto } from "../api/index.js";
@@ -19,6 +20,7 @@ export function HomePage() {
   const navigate = useNavigate();
   const [research, setResearch] = useState<readonly WorkspaceListItem[]>([]);
   const [thesis, setThesis] = useState<ThesisView | undefined>(undefined);
+  const [monitors, setMonitors] = useState<readonly WorkspaceListItem[]>([]);
   const [counts, setCounts] = useState({ active: 0, proposed: 0 });
   const [contradictions, setContradictions] = useState<readonly string[]>([]);
   const [uncertainties, setUncertainties] = useState<readonly string[]>([]);
@@ -30,7 +32,8 @@ export function HomePage() {
       // Each load path is INDEPENDENT: one failed endpoint (e.g. a transient 404/timeout)
       // must not blank the whole home page — previously one rejected promise in this
       // Promise.all discarded the research history that had already loaded fine.
-      const settled = await Promise.allSettled([listResearch(), getWorkspace(), listTheses()]);
+      // Newest-first, bounded page of research history (the History page pages further).
+      const settled = await Promise.allSettled([listResearch({ limit: 50 }), getWorkspace(), listTheses()]);
       const all = settled[0].status === "fulfilled" ? settled[0].value : [];
       const snapshot = settled[1].status === "fulfilled" ? settled[1].value : undefined;
       const theses = settled[2].status === "fulfilled" ? settled[2].value : [];
@@ -40,20 +43,25 @@ export function HomePage() {
         return;
       }
       if (snapshot !== undefined) {
-        setResearch(homeDataFromSnapshot(snapshot, all).research);
-        setCounts(homeDataFromSnapshot(snapshot, all).monitorCounts);
+        const home = homeDataFromSnapshot(snapshot, all);
+        setResearch(home.research);
+        setMonitors(home.monitors); // separate list; never merged into research history
+        setCounts(home.monitorCounts);
         setContradictions(snapshot.importantContradictions);
         setUncertainties(snapshot.unresolvedUncertainties);
       } else if (all.length > 0) {
-        // Snapshot unavailable: still render history from the research list alone.
-        setResearch(all.map((r) => ({
-          ref: r.ref,
-          title: r.question.length > 0 ? r.question : r.objective,
-          kind: "research" as const,
-          status: r.status,
-          updatedAt: r.history.length > 0 ? r.history[r.history.length - 1]! : new Date().toISOString(),
-          meta: r.flow.replace(/_/g, " ").toLowerCase(),
-        })));
+        // Snapshot unavailable: still render history from the research list alone (research
+        // refs only; a monitor row must never be openable as research).
+        setResearch(all
+          .filter((r) => isResearchRef(r.ref))
+          .map((r) => ({
+            ref: r.ref,
+            title: r.question.length > 0 ? r.question : r.objective,
+            kind: "research" as const,
+            status: r.isCurrent === true ? "CURRENT" : r.status,
+            updatedAt: r.updatedAt ?? "",
+            meta: r.flow.replace(/_/g, " ").toLowerCase(),
+          })));
       }
       const active = theses.find((t) => t.isActive) ?? theses[theses.length - 1];
       if (active !== undefined && snapshot !== undefined) {
@@ -153,7 +161,7 @@ export function HomePage() {
               >
                 <div style={{ minWidth: 0 }}>
                   <div className="row-title">{r.title}</div>
-                  <div className="row-meta">{r.meta} · {timeAgo(r.updatedAt)}</div>
+                  <div className="row-meta">{r.meta}{timeAgo(r.updatedAt) !== "" ? ` · ${timeAgo(r.updatedAt)}` : ""}</div>
                 </div>
                 <div className="row-right"><StatusBadge status={r.status} /></div>
               </button>
@@ -162,7 +170,30 @@ export function HomePage() {
         </Panel>
       )}
 
-      <Panel title="Research history" kicker="everything the engine has run">
+      {monitors.length > 0 && (
+        <Panel title="Monitors" kicker="proposed and active; no background worker exists">
+          <div className="row-list">
+            {monitors.map((m) => (
+              <button
+                className="row" style={{ width: "100%", textAlign: "left", background: "none", border: "none", borderTop: "1px solid var(--line)", color: "inherit", cursor: "pointer" }}
+                key={m.ref} onClick={() => navigate("/monitor")}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div className="row-title">{m.title}</div>
+                  <div className="row-meta">{m.meta}</div>
+                </div>
+                <div className="row-right"><StatusBadge status={m.status} /></div>
+              </button>
+            ))}
+          </div>
+        </Panel>
+      )}
+
+      <Panel
+        title="Research history"
+        kicker="everything the engine has run"
+        right={<button className="btn sm ghost" onClick={() => navigate("/history")}>Full history →</button>}
+      >
         <div className="row-list">
           {recent.map((r) => (
             <button
@@ -171,7 +202,7 @@ export function HomePage() {
             >
               <div style={{ minWidth: 0 }}>
                 <div className="row-title">{r.title}</div>
-                <div className="row-meta">{r.meta} · {timeAgo(r.updatedAt)}</div>
+                <div className="row-meta">{r.meta}{timeAgo(r.updatedAt) !== "" ? ` · ${timeAgo(r.updatedAt)}` : ""}</div>
               </div>
               <div className="row-right"><StatusBadge status={r.status} /></div>
             </button>

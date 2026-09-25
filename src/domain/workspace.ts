@@ -32,10 +32,17 @@ import { appendProvenance, createProvenance, type ProvenanceOrigin } from "./pro
 import { newId, seedIdCountersFromIds } from "./ids.js";
 import { currentRun } from "./run-context.js";
 
-/** Persisted final responses kept per workspace (history depth for verbatim re-serving). */
-const MAX_PERSISTED_RESPONSES = 100;
-
-/** Shape of a persisted response record in the snapshot (researchResponses entries). */
+/**
+ * Persisted run presentation records (researchResponses entries).
+ *
+ * RETENTION POLICY (Phase B): history must preserve the research record itself, so there is
+ * NO FIFO eviction here — evicting the oldest responses silently degraded older runs to bare
+ * summaries (the 100-run cap this replaces). Bounded growth is enforced by SHAPE, not by
+ * dropping records: the application layer stores one SLIM record per completed run (answer,
+ * diagnostics, gaps, resolution — never copies of evidence/judgment objects the graph already
+ * holds), so each run contributes a fixed small record exactly once. A workspace with N runs
+ * holds N records; nothing is duplicated inside a record.
+ */
 export interface ResearchResponseRecord {
   readonly researchId: string;
   readonly response: unknown;
@@ -60,10 +67,9 @@ export interface WorkspaceSnapshot {
   /** M6 (audit D1): the trader's explicit active-thesis selection (working state). */
   readonly activeThesisId?: string;
   /**
-   * Final responses per research id (bounded to the most recent N in the API layer's
-   * persistence call): the trader-facing answer of a completed run. Persisted so ANY
-   * serverless instance can serve history verbatim — the in-memory-only archive broke
-   * exactly this on Vercel ("Full reasoning is not retained on this server instance").
+   * Run presentation records per research id (see WorkspaceSnapshot.researchResponses):
+   * one slim record per completed run, retained without eviction so any historical run
+   * stays fully reconstructable after a restart.
    */
   readonly researchResponses?: readonly ResearchResponseRecord[];
 }
@@ -114,16 +120,12 @@ export class Workspace {
   }
 
   /**
-   * Persist the final trader-facing response of a completed run (bounded to the most
-   * recent MAX_PERSISTED_RESPONSES). Any later instance can then serve history verbatim.
+   * Persist the final trader-facing response record of a completed run. One record per run,
+   * retained for the life of the workspace (see ResearchResponseRecord retention policy):
+   * any later instance can then serve history verbatim, including for OLD runs.
    */
   saveResearchResponse(researchId: string, response: unknown): void {
     this.researchResponses.set(researchId, response);
-    while (this.researchResponses.size > MAX_PERSISTED_RESPONSES) {
-      const oldest = this.researchResponses.keys().next().value;
-      if (oldest === undefined) break;
-      this.researchResponses.delete(oldest);
-    }
   }
 
   getResearchResponse(researchId: string): unknown {

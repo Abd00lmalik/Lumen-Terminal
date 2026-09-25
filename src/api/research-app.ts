@@ -18,6 +18,8 @@ import type { ModelProvider } from "../model/provider.js";
 import type { CapabilityRegistry } from "../adapters/capability-registry.js";
 import type { WorkspaceStore } from "../persistence/index.js";
 import { Workspace, type WorkspaceSnapshot } from "../domain/workspace.js";
+import type { Research } from "../domain/objects.js";
+import type { SavedArtifact } from "../domain/thesis.js";
 import { newId, idPrefixes } from "../domain/ids.js";
 import { beginRun, endRun } from "../domain/run-context.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
@@ -25,8 +27,9 @@ import type { ProgressListener } from "../research/progress.js";
 import {
   evidenceToDTO, evidenceSummaryDTO, judgmentToDTO, researchToDTO, continuitySnapshotToDTO,
   thesisToDTO, thesisAssessmentToDTO, artifactToDTO, memoryToDTO, monitorToDTO,
-  toHistoricalAnalysisDTO, uiText,
+  provenanceToDTO, toHistoricalAnalysisDTO, uiText,
   type ResearchResponseDTO, type ResearchDiagnosticsDTO, type RequirementDiagnosticDTO, type AnswerDTO, type EvidenceDTO, type JudgmentDTO,
+  type ResearchRunSummaryDTO, type ResearchRunAggregateDTO, type ResearchRecordTierDTO,
 } from "./dto.js";
 import { InvalidRequestError, ModelFailureError, PersistenceFailureError, NotFoundError } from "./errors.js";
 import { renderConfidence, type ConfidenceComponents } from "../research/confidence.js";
@@ -507,7 +510,10 @@ export class ResearchApp {
         if (oldest === undefined) break;
         this.responseArchive.delete(oldest);
       }
-      ws.saveResearchResponse(researchRef, response);
+      // Durable history record: the run's presentation content MINUS the evidence/judgment
+      // object copies the graph already holds (deduplication, not truncation). The read path
+      // rehydrates those arrays from the graph by ref, so a retained run reopens complete.
+      ws.saveResearchResponse(researchRef, toRunRecord(response));
       await this.persist();
     }
     return response;
@@ -537,10 +543,24 @@ export class ResearchApp {
    * never rewritten, only presented correctly). Explicit status fields; the client never
    * infers staleness/currentness.
    */
-  listResearch() {
-    const all = this.ws().listResearch();
-    const activeId = this.ws().getContinuitySnapshot().activeResearchTarget?.id;
-    const groups = new Map<string, (typeof all)[number][]>();
+  /**
+   * Research history list (the History page contract): ONE lightweight entry per research
+   * RUN, newest first by default. Each entry answers "what did I research?" — question,
+   * timestamps, status, confidence, question-resolution verdict, a short insight/judgment
+   * preview, save marker — and never dumps the run's objects. Opening an entry is one call
+   * to getResearch(ref) (the run aggregate).
+   *
+   * Identity laws: the entry's `ref` IS the ref that opens the run (list and open use the
+   * same identifier, by construction) and is always a research ref — monitor/other object
+   * refs are never listed here because history lists only research objects. Filtering is
+   * deliberately plain (exact status, case-insensitive substring) rather than a query
+   * language.
+   */
+  listResearch(options: ResearchListOptions = {}): ResearchRunSummaryDTO[] {
+    const ws = this.ws();
+    const all = ws.listResearch();
+    const activeId = ws.getContinuitySnapshot().activeResearchTarget?.id;
+    const groups = new Map<string, Research[]>();
     const order: string[] = [];
     for (const r of all) {
       const key = r.runId ?? `solo:${r.id}`;
@@ -552,83 +572,187 @@ export class ResearchApp {
         bucket.push(r);
       }
     }
-    return order.map((key) => {
+    const artifacts = ws.listSavedArtifacts();
+    const entries: ResearchRunSummaryDTO[] = order.map((key) => {
       const members = groups.get(key)!;
       // Representative: the member that carries the run's answer (its judgment), else the
       // most recent member. Its ref stays hydratable through getResearch.
       const representative = [...members].reverse().find((m) => m.currentJudgmentRef !== undefined)
         ?? members[members.length - 1]!;
+      const memberIds = members.map((m) => m.id);
       const internalRefs = members.filter((m) => m.id !== representative.id).map((m) => m.id);
+      const timestamps = runTimestamps(members);
+      const record = this.findRunRecord(memberIds);
+      const questionResolution = record?.researchDiagnostics?.questionResolution;
+      const judgment = representative.currentJudgmentRef !== undefined
+        ? ws.getJudgment(representative.currentJudgmentRef)
+        : undefined;
+      const confidence = record?.researchDiagnostics?.confidence
+        ?? record?.answer.confidence
+        ?? judgment?.confidence;
+      const insightPreview = questionResolution?.actionableInsight.whatItMeans;
+      const judgmentPreview = record?.answer.answer ?? judgment?.statement;
       return {
         ...researchToDTO(representative),
         ...(representative.userQuestion !== undefined ? { question: representative.userQuestion } : {}),
         ...(internalRefs.length > 0 ? { internalRefs } : {}),
         isCurrent: members.some((m) => m.id === activeId),
+        ...timestamps,
+        ...(confidence !== undefined ? { confidence } : {}),
+        ...(questionResolution !== undefined ? { questionResolutionStatus: questionResolution.status } : {}),
+        ...(insightPreview !== undefined && insightPreview.length > 0 ? { insightPreview: preview(insightPreview) } : {}),
+        ...(judgmentPreview !== undefined && judgmentPreview.length > 0 ? { judgmentPreview: preview(judgmentPreview) } : {}),
+        ...(runIsSaved(artifacts, memberIds) ? { saved: true } : {}),
+        // Honest listing: the full run record is not retained, so opening it will render at
+        // a lower reconstruction tier (the aggregate reports which).
+        ...(record === undefined ? { degraded: true } : {}),
       };
     });
+
+    const wanted = options.status?.trim().toUpperCase();
+    const needle = options.q?.trim().toLowerCase();
+    let filtered = entries;
+    if (wanted !== undefined && wanted.length > 0) {
+      filtered = filtered.filter((e) => (wanted === "CURRENT" ? e.isCurrent === true : e.status === wanted));
+    }
+    if (needle !== undefined && needle.length > 0) {
+      filtered = filtered.filter((e) =>
+        [e.question, e.objective, e.userQuestion].some((text) => text !== undefined && text.toLowerCase().includes(needle)),
+      );
+    }
+    const sorted = [...filtered].sort((a, b) => {
+      const byTime = (a.updatedAt ?? "").localeCompare(b.updatedAt ?? "");
+      return byTime !== 0 ? byTime : a.ref.localeCompare(b.ref);
+    });
+    if ((options.sort ?? "recent") === "recent") sorted.reverse(); // newest first
+    const offset = options.offset ?? 0;
+    const limit = options.limit ?? DEFAULT_RESEARCH_LIMIT;
+    return sorted.slice(offset, offset + limit);
   }
 
-  getResearch(ref: string) {
-    const r = this.ws().getResearch(ref);
+  /**
+   * Run aggregate (the single opening contract): everything the run view needs in ONE call,
+   * on the SAME identity the history list exposes. Research-object fields plus the retained
+   * response surface (`answer`, evidence, judgments, gaps, diagnostics) when a record exists,
+   * hoisted presentation fields (question resolution, actionable insight, watch items,
+   * confidence, stop reason, causal links), provenance, timestamps, saved/thesis associations
+   * and the honest reconstruction tier.
+   *
+   * Reconstruction tiers (never fabricated):
+   * 1. in-memory archive (this instance completed the run);
+   * 2. workspace-persisted run record (any instance, incl. after a cold start) — slim records
+   *    rehydrate their evidence/judgment arrays from the graph by ref;
+   * 3. the run's real persisted JUDGMENT (legacy pre-record runs): the actual conclusion,
+   *    never a "reasoning not retained" refusal;
+   * 4. SUMMARY: only the research object remains — reported as degraded, not disguised.
+   *
+   * `researchRef` is ALWAYS the ref this aggregate was requested by, so a client navigating
+   * from a history entry always lands on the same identity it listed.
+   */
+  getResearch(ref: string): ResearchRunAggregateDTO {
+    const ws = this.ws();
+    const r = ws.getResearch(ref);
     if (r === undefined) throw new NotFoundError("research");
-    // Full response hydration, three tiers: in-memory archive (this instance completed
-    // the run) -> workspace-persisted response (restored from the store: any instance can
-    // serve history verbatim) -> bare research summary (genuinely old entry).
-    //
     // RUN-AWARE: one submission creates several Research objects (plan steps), and the answer
     // is persisted against the run's ANSWER-bearing member, which is not necessarily the ref
-    // the history entry exposes. Hydration therefore checks the whole run group, so clicking
+    // the history entry exposes. Resolution therefore checks the whole run group, so clicking
     // a history entry always yields the run's real answer instead of a bare summary.
-    const candidates = r.runId !== undefined
-      ? this.ws().listResearch().filter((m) => m.runId === r.runId).map((m) => m.id)
-      : [ref];
-    for (const id of candidates) {
+    const members = r.runId !== undefined ? ws.listResearch().filter((m) => m.runId === r.runId) : [r];
+    const memberIds = members.map((m) => m.id);
+    const memberIdSet = new Set(memberIds);
+
+    let response: ResearchResponseDTO | undefined;
+    let recordTier: ResearchRecordTierDTO = "SUMMARY";
+    for (const id of memberIds) {
       const archivedHit = this.responseArchive.get(id);
-      if (archivedHit !== undefined) return archivedHit.response;
-      const persistedHit = this.ws().getResearchResponse(id);
-      if (persistedHit !== undefined && typeof persistedHit === "object" && "answer" in (persistedHit as Record<string, unknown>)) {
-        return persistedHit as ResearchResponseDTO;
+      if (archivedHit !== undefined) {
+        response = archivedHit.response;
+        recordTier = "FULL";
+        break;
+      }
+      const payload = recordPayload(ws.getResearchResponse(id));
+      if (payload !== undefined) {
+        response = hydrateRunResponse(ws, payload, memberIds);
+        recordTier = "FULL";
+        break;
       }
     }
     // Legacy tier: runs completed before response persistence have no archived response,
     // but their judgment (statement, confidence, uncertainty, implications) WAS persisted.
-    // Reconstruct the run's answer from that real persisted content — the user gets the
-    // actual research conclusion, never a "reasoning not retained" refusal.
-    // Legacy tier: the run's answer-bearing member may be another object in the same run.
-    const answerMember = candidates
-      .map((id) => this.ws().getResearch(id))
-      .find((m) => m?.currentJudgmentRef !== undefined);
-    const j = answerMember?.currentJudgmentRef !== undefined
-      ? this.ws().getJudgment(answerMember.currentJudgmentRef)
-      : r.currentJudgmentRef !== undefined
-        ? this.ws().getJudgment(r.currentJudgmentRef)
-        : undefined;
-    if (j !== undefined) {
-      return {
-        requestId: r.id,
-        action: "RESEARCH",
-        outcome: "COMPLETED",
-        answer: {
-          answer: j.statement,
-          supportingReasons: [],
-          opposingReasons: [],
-          confidence: j.confidence ?? "UNKNOWN",
-          keyUncertainty: j.uncertainty[0] ?? "",
-          implication: j.implications[0] ?? "",
-          citedObjectRefs: [j.id],
-        },
-        limitations: [],
-        researchRef: r.id,
-        evidenceRefs: [...(answerMember ?? r).evidenceRefs],
-        judgmentRef: j.id,
-        evidence: [...(answerMember ?? r).evidenceRefs].flatMap((er) => {
-          const e = this.ws().getEvidence(er);
-          return e === undefined ? [] : [evidenceToDTO(e)];
-        }),
-        judgments: [judgmentToDTO(j)],
-      };
+    // Reconstruct the run's answer from that real persisted content.
+    if (response === undefined) {
+      const answerMember = members.find((m) => m.currentJudgmentRef !== undefined);
+      const source = answerMember ?? (r.currentJudgmentRef !== undefined ? r : undefined);
+      const j = source?.currentJudgmentRef !== undefined ? ws.getJudgment(source.currentJudgmentRef) : undefined;
+      if (j !== undefined && source !== undefined) {
+        response = {
+          requestId: r.id,
+          action: "RESEARCH",
+          outcome: "COMPLETED",
+          answer: {
+            answer: j.statement,
+            supportingReasons: [],
+            opposingReasons: [],
+            counterevidenceStatus: "NOT_ASSESSED",
+            confidence: j.confidence ?? "UNKNOWN",
+            keyUncertainty: j.uncertainty[0] ?? "",
+            implication: j.implications[0] ?? "",
+            citedObjectRefs: [j.id],
+          },
+          limitations: [],
+          researchGaps: [],
+          researchRef: ref,
+          evidenceRefs: [...source.evidenceRefs],
+          judgmentRef: j.id,
+          evidence: [...source.evidenceRefs].flatMap((er) => {
+            const e = ws.getEvidence(er);
+            return e === undefined ? [] : [evidenceToDTO(e)];
+          }),
+          judgments: [judgmentToDTO(j)],
+        };
+        recordTier = "JUDGMENT";
+      }
     }
-    return researchToDTO(r);
+
+    const diagnostics = response?.researchDiagnostics;
+    const questionResolution = diagnostics?.questionResolution;
+    const timestamps = runTimestamps(members);
+    const confidence = diagnostics?.confidence ?? response?.answer.confidence;
+    return {
+      ...researchToDTO(r),
+      ...(response ?? {}),
+      ...(r.userQuestion !== undefined ? { question: r.userQuestion } : {}),
+      researchRef: ref,
+      createdAt: timestamps.createdAt ?? r.provenance[0]?.at ?? new Date(0).toISOString(),
+      updatedAt: timestamps.updatedAt ?? r.provenance[r.provenance.length - 1]?.at ?? new Date(0).toISOString(),
+      isCurrent: members.some((m) => m.id === ws.getContinuitySnapshot().activeResearchTarget?.id),
+      provenance: provenanceToDTO(r.provenance),
+      saved: runIsSaved(ws.listSavedArtifacts(), memberIds),
+      recordTier,
+      degraded: recordTier !== "FULL",
+      ...(questionResolution !== undefined ? { questionResolution } : {}),
+      ...(questionResolution !== undefined ? { actionableInsight: questionResolution.actionableInsight } : {}),
+      ...(questionResolution !== undefined ? { watchNext: questionResolution.actionableInsight.watchItems } : {}),
+      ...(confidence !== undefined ? { confidence } : {}),
+      ...(diagnostics !== undefined ? { stoppedBecause: diagnostics.completionGate } : {}),
+      ...(diagnostics?.causalLinks !== undefined ? { causalLinks: diagnostics.causalLinks } : {}),
+      ...(diagnostics?.weakestCausalLink !== undefined ? { weakestCausalLink: diagnostics.weakestCausalLink } : {}),
+      summary: runCounts(members),
+      thesisAssessments: ws.listThesisAssessments()
+        .filter((a) => a.researchRef !== undefined && memberIdSet.has(a.researchRef))
+        .map(thesisAssessmentToDTO),
+    };
+  }
+
+  /** The retained presentation content of a run (any tier), for list summaries. */
+  private findRunRecord(memberIds: readonly string[]): RunRecordPayload | undefined {
+    for (const id of memberIds) {
+      const archivedHit = this.responseArchive.get(id);
+      if (archivedHit !== undefined) return archivedHit.response;
+      const payload = recordPayload(this.ws().getResearchResponse(id));
+      if (payload !== undefined) return payload;
+    }
+    return undefined;
   }
 
   /** List view: bounded count (route applies the window) + truncated observations. */
@@ -773,6 +897,139 @@ export function ensureRunJudgment(
     origin,
   );
   return judgmentToDTO(minted);
+}
+
+/** Default history page size (bounded list responses law; /api/evidence honours the same). */
+export const DEFAULT_RESEARCH_LIMIT = 50;
+/** Hard ceiling for ?limit= on the history list. */
+export const MAX_RESEARCH_LIMIT = 200;
+
+/** Chars kept in a list-entry preview before truncation (the full text lives on the run). */
+const PREVIEW_CHARS = 180;
+
+/** Optional history-list window/filter (B4): limit/offset window, sort, status, substring search. */
+export interface ResearchListOptions {
+  readonly limit?: number;
+  readonly offset?: number;
+  readonly sort?: "recent" | "oldest";
+  readonly status?: string;
+  readonly q?: string;
+}
+
+/**
+ * v2 slim run record marker. `toRunRecord` removes the evidence/judgment object ARRAYS from
+ * the stored response because the workspace graph already holds those objects by ref; the read
+ * path rehydrates them. Old (v1) records stored the complete response verbatim and are still
+ * read as-is — the migration is explicit, not guessed: the version marker says which it is.
+ */
+export const RUN_RECORD_VERSION = 2;
+
+/** Durable per-run presentation record stored in the workspace snapshot (survey of B5). */
+export interface ResearchRunRecord {
+  readonly recordVersion: number;
+  readonly response: Omit<ResearchResponseDTO, "evidence" | "judgments">;
+}
+
+/** Stored payload shape: slim (v2) records have no evidence/judgments arrays. */
+type RunRecordPayload = Omit<ResearchResponseDTO, "evidence" | "judgments"> &
+  Partial<Pick<ResearchResponseDTO, "evidence" | "judgments">>;
+
+/**
+ * Slim a completed run's response for durable storage: everything the run view needs, minus
+ * the duplicated graph objects (evidence[], judgments[]) that are rehydrated by ref at read
+ * time. Deduplication, not truncation — the answer, gaps, limitations, question resolution and
+ * diagnostics are all retained verbatim, so a retained run reopens complete after a restart.
+ */
+export function toRunRecord(response: ResearchResponseDTO): ResearchRunRecord {
+  const { evidence: _evidence, judgments: _judgments, ...rest } = response;
+  return { recordVersion: RUN_RECORD_VERSION, response: rest };
+}
+
+/** Unwrap a stored run record (v2 slim or v1 verbatim) into its presentation payload. */
+function recordPayload(raw: unknown): RunRecordPayload | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const wrapper = raw as { recordVersion?: unknown; response?: unknown };
+  if (wrapper.recordVersion === RUN_RECORD_VERSION && typeof wrapper.response === "object" && wrapper.response !== null) {
+    return wrapper.response as RunRecordPayload;
+  }
+  if ("answer" in (raw as Record<string, unknown>)) return raw as RunRecordPayload;
+  return undefined;
+}
+
+/**
+ * Rebuild the complete response surface from a stored payload: evidence and judgments come
+ * from the workspace graph by ref (never re-derived, never fabricated — an object the graph
+ * no longer holds simply does not appear). Legacy v1 payloads that still carry their own
+ * arrays are returned unchanged.
+ */
+function hydrateRunResponse(ws: Workspace, payload: RunRecordPayload, memberIds: readonly string[]): ResearchResponseDTO {
+  const evidence = payload.evidence !== undefined && payload.evidence.length > 0
+    ? [...payload.evidence]
+    : payload.evidenceRefs.flatMap((ref) => {
+        const e = ws.getEvidence(ref);
+        return e === undefined ? [] : [evidenceToDTO(e)];
+      });
+  const judgments = payload.judgments !== undefined && payload.judgments.length > 0
+    ? [...payload.judgments]
+    : collectRunJudgments(ws, memberIds);
+  return { ...payload, evidence, judgments };
+}
+
+/** Every judgment the run's members carry, de-duplicated (the original response's judgments). */
+function collectRunJudgments(ws: Workspace, memberIds: readonly string[]): JudgmentDTO[] {
+  const out: JudgmentDTO[] = [];
+  for (const id of memberIds) {
+    for (const j of judgmentsForResearch(ws, id)) if (!out.some((d) => d.ref === j.ref)) out.push(j);
+  }
+  return out;
+}
+
+/** Run start/end timestamps from the members' provenance trails (history never fakes "now"). */
+function runTimestamps(members: readonly Research[]): { createdAt?: string; updatedAt?: string } {
+  const ats = members.flatMap((m) => m.provenance.map((p) => p.at));
+  if (ats.length === 0) return {};
+  let min = ats[0]!;
+  let max = ats[0]!;
+  for (const at of ats) {
+    if (at < min) min = at;
+    if (at > max) max = at;
+  }
+  return { createdAt: min, updatedAt: max };
+}
+
+/** Object counts for a run (union across its members; the run view's summary line). */
+function runCounts(members: readonly Research[]): ResearchRunAggregateDTO["summary"] {
+  const evidence = new Set<string>();
+  const claims = new Set<string>();
+  const hypotheses = new Set<string>();
+  const judgments = new Set<string>();
+  for (const m of members) {
+    for (const ref of m.evidenceRefs) evidence.add(ref);
+    for (const ref of m.claimRefs) claims.add(ref);
+    for (const ref of m.hypothesisRefs) hypotheses.add(ref);
+    for (const ref of m.judgmentRefs) judgments.add(ref);
+    if (m.currentJudgmentRef !== undefined) judgments.add(m.currentJudgmentRef);
+  }
+  return {
+    evidenceCount: evidence.size,
+    claimCount: claims.size,
+    hypothesisCount: hypotheses.size,
+    judgmentCount: judgments.size,
+  };
+}
+
+/** True when a SAVEd artifact (LUI-authorized) derives from this run. */
+function runIsSaved(artifacts: readonly SavedArtifact[], memberIds: readonly string[]): boolean {
+  const ids = new Set(memberIds);
+  return artifacts.some((a) =>
+    (a.researchRef !== undefined && ids.has(a.researchRef)) || a.derivedFromRefs.some((ref) => ids.has(ref)),
+  );
+}
+
+/** One-line list preview: whitespace collapsed, bounded, honestly marked when shortened. */
+function preview(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return normalized.length <= PREVIEW_CHARS ? normalized : `${normalized.slice(0, PREVIEW_CHARS).trimEnd()} …`;
 }
 
 function judgmentsForResearch(ws: Workspace, researchRef: string): ReturnType<typeof judgmentToDTO>[] {

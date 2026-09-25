@@ -228,6 +228,94 @@ export function researchToDTO(r: Research): ResearchDTO {
 }
 
 // ---------------------------------------------------------------------------
+// History list + ResearchRun aggregate (Phase B: run identity + history surface)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lightweight history entry (GET /api/research): ONE row per research RUN, answering
+ * "what did I research?" — question, timestamps, status, confidence, question-resolution
+ * verdict, a short insight preview, saved marker. Never an object dump; detailed
+ * diagnostics live behind the run aggregate (GET /api/research/:ref) disclosure.
+ */
+export interface ResearchRunSummaryDTO extends ResearchDTO {
+  /** Explicit current-ness (list + aggregate), never inferred by the client. */
+  readonly isCurrent: boolean;
+  /** First provenance timestamp across the run's research objects (when the run started). */
+  readonly createdAt?: string;
+  /** Last provenance timestamp across the run's research objects (when it last changed). */
+  readonly updatedAt?: string;
+  /** Engine-level confidence of the retained answer (absent when genuinely unknown). */
+  readonly confidence?: string;
+  /** Engine question-fit verdict: ANSWERED | PARTIALLY_ANSWERED | NOT_ANSWERED. */
+  readonly questionResolutionStatus?: string;
+  /** One-line actionable-insight preview (verbatim engine text, truncated). */
+  readonly insightPreview?: string;
+  /** One-line judgment preview (the run's conclusion, truncated). */
+  readonly judgmentPreview?: string;
+  /** True when a saved artifact derives from this run (SAVE through the LUI). */
+  readonly saved?: boolean;
+  /** True when the full run record is NOT retained (honest degraded listing). */
+  readonly degraded?: boolean;
+}
+
+/**
+ * How completely GET /api/research/:ref could reconstruct the run:
+ * - FULL: the run's persisted presentation record (answer, evidence, gaps, diagnostics).
+ * - JUDGMENT: legacy pre-record run reconstructed from its real persisted judgment.
+ * - SUMMARY: only the research object summary remains (no answer retained; honest).
+ */
+export type ResearchRecordTierDTO = "FULL" | "JUDGMENT" | "SUMMARY";
+
+/**
+ * ResearchRun aggregate (GET /api/research/:ref): the single stable run-level presentation
+ * contract. The frontend opens a historical run through this ONE endpoint instead of
+ * stitching list/get/workspace/judgments calls. Carries the research object fields plus the
+ * retained response surface (when a record exists), hoisted presentation fields, provenance,
+ * timestamps, saved/thesis associations and the honest reconstruction tier. Internal engine
+ * state beyond the diagnostics disclosure is not exposed.
+ */
+export type ResearchRunAggregateDTO = ResearchDTO &
+  Partial<ResearchResponseDTO> & {
+    /** Canonical open identity: ALWAYS the ref this aggregate was requested by. */
+    readonly researchRef: string;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+    /** Explicit current-ness (list + aggregate), never inferred by the client. */
+    readonly isCurrent?: boolean;
+    /** Provenance trail of the run's representative object (transport-safe). */
+    readonly provenance: readonly ProvenanceEntryDTO[];
+    /** True when a saved artifact derives from this run (SAVE through the LUI). */
+    readonly saved: boolean;
+    /** Reconstruction tier (see ResearchRecordTierDTO); degraded = tier !== FULL. */
+    readonly recordTier: ResearchRecordTierDTO;
+    readonly degraded: boolean;
+    /** Engine question-fit verdict, hoisted for the run view (present when retained). */
+    readonly questionResolution?: QuestionResolutionDTO;
+    /** Actionable insight the answer carries (hoisted; never trade instructions). */
+    readonly actionableInsight?: QuestionResolutionDTO["actionableInsight"];
+    /** Watch items from the actionable insight (hoisted). */
+    readonly watchNext?: readonly string[];
+    /** Engine confidence level of the retained run (hoisted from diagnostics/answer). */
+    readonly confidence?: string;
+    /** Last completion gate the run ended on (hoisted from diagnostics). */
+    readonly stoppedBecause?: string;
+    /** Transmission links, hoisted for the run view (absent when the question asked none). */
+    readonly causalLinks?: readonly CausalLinkDiagnosticDTO[];
+    readonly weakestCausalLink?: string;
+    /** Object counts for the run (evidence/claims/hypotheses/judgments). */
+    readonly summary: {
+      readonly evidenceCount: number;
+      readonly claimCount: number;
+      readonly hypothesisCount: number;
+      readonly judgmentCount: number;
+    };
+    /** Thesis assessments produced by this run (thesis association; empty when none). */
+    readonly thesisAssessments: readonly ThesisAssessmentDTO[];
+    // Challenge/monitor associations: no such entities reference a research run today,
+    // so none are exposed (a field would be invented state, not a mapping).
+  };
+
+// ---------------------------------------------------------------------------
 // Thesis / assessments / frameworks / artifacts / memory / monitors
 // ---------------------------------------------------------------------------
 

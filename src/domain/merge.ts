@@ -48,10 +48,15 @@ export function mergeSnapshots(local: WorkspaceSnapshot, remote: WorkspaceSnapsh
     return [...byId.values()];
   };
 
+  // Run records: union by researchId. A missing local record (another instance completed
+  // that run while we were idle) is filled from remote; an EXISTING local record keeps the
+  // local side (our in-flight write wins — the saving instance holds the fresher state),
+  // matching the per-object rule above. Records are immutable once written, so both sides
+  // normally hold the identical value.
   const mergedResponses = new Map<string, unknown>(
-    (local.researchResponses ?? []).map((r) => [r.researchId, r.response]),
+    (remote.researchResponses ?? []).map((r) => [r.researchId, r.response]),
   );
-  for (const r of remote.researchResponses ?? []) mergedResponses.set(r.researchId, r.response);
+  for (const r of local.researchResponses ?? []) mergedResponses.set(r.researchId, r.response);
 
   // Active-thesis selection: prefer the side whose chosen thesis exists in the union.
   const mergedTheses = mergeById(local.theses, remote.theses);

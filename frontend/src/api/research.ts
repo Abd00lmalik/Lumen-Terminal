@@ -3,7 +3,9 @@
  * The client message is natural language ONLY; flow/action selection belongs to the backend LUI.
  */
 import { http, streamResearch } from "./client.js";
-import type { ResearchResponseDto, ResearchDto } from "./types.js";
+import type {
+  ResearchResponseDto, ResearchRunAggregateDto, ResearchRunSummaryDto, ResearchListQuery,
+} from "./types.js";
 
 export function submitResearch(message: string, confirmed = false): Promise<ResearchResponseDto> {
   return http.post<ResearchResponseDto>("/api/research", { message, confirmed });
@@ -30,10 +32,27 @@ export function streamResearchRequest(message: string, cb: StreamCallbacks, opti
   );
 }
 
-export function listResearch(): Promise<readonly ResearchDto[]> {
-  return http.get<readonly ResearchDto[]>("/api/research");
+/**
+ * Research history (one lightweight entry per RUN, newest first by default). Windowed and
+ * filterable so the History page pages instead of loading the whole workspace: `limit`
+ * defaults to the backend's page size, and callers detect the end of the list by receiving
+ * fewer entries than the page size they asked for.
+ */
+export function listResearch(query: ResearchListQuery = {}): Promise<readonly ResearchRunSummaryDto[]> {
+  const params = new URLSearchParams();
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  if (query.offset !== undefined) params.set("offset", String(query.offset));
+  if (query.sort !== undefined) params.set("sort", query.sort);
+  if (query.status !== undefined && query.status !== "") params.set("status", query.status);
+  if (query.q !== undefined && query.q.trim() !== "") params.set("q", query.q.trim());
+  const suffix = params.toString();
+  return http.get<readonly ResearchRunSummaryDto[]>(`/api/research${suffix === "" ? "" : `?${suffix}`}`);
 }
 
-export function getResearch(ref: string): Promise<ResearchDto> {
-  return http.get<ResearchDto>(`/api/research/${encodeURIComponent(ref)}`);
+/**
+ * Open ONE research run: the run aggregate (the same contract a new run renders through), so
+ * a reopened historical run and a fresh result share a single presentation path.
+ */
+export function getResearch(ref: string): Promise<ResearchRunAggregateDto> {
+  return http.get<ResearchRunAggregateDto>(`/api/research/${encodeURIComponent(ref)}`);
 }

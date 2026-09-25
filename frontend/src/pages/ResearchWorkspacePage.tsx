@@ -17,10 +17,14 @@ import {
   ProxyNote, UnavailableNote, KV, Note, Empty, timeAgo,
 } from "../components/ui.js";
 import { evidenceFromDto, judgmentFromDto } from "../data/adapters.js";
+import { isResearchRef, preferTurn, runOpenRef, turnIdentity } from "../data/identity.js";
 import { isExpandedTurn, railBelongsToActive, selectActiveTurnRef } from "./researchView.js";
-import { getWorkspace, listResearch, getResearch } from "../api/index.js";
+import { ApiError, getWorkspace, listResearch, getResearch } from "../api/index.js";
 import type { EvidenceItem, JudgmentView, ThesisView } from "../data/types.js";
-import type { ResearchResponseDto, ResearchDto, ContinuitySnapshotDto, HistoricalAnalysisDto } from "../api/index.js";
+import type {
+  ResearchResponseDto, ResearchDto, ContinuitySnapshotDto, HistoricalAnalysisDto,
+  ResearchRecordTierDto, QuestionResolutionDto,
+} from "../api/index.js";
 import { useResearchStream } from "../hooks/useResearchStream.js";
 
 interface WorkspaceData {
@@ -31,34 +35,59 @@ interface WorkspaceData {
   readonly loadError: unknown;
 }
 
+/**
+ * What the run view renders: the response DTO plus the aggregate's hoisted presentation
+ * fields. A freshly streamed result carries only the response surface; a reopened run carries
+ * both — the view renders whichever is present and never re-derives either.
+ */
+interface RunLike extends ResearchResponseDto {
+  readonly questionResolution?: QuestionResolutionDto;
+  readonly actionableInsight?: QuestionResolutionDto["actionableInsight"];
+  readonly watchNext?: readonly string[];
+  readonly confidence?: string;
+  readonly stoppedBecause?: string;
+}
+
 interface Turn {
   readonly question: string;
-  readonly run: ResearchResponseDto;
-  /** True when hydrated from a bare summary (full response not retrievable right now). */
+  readonly run: RunLike;
+  /** True when the run was reconstructed at less than full fidelity (see recordTier). */
   readonly degraded?: boolean;
+  /** How completely this run could be reconstructed: FULL | JUDGMENT | SUMMARY. */
+  readonly recordTier?: ResearchRecordTierDto;
 }
 
 /**
- * Hydrate a history entry into a renderable turn. `getResearch` serves the FULL archived
- * response for runs completed on the serving instance (answer, reasons, evidence); older
- * or cold-store runs degrade to the bare summary DTO rendered as an honest research
- * reference (objective + status) instead of a fabricated answer.
+ * Hydrate a run into a renderable turn; the SAME path serves a fresh result and a reopened
+ * historical one (no second "history result" UI).
+ *
+ * Identity is normalized here: a turn's research identity is the research REF (never the
+ * requestId). `getResearch` already answers on the ref the list exposed, and old bare
+ * summaries carry the ref as their identity — without normalization `isExpandedTurn` and the
+ * open affordance compared a UUID against a ref and silently failed.
  */
-function researchDtoToTurn(dto: ResearchDto & Partial<ResearchResponseDto>): Turn | undefined {
+function researchDtoToTurn(dto: (ResearchDto & Partial<ResearchResponseDto>) & {
+  readonly recordTier?: ResearchRecordTierDto;
+  readonly degraded?: boolean;
+}): Turn | undefined {
   const question = dto.question?.length > 0 ? dto.question : dto.objective;
   if (question.length === 0) return undefined;
-  const answer = (dto as { answer?: ResearchResponseDto["answer"] }).answer;
+  const researchRef = isResearchRef(dto.researchRef) ? dto.researchRef : dto.ref;
+  const answer = dto.answer;
   if (answer === undefined) {
-    // Bare summary (full response not archived on this instance): render honestly.
+    // No retained answer at all (SUMMARY tier): render the summary honestly, never a
+    // fabricated answer, and never pretend the record is complete.
     return {
       question,
       degraded: true,
+      recordTier: "SUMMARY",
       run: {
-        requestId: dto.ref,
+        requestId: researchRef, // identity is the research ref, not a UUID
+        researchRef,
         action: "RESEARCH",
         outcome: "COMPLETED",
         answer: {
-          answer: `Completed research (history): ${dto.objective}. Full reasoning is not retained on this server instance; ask again to re-run it in full.`,
+          answer: `Only this research's summary is retained for ${dto.objective}. No answer, judgment or evidence record is available for this run.`,
           supportingReasons: [],
           opposingReasons: [],
           confidence: "UNKNOWN",
@@ -73,7 +102,16 @@ function researchDtoToTurn(dto: ResearchDto & Partial<ResearchResponseDto>): Tur
       },
     };
   }
-  return { question, run: dto as ResearchResponseDto };
+  // Boundary cast: `answer` was just checked, and the aggregate's extra presentation fields
+  // are copied through untouched (types are erased; nothing is synthesized here).
+  return {
+    question,
+    ...(dto.degraded === true ? { degraded: true } : {}),
+    ...(dto.recordTier !== undefined
+      ? { recordTier: dto.recordTier }
+      : { recordTier: "FULL" as const }),
+    run: { ...(dto as unknown as RunLike), researchRef },
+  };
 }
 
 /**
@@ -168,10 +206,13 @@ export function ResearchWorkspacePage() {
     //   the honest banner is shown; previous state stays visible meanwhile.
     let historyTurns: readonly Turn[] | undefined;
     try {
-      const history = await listResearch();
-      const completed = history.filter((r) => r.status === "COMPLETED").slice(-3);
+      // The thread shows the newest few COMPLETED runs (oldest→newest, chat order); the
+      // History page is the full, paginated surface. The window is requested from the
+      // backend rather than sliced out of an unbounded list.
+      const history = await listResearch({ limit: 50, status: "COMPLETED" });
+      const latest = history.slice(0, 3).reverse();
       const hydrated = await Promise.all(
-        completed.map(async (r): Promise<Turn | undefined> => {
+        latest.map(async (r): Promise<Turn | undefined> => {
           try {
             const full = await getResearch(r.ref);
             return researchDtoToTurn(full);
@@ -186,19 +227,30 @@ export function ResearchWorkspacePage() {
     }
     if (historyTurns !== undefined) {
       setRuns((prev) => {
-        // MERGE LAW: a degraded history turn (bare summary) never displaces a fuller turn
-        // of the same question already on screen — the live answer a user just received
-        // must survive the post-run refresh even when a stale instance serves the bare
-        // summary. Degraded only fills gaps; fresh full turns always win.
-        const prevByQuestion = new Map(prev.map((t) => [t.question, t]));
-        const seen = new Set<string>();
-        const merged: Turn[] = [];
-        for (const t of historyTurns!) {
-          seen.add(t.question);
-          const existing = prevByQuestion.get(t.question);
-          merged.push(existing !== undefined && t.degraded === true && existing.degraded !== true ? existing : t);
+        // MERGE LAW, identity-keyed: turns are deduped by research ref (never by requestId,
+        // which compared a UUID against a ref and appended a duplicate row on every reopen).
+        // A non-degraded record always wins over a degraded one for the same run; a turn
+        // already on screen whose question matches a full history turn is that same run and
+        // is superseded rather than duplicated.
+        const merged = new Map<string, Turn>();
+        const questionToKey = new Map<string, string>();
+        const choose = (t: Turn): void => {
+          const identity = turnIdentity({ requestId: t.run.requestId, ...(t.run.researchRef !== undefined ? { researchRef: t.run.researchRef } : {}) });
+          const key = questionToKey.get(t.question) ?? identity;
+          const existing = merged.get(key);
+          if (existing === undefined) {
+            merged.set(key, t);
+            questionToKey.set(t.question, key);
+            return;
+          }
+          if (preferTurn(existing, t) === "incoming") merged.set(key, t);
+        };
+        for (const t of historyTurns!) choose(t);
+        for (const t of prev) {
+          const covered = questionToKey.has(t.question) || merged.has(turnIdentity({ requestId: t.run.requestId, ...(t.run.researchRef !== undefined ? { researchRef: t.run.researchRef } : {}) }));
+          if (!covered) choose(t);
         }
-        return [...merged, ...prev.filter((t) => !seen.has(t.question))];
+        return [...merged.values()];
       });
     }
     try {
@@ -272,6 +324,9 @@ export function ResearchWorkspacePage() {
   // history entry can never render an NVDA run. Unknown/deleted refs fall through to the
   // normal workspace view with an honest inline note.
   const [linkedNotFound, setLinkedNotFound] = useState(false);
+  // A linked run that could not be fetched for a TRANSIENT reason is not "unavailable": the
+  // banner is retryable and the retry loop below keeps trying.
+  const [refLoadError, setRefLoadError] = useState<unknown>(undefined);
   // EXPLICIT user selection of a research run (history click / linked URL). This is the ONLY
   // way a non-live run becomes the active result; it is cleared when a new question starts.
   const [viewedRef, setViewedRef] = useState<string | undefined>(undefined);
@@ -279,6 +334,7 @@ export function ResearchWorkspacePage() {
     const ref = params.ref;
     if (ref === undefined || ref.length === 0) {
       setLinkedNotFound(false);
+      setRefLoadError(undefined);
       setViewedRef(undefined);
       return;
     }
@@ -290,16 +346,65 @@ export function ResearchWorkspacePage() {
         const turn = researchDtoToTurn(full);
         if (turn === undefined) return;
         setLinkedNotFound(false);
+        setRefLoadError(undefined);
         setViewedRef(ref);
-        setRuns((prev) => (prev.some((t) => t.run.requestId === ref) ? prev : [...prev, turn]));
-      } catch {
-        if (!cancelled) setLinkedNotFound(true);
+        // Dedupe on the SAME identity the list exposes: reopening a run already on screen
+        // replaces its turn (preferring the fuller reconstruction) instead of appending a
+        // duplicate row.
+        setRuns((prev) => {
+          const index = prev.findIndex((t) => turnIdentity({ requestId: t.run.requestId, ...(t.run.researchRef !== undefined ? { researchRef: t.run.researchRef } : {}) }) === ref);
+          if (index === -1) return [...prev, turn];
+          if (preferTurn(prev[index], turn) === "existing") return prev;
+          const next = [...prev];
+          next[index] = turn;
+          return next;
+        });
+      } catch (err) {
+        if (cancelled) return;
+        // The "not available" panel is reserved for a run the backend genuinely does not
+        // have (typed NOT_FOUND). A cold start, deploy window or network blip is a
+        // transient read failure and must never be reported as missing history.
+        if (err instanceof ApiError && err.code === "NOT_FOUND") {
+          setLinkedNotFound(true);
+          setRefLoadError(undefined);
+        } else {
+          setLinkedNotFound(false);
+          setRefLoadError(err);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [params.ref]);
+
+  // A transient open failure retries in the background (bounded): a cold serverless instance
+  // must not leave the user staring at a failure note for a run that exists.
+  useEffect(() => {
+    if (refLoadError === undefined || params.ref === undefined) return;
+    let cancelled = false;
+    let attempt = 0;
+    const tick = async (): Promise<void> => {
+      if (cancelled) return;
+      attempt += 1;
+      try {
+        const full = await getResearch(params.ref!);
+        if (cancelled) return;
+        const turn = researchDtoToTurn(full);
+        if (turn !== undefined) {
+          setRefLoadError(undefined);
+          setViewedRef(params.ref!);
+          setRuns((prev) => (prev.some((t) => turnIdentity({ requestId: t.run.requestId, ...(t.run.researchRef !== undefined ? { researchRef: t.run.researchRef } : {}) }) === params.ref) ? prev : [...prev, turn]));
+        }
+        return;
+      } catch {
+        if (attempt < 3 && !cancelled) setTimeout(() => { void tick(); }, Math.min(4000 * 2 ** (attempt - 1), 20000));
+      }
+    };
+    const t = setTimeout(() => { void tick(); }, 2500);
+    return () => { cancelled = true; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refLoadError, params.ref]);
 
   // AUTO-RECOVERY: while the banner is up, a bounded background retry keeps trying to load
   // workspace state; the moment one succeeds the banner clears itself (a user should never
@@ -472,10 +577,14 @@ export function ResearchWorkspacePage() {
         </Panel>
       )}
 
+      {/* Genuine 404 only: the backend does not have this run (bad/foreign/expired ref). */}
       {linkedNotFound && (
         <Panel kicker="history" title="That research entry is not available">
-          <div className="panel-body" style={{ paddingTop: 6 }}>The linked research run could not be loaded (it may be too old for this workspace store). Ask a new question below, or pick another entry from Research history.</div>
+          <div className="panel-body" style={{ paddingTop: 6 }}>The backend has no research run for this reference. It is still retrying in the background if this was a transient read failure; otherwise pick another entry from Research history.</div>
         </Panel>
+      )}
+      {refLoadError !== undefined && (
+        <BackendDownNote error={refLoadError}> The run is still on the server; this is a read failure, not missing history.</BackendDownNote>
       )}
       {runs.length === 0 && !stream.running && ws.loadError === undefined && (
         <Empty title="No research in this workspace yet" hint="Type a natural-language question above; the agent plans and investigates." />
@@ -488,22 +597,29 @@ export function ResearchWorkspacePage() {
           ...(turn.run.researchRef !== undefined ? { researchRef: turn.run.researchRef } : {}),
           ...(turn.degraded === true ? { degraded: true } : {}),
         };
+        // Identity for rendering is the research ref when the turn has one, else its own
+        // request id (failure turns). Never a UUID where a ref is expected.
+        const identity = turnIdentity({ requestId: turn.run.requestId, ...(turn.run.researchRef !== undefined ? { researchRef: turn.run.researchRef } : {}) });
         if (isExpandedTurn(turnIdentified, activeRef, stream.running)) {
-          return <RunView key={turn.run.requestId} turn={turn} evidenceById={evidenceById} onInspectEvidence={() => navigate("/evidence")} onConfirm={() => void ask(turn.question, true)} />;
+          return <RunView key={identity} turn={turn} evidenceById={evidenceById} onInspectEvidence={() => navigate("/evidence")} onConfirm={() => void ask(turn.question, true)} />;
         }
         // Archival row: a previous research stays reachable, but never occupies the active
-        // area while a new question is being researched.
+        // area while a new question is being researched. The open affordance navigates with
+        // the research REF: only a research ref can be opened (a requestId never can).
+        const openRef = runOpenRef({ researchRef: turn.run.researchRef, requestId: turn.run.requestId });
         return (
-          <div className="chat-user" key={turn.run.requestId}>
+          <div className="chat-user" key={identity}>
             <div className="bubble" style={{ opacity: 0.75 }}>
               {turn.question}
-              <button
-                className="btn sm ghost"
-                style={{ marginLeft: 10 }}
-                onClick={() => navigate(`/research/${turn.run.requestId}`)}
-              >
-                open
-              </button>
+              {openRef !== undefined && (
+                <button
+                  className="btn sm ghost"
+                  style={{ marginLeft: 10 }}
+                  onClick={() => navigate(`/research/${encodeURIComponent(openRef)}`)}
+                >
+                  open
+                </button>
+              )}
             </div>
           </div>
         );
@@ -522,10 +638,35 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
   const supporting = run.answer.supportingReasons;
   const opposing = run.answer.opposingReasons;
 
+  // Engine-owned run state, rendered verbatim: what the run concluded about the QUESTION
+  // (question resolution) and how completely the record was reconstructed. The client never
+  // infers either.
+  const resolution = run.questionResolution;
+  const recordTier: ResearchRecordTierDto = turn.recordTier ?? "FULL";
+  const insight = run.actionableInsight ?? resolution?.actionableInsight;
+  const watchNext = run.watchNext ?? insight?.watchItems ?? [];
+
   return (
     <>
       <div className="chat-user">
         <div className="bubble">{turn.question}</div>
+      </div>
+
+      {/* RESEARCH STATUS: explicit state, immediately after the question. */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "0 0 10px" }}>
+        <StatusBadge status={run.outcome} />
+        <span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)" }}>{run.action.toLowerCase()}</span>
+        {resolution !== undefined && (
+          <span className="badge gray" title="Engine question-resolution verdict">question {resolution.status.replace(/_/g, " ").toLowerCase()}</span>
+        )}
+        {run.stoppedBecause !== undefined && run.stoppedBecause !== "EVIDENCE_SUFFICIENT" && (
+          <span className="badge gray" title="Why the engine stopped">stopped: {run.stoppedBecause.replace(/_/g, " ").toLowerCase()}</span>
+        )}
+        {recordTier !== "FULL" && (
+          <span className="badge amber" title="This run's record is not fully retained">
+            {recordTier === "JUDGMENT" ? "conclusion only" : "summary only"}
+          </span>
+        )}
       </div>
 
       {/* §8A: the JUDGMENT is the visual focal point; elevated surface, larger type.
@@ -575,51 +716,52 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
         </Note>
       )}
 
+      {/* ACTIONABLE INSIGHT (engine-derived): what the evidence shows, what it does NOT
+          show, what it means, and what would change the conclusion. Never trade
+          instructions; the trader keeps the decision. */}
+      {insight !== undefined && (insight.whatItMeans.length > 0 || insight.whatEvidenceShows.length > 0) && (
+        <Panel kicker="actionable insight" title="What this means for you">
+          <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {insight.whatItMeans.length > 0 && (
+              <div style={{ fontSize: 14, lineHeight: 1.65 }}>{insight.whatItMeans}</div>
+            )}
+            {insight.whatEvidenceShows.length > 0 && (
+              <div>
+                <div className="panel-kicker">what the evidence shows</div>
+                {insight.whatEvidenceShows.slice(0, 5).map((r, i) => <Finding key={`s${i}`} text={r} tone="sup" />)}
+              </div>
+            )}
+            {insight.whatEvidenceDoesNotShow.length > 0 && (
+              <div>
+                <div className="panel-kicker">what the evidence does not show</div>
+                {insight.whatEvidenceDoesNotShow.slice(0, 5).map((r, i) => <Finding key={`n${i}`} text={r} tone="opp" />)}
+              </div>
+            )}
+            {insight.whatWouldChangeConclusion.length > 0 && (
+              <div style={{ fontSize: 12.5, color: "var(--text-3)" }}>
+                what would change this conclusion: {insight.whatWouldChangeConclusion.join(" · ")}
+              </div>
+            )}
+          </div>
+        </Panel>
+      )}
+
+      {/* WHY LUMEN REACHED THIS: the structured findings the answer was built from, kept
+          separate from the conclusion itself so a reader can audit the reasoning path. */}
       {supporting.length > 0 && (
-        <Panel kicker="structured findings" title="Strongest support">
+        <Panel kicker="why lumen reached this" title="Strongest support">
           <div className="panel-body" style={{ paddingTop: 6 }}>
             {supporting.map((r, i) => <Finding key={i} text={r} tone="sup" />)}
           </div>
         </Panel>
       )}
       {opposing.length > 0 && (
-        <Panel kicker="structured findings" title="Meaningful opposition">
+        <Panel kicker="why lumen reached this" title="Meaningful opposition">
           <div className="panel-body" style={{ paddingTop: 6 }}>
             {opposing.map((r, i) => <Finding key={i} text={r} tone="opp" />)}
           </div>
         </Panel>
       )}
-
-      {(() => {
-        // GAP SEPARATION (final-judgment contract): the visible coverage panel shows only
-        // MATERIAL RESEARCH GAPS the engine assessed (a CRITICAL requirement the run could
-        // not satisfy). Provider notes, evidence laws, fallback trails, and provenance
-        // caveats are capability diagnostics: they belong in the collapsed detail, never in
-        // the wall a trader reads.
-        const gaps = [...new Set(run.researchGaps ?? [])];
-        const all = [...new Set(run.limitations)];
-        // Capability notes never promoted to the visible wall: research gaps own it.
-        const material = gaps.slice(0, 5);
-        const detail = all.filter((l) => !material.includes(l));
-        if (material.length === 0 && detail.length === 0) return null;
-        return (
-          <Panel kicker="coverage notes" title={material.length > 0 ? "What this research could not establish" : "What this run could not do"}>
-            <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {material.map((l, i) => <UnavailableNote key={`m${i}`} note={l} />)}
-              {detail.length > 0 && (
-                <details style={{ marginTop: 2 }}>
-                  <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--text-3)" }}>
-                    {detail.length} data-source note{detail.length === 1 ? "" : "s"} (sources, provenance, evidence laws)
-                  </summary>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-                    {detail.map((l, i) => <UnavailableNote key={`d${i}`} note={l} />)}
-                  </div>
-                </details>
-              )}
-            </div>
-          </Panel>
-        );
-      })()}
 
       {run.evidence.length > 0 && (
         <Panel
@@ -659,6 +801,53 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
         </Panel>
       )}
 
+      {(() => {
+        // GAP SEPARATION (final-judgment contract): the visible coverage panel shows only
+        // MATERIAL RESEARCH GAPS the engine assessed (a CRITICAL requirement the run could
+        // not satisfy). Provider notes, evidence laws, fallback trails, and provenance
+        // caveats are capability diagnostics: they belong in the collapsed detail, never in
+        // the wall a trader reads.
+        const gaps = [...new Set(run.researchGaps ?? [])];
+        const all = [...new Set(run.limitations)];
+        const material = gaps.slice(0, 5);
+        const detail = all.filter((l) => !material.includes(l));
+        if (material.length === 0 && detail.length === 0) return null;
+        return (
+          <Panel kicker="uncertainty" title={material.length > 0 ? "What this research could not establish" : "What this run could not do"}>
+            <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {material.map((l, i) => <UnavailableNote key={`m${i}`} note={l} />)}
+              {detail.length > 0 && (
+                <details style={{ marginTop: 2 }}>
+                  <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--text-3)" }}>
+                    {detail.length} data-source note{detail.length === 1 ? "" : "s"} (sources, provenance, evidence laws)
+                  </summary>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                    {detail.map((l, i) => <UnavailableNote key={`d${i}`} note={l} />)}
+                  </div>
+                </details>
+              )}
+            </div>
+          </Panel>
+        );
+      })()}
+
+      {watchNext.length > 0 && (
+        <Panel kicker="watch next" title="What to watch for next">
+          <div className="panel-body" style={{ paddingTop: 6 }}>
+            {watchNext.slice(0, 6).map((w, i) => (
+              <div className="finding" key={i} style={{ background: "none" }}>
+                <span className="tick" aria-hidden>◇</span>
+                <span>{w}</span>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
+
+      {/* DIAGNOSTICS DISCLOSURE: the engine's requirement ledger, executions and gates.
+          Collapsed by default (progressive disclosure); never the first thing a trader reads. */}
+      <RunDiagnostics run={run} recordTier={recordTier} />
+
       {run.judgments.length > 0 && (
         <Panel kicker="research objects" title="Judgments created by this request">
           <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -678,7 +867,104 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
           </div>
         </Panel>
       )}
+
+      {/* DECISION OWNERSHIP (product law): Lumen researches; the human decides. Nothing on
+          this page is an instruction, a recommendation or an execution. */}
+      <Note tone="info">
+        This research informs your decision; it does not make it. Lumen never executes trades and never changes
+        state without your explicit confirmation.
+      </Note>
     </>
+  );
+}
+
+/**
+ * Diagnostics disclosure (B3): the engine's own accounting — requirement ledger, capability
+ * executions, completion gates, coverage, confidence basis, question-resolution dimensions and
+ * transmission links. Collapsed by default: it exists for auditability, not for reading first.
+ */
+function RunDiagnostics({ run, recordTier }: { run: RunLike; recordTier: ResearchRecordTierDto }) {
+  const d = run.researchDiagnostics;
+  const resolution = run.questionResolution;
+  if (d === undefined && resolution === undefined && recordTier === "FULL") return null;
+  return (
+    <details className="panel" style={{ padding: "10px 14px" }}>
+      <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--text-3)" }}>
+        diagnostics · how this run was produced (requirements, executions, gates)
+      </summary>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
+        {recordTier !== "FULL" && (
+          <Note tone="warn">
+            This run's full record is not retained (reconstruction: {recordTier.toLowerCase()}). The conclusion above is
+            the real persisted research; its supporting diagnostics may be incomplete.
+          </Note>
+        )}
+        {d !== undefined && (
+          <>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <KV k="coverage" v={d.coverage} />
+              <KV k="gate" v={d.completionGate} />
+              {d.confidence !== undefined && <KV k="confidence" v={d.confidence} />}
+              {d.questionType !== undefined && <KV k="question type" v={d.questionType} />}
+              <KV k="recovery rounds" v={String(d.recoveryRounds)} />
+            </div>
+            {d.confidenceBasis !== undefined && d.confidenceBasis !== "" && (
+              <div style={{ fontSize: 12, color: "var(--text-3)" }}>confidence basis: {d.confidenceBasis}</div>
+            )}
+            {d.requirements.length > 0 && (
+              <div>
+                <div className="panel-kicker">requirement ledger</div>
+                {d.requirements.map((r, i) => (
+                  <div key={i} style={{ fontSize: 12, padding: "4px 0", borderTop: i === 0 ? undefined : "1px dashed var(--line)" }}>
+                    <span className="mono" style={{ color: "var(--text-3)" }}>{r.importance}/{r.role ?? "CORE"} · {r.status}</span>{" "}
+                    {r.description}
+                    <span className="mono" style={{ color: "var(--text-3)" }}> · {r.evidenceCount} evidence</span>
+                    {r.unresolvedReason !== undefined && <div style={{ color: "var(--text-3)" }}>unresolved: {r.unresolvedReason}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {d.executions.length > 0 && (
+              <div>
+                <div className="panel-kicker">capability executions</div>
+                {d.executions.map((e, i) => (
+                  <div key={i} className="mono" style={{ fontSize: 11.5, color: "var(--text-3)", padding: "2px 0" }}>
+                    r{e.round} · {e.capability} · {e.provider || "no provider"} · {e.completeness} · {e.evidenceCount} evidence{e.failureType !== "NONE" ? ` · ${e.failureType}` : ""}
+                  </div>
+                ))}
+              </div>
+            )}
+            {d.causalLinks !== undefined && d.causalLinks.length > 0 && (
+              <div>
+                <div className="panel-kicker">transmission links</div>
+                {d.causalLinks.map((l, i) => (
+                  <div key={i} style={{ fontSize: 12, padding: "2px 0" }}>
+                    <span className="mono">{l.source !== undefined ? `${l.source} → ` : ""}{l.targetLabel}</span> · {l.status}
+                    {d.weakestCausalLink === l.target && <span className="badge amber" style={{ marginLeft: 6 }}>weakest link</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+        {resolution !== undefined && (
+          <div>
+            <div className="panel-kicker">question resolution · {resolution.intent} · {resolution.status}</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, paddingTop: 4 }}>
+              {resolution.dimensions.map((dim) => (
+                <span key={dim.dimension} className={`dim-chip ${dim.fit === "SATISFIED" ? "match" : "diff"}`}>
+                  {dim.dimension}: {dim.fit}
+                </span>
+              ))}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 6 }}>
+              materiality {resolution.materiality.toLowerCase()} · {resolution.relevantEvidenceCount} relevant of {resolution.evidenceCount} evidence
+              {resolution.staleEvidenceCount > 0 ? ` · ${resolution.staleEvidenceCount} stale` : ""}
+            </div>
+          </div>
+        )}
+      </div>
+    </details>
   );
 }
 
