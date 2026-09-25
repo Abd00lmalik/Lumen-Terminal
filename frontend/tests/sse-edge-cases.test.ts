@@ -171,6 +171,38 @@ describe("malformed terminal events must never fail silently", () => {
   });
 });
 
+describe("premature EOF (no terminal event) is reported honestly", () => {
+  it("a stream that ends with only progress events surfaces connection-lost, never an eternal spinner", async () => {
+    // Production shape: the serverless function was killed at the platform limit mid-run, so
+    // the SSE body ended without `final`/`error`. The UI must stop "Researching…" and say so.
+    mockFetchWith(sseResponse(["event: progress\ndata: {\"stage\":\"capability_started\",\"summary\":\"running\"}\n\n"]));
+    const { received, handlers } = collect();
+    await streamResearch("What is driving gold prices this week?", {}, handlers);
+    expect(received.progress).toHaveLength(1);
+    expect(received.final).toHaveLength(0);
+    expect(received.errors).toHaveLength(0);
+    expect(received.connectionLost).toBe(1);
+  });
+
+  it("a typed error event followed by EOF produces exactly ONE terminal signal", async () => {
+    const body = "event: error\ndata: " + JSON.stringify({ error: { code: "MODEL_FAILURE", message: "provider exhausted" } }) + "\n\n";
+    mockFetchWith(sseResponse([body]));
+    const { received, handlers } = collect();
+    await streamResearch("Why did BTC move?", {}, handlers);
+    expect(received.errors).toHaveLength(1);
+    expect(received.errors[0]!.code).toBe("MODEL_FAILURE");
+    expect(received.connectionLost).toBe(0); // the failure turn is not duplicated
+  });
+
+  it("a delivered final is never followed by a connection-lost signal", async () => {
+    mockFetchWith(sseResponse(["event: final\ndata: " + JSON.stringify(FINAL_DTO) + "\n\n"]));
+    const { received, handlers } = collect();
+    await streamResearch("Why did BTC move?", {}, handlers);
+    expect(received.final).toHaveLength(1);
+    expect(received.connectionLost).toBe(0);
+  });
+});
+
 describe("terminal-once semantics", () => {
   it("a connection reset AFTER final is delivered does not produce an error/connection-lost callback", async () => {
     // ReadableStream.error() discards queued chunks, so the reset must fire only after

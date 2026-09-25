@@ -204,10 +204,13 @@ export async function streamResearch(
     return;
   }
 
-  // Terminal-once semantics: after a `final` result has been delivered, later error or
-  // connection-lost signals (e.g. a reset during connection teardown) must never
-  // overwrite or follow the delivered result with a phantom failure turn.
+  // Terminal-once semantics: a run produces exactly ONE terminal signal. After a `final`
+  // result has been delivered, later error/lost signals (e.g. a reset during connection
+  // teardown) must never overwrite or follow the delivered result with a phantom failure
+  // turn; after a typed `error` was delivered, the premature EOF that follows must not
+  // report the same failure a second time.
   let delivered = false;
+  let failed = false;
   const guarded: StreamHandlers = {
     ...handlers,
     onFinal: (result) => {
@@ -215,11 +218,13 @@ export async function streamResearch(
       handlers.onFinal(result);
     },
     onError: (error) => {
-      if (!delivered) handlers.onError(error);
+      if (delivered || failed) return;
+      failed = true;
+      handlers.onError(error);
     },
     onConnectionLost: handlers.onConnectionLost
       ? () => {
-          if (!delivered) handlers.onConnectionLost!();
+          if (!delivered && !failed) handlers.onConnectionLost!();
         }
       : undefined,
   };
@@ -248,6 +253,12 @@ export async function streamResearch(
     // last read (a dropped final looked like an eternal "Researching…").
     buffer += decoder.decode();
     if (buffer.trim().length > 0) handleSseChunk(buffer, guarded);
+    // PREMATURE EOF: the stream ended WITHOUT any terminal event — the serverless function
+    // was killed at the platform limit (observed live: a run overran 300s and the UI then sat
+    // on "Researching…" forever), or a proxy truncated the body. Silence here is the worst
+    // outcome; report the loss honestly. The completed research object, if any, is reachable
+    // from Research history — which is exactly what the caller's message says.
+    guarded.onConnectionLost?.();
   } catch {
     guarded.onConnectionLost?.();
   }

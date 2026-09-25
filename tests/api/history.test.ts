@@ -150,9 +150,10 @@ describe("Phase B: history identity (list and open use the same research ref)", 
       expect(body.stoppedBecause).toBe(body.researchDiagnostics.completionGate);
       expect(body.confidence).toBe(body.researchDiagnostics.confidence ?? body.answer.confidence);
     }
-    // Counts, provenance, associations, timing.
-    expect(body.summary.evidenceCount).toBeGreaterThanOrEqual(body.evidence.length > 0 ? 1 : 0);
-    expect(body.summary.judgmentCount).toBeGreaterThanOrEqual(1);
+    // Counts, provenance, associations, timing. The retained record is authoritative: the run
+    // summary must agree with the evidence/judgments the view actually renders.
+    expect(body.summary.evidenceCount).toBe(body.evidence.length);
+    expect(body.summary.judgmentCount).toBe(body.judgments.length);
     expect(Array.isArray(body.provenance)).toBe(true);
     expect(body.provenance.length).toBeGreaterThan(0);
     expect(body.saved).toBe(false);
@@ -317,6 +318,41 @@ describe("Phase B: history list window + filters (B4)", () => {
       expect(res.statusCode).toBe(400);
       expect((res.json() as { error: { code: string } }).error.code).toBe("INVALID_REQUEST");
     }
+    await app.close();
+  });
+
+  it("a COMPLETED run whose record write never landed is listed and opened HONESTLY, not hidden", { timeout: 30_000 }, async () => {
+    // The production shape this locks down: the engine had already persisted the research
+    // object as COMPLETED when the invocation died (the platform's 300s limit, or a blob write
+    // that stopped answering) — so no presentation record and no completion judgment landed.
+    // History must still show the run and say what is missing instead of inventing a result.
+    const { app } = await makeApp({
+      seed: (ws) => {
+        const r = ws.addResearch({ objective: "Research what is driving gold prices", question: "What is driving gold prices this week?", flow: "WHAT_HAPPENED" }, trader);
+        ws.transitionResearch(r.id, "ACTIVE", trader, "run started", new Date());
+        ws.transitionResearch(r.id, "COMPLETED", trader, "research loop completed", new Date());
+      },
+    });
+
+    const history = await listHistory(app);
+    expect(history.length).toBe(1); // never hidden from the user
+    const entry = history[0]!;
+    expect(entry.question).toBe("What is driving gold prices this week?");
+    expect(entry.status).toBe("COMPLETED");
+    expect(entry.degraded).toBe(true); // the listing tells the truth up front
+    expect(entry.confidence).toBeUndefined();
+    expect(entry.insightPreview).toBeUndefined();
+
+    const body = (await app.inject({ method: "GET", url: `/api/research/${String(entry.ref)}` })).json() as Record<string, any>;
+    expect(body.recordTier).toBe("SUMMARY");
+    expect(body.degraded).toBe(true);
+    expect(body.question).toBe("What is driving gold prices this week?"); // the run is identified exactly
+    expect(body.researchRef).toBe(entry.ref);
+    expect(body.answer).toBeUndefined(); // no answer is invented from nothing
+    expect(body.judgments).toBeUndefined(); // no judgment is fabricated
+    expect(body.evidence).toBeUndefined();
+    expect(body.provenance.length).toBeGreaterThanOrEqual(2); // the REAL trail survives
+    expect(body.summary).toEqual({ evidenceCount: 0, claimCount: 0, hypothesisCount: 0, judgmentCount: 0 });
     await app.close();
   });
 

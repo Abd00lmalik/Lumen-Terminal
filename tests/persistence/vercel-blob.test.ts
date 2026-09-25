@@ -9,11 +9,19 @@
  * Covered: first write, read after write, update/merge, concurrent writes across instances,
  * a stale (lost-race) conditional write, a failed save that must not poison the queue,
  * corrupted snapshot, missing blob, cold-start hydration of every retained run, record
- * retention across a restart, and access-mode auto-detection.
+ * retention across a restart, access-mode auto-detection, the CDN-cache bypass that a stale
+ * read would otherwise use to erase runs, and the bounded-I/O deadline.
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { VercelBlobStore } from "../../src/persistence/vercel-edge.js";
-import { FakeBlob } from "./fake-blob.js";
+import {
+  BLOB_IO_TIMEOUT_MS,
+  BlobIoTimeoutError,
+  SNAPSHOT_CACHE_CONTROL_MAX_AGE_SECONDS,
+  VercelBlobStore,
+  snapshotReadOptions,
+  snapshotWriteOptions,
+} from "../../src/persistence/vercel-edge.js";
+import { CdnCachedBlob, FakeBlob } from "./fake-blob.js";
 import { Workspace } from "../../src/domain/workspace.js";
 import { resetIdCounters, bumpIdCounterPast } from "../../src/domain/ids.js";
 import type { ProvenanceOrigin } from "../../src/domain/provenance.js";
@@ -172,6 +180,61 @@ describe("VercelBlobStore (production persistence, tested with an in-memory blob
     // Detection is remembered: later reads go straight to the working mode.
     const cold = new VercelBlobStore(blob.client());
     expect(await cold.load()).toBeDefined();
+  });
+
+  it("reads the snapshot from origin storage, never a CDN copy, and keeps it out of long caches", async () => {
+    // The option builders are the single place this is decided, so assert them directly.
+    expect(snapshotReadOptions().useCache).toBe(false);
+    expect(snapshotWriteOptions().cacheControlMaxAge).toBe(SNAPSHOT_CACHE_CONTROL_MAX_AGE_SECONDS);
+    expect(SNAPSHOT_CACHE_CONTROL_MAX_AGE_SECONDS).toBeLessThanOrEqual(60); // a mutable snapshot, not a month
+
+    const blob = new FakeBlob();
+    const store = new VercelBlobStore(blob.client());
+    await store.save(workspaceWithRuns(1, "A").toSnapshot());
+    await new VercelBlobStore(blob.client()).load();
+
+    expect(blob.reads.length).toBeGreaterThan(0);
+    expect(blob.reads.every((r) => r.options.useCache === false)).toBe(true);
+    expect(blob.writes.every((w) => w.options?.cacheControlMaxAge === SNAPSHOT_CACHE_CONTROL_MAX_AGE_SECONDS)).toBe(true);
+  });
+
+  it("a CDN-cached stale snapshot can never erase a run written by another instance", async () => {
+    // Production failure mode: get() defaults to useCache:true and a blob is cached for up to
+    // a month, so a merge could read a copy that predated another instance's run — and the
+    // write (conditioned on that stale ETag) either dropped the run or failed outright.
+    const blob = new CdnCachedBlob();
+    const store = new VercelBlobStore(blob.client());
+    await store.save(workspaceWithRuns(1, "A").toSnapshot());
+    blob.primeCache(); // the CDN now holds A's snapshot
+
+    // Another instance completes a run: origin storage moves on, the CDN copy does not.
+    const other = new VercelBlobStore(blob.client());
+    await other.save(workspaceWithRuns(1, "B").toSnapshot());
+
+    // Our (stale-in-memory) instance saves its own run: B's run must survive.
+    await store.save(workspaceWithRuns(1, "C").toSnapshot());
+
+    const restored = (await new VercelBlobStore(blob.client()).load())!;
+    const objectives = restored.listResearch().map((r) => r.objective);
+    expect(objectives.filter((o) => o.startsWith("A ")).length).toBe(1);
+    expect(objectives.filter((o) => o.startsWith("B ")).length).toBe(1);
+    expect(objectives.filter((o) => o.startsWith("C ")).length).toBe(1);
+    // The cache was never consulted (that is the fix); the stale copy was never trusted.
+    expect(blob.staleReads).toBe(0);
+  });
+
+  it("bounds every blob operation: a hung transport fails fast instead of stalling the invocation", async () => {
+    const blob = new FakeBlob();
+    const store = new VercelBlobStore(blob.client(), { ioTimeoutMs: 40 });
+    blob.hangWrites = true;
+    await expect(store.save(workspaceWithRuns(1, "A").toSnapshot())).rejects.toBeInstanceOf(BlobIoTimeoutError);
+    // The default budget is a real ceiling, not zero.
+    expect(BLOB_IO_TIMEOUT_MS).toBeGreaterThanOrEqual(5_000);
+
+    // The hung operation did not poison the queue: the next save runs normally.
+    blob.hangWrites = false;
+    await store.save(workspaceWithRuns(1, "A").toSnapshot());
+    expect(blob.body()).toBeDefined();
   });
 
   it("never writes a snapshot that drops the other instance's retained records", async () => {
