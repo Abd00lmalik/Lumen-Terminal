@@ -44,7 +44,11 @@ function fakeCapability(capability: string, value: string, outputClass = "QUANTI
 
 function registryWith(...capabilities: string[]): CapabilityRegistry {
   const registry = new CapabilityRegistry();
-  for (const c of capabilities) registry.register(fakeCapability(c, `${c} reading for BTC`));
+  // Genuine move + factor content (driver-admission law: a bare "... reading for BTC"
+  // payload is target relevance, never target driver, and never enters synthesis).
+  for (const c of capabilities) {
+    registry.register(fakeCapability(c, `${c}(): BTC dropped 4 percent today in a sharp move after leveraged liquidations and liquidity withdrawal hit futures markets as funding reset.`));
+  }
   return registry;
 }
 

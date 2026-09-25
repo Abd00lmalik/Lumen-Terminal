@@ -54,7 +54,13 @@ function setup(
 ): { provider: FakeModelProvider; registry: CapabilityRegistry; workspace: Workspace; store: MemoryStore } {
   const provider = new FakeModelProvider(new Map(providerResponses));
   const registry = new CapabilityRegistry();
-  for (const c of capabilities) registry.register(fakeCapability(c, `${c} data for BTC`));
+  // Fixture evidence carries genuine move + causal/factor language: the engine's
+  // driver-admission law rejects tool-name payloads ("... data for BTC") for the WHY
+  // ledger's driver rows, and the question-fit gate admits only evidence that matches
+  // a ledger requirement.
+  for (const c of capabilities) {
+    registry.register(fakeCapability(c, `${c}(): BTC dropped 4 percent today in a sharp move after leveraged liquidations cascaded through futures as funding reset.`));
+  }
   return { provider, registry, workspace: new Workspace(), store: new MemoryStore() };
 }
 

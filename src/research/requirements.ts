@@ -14,6 +14,9 @@
  * CURRENT question), DXY/VIX/yields/fed/liquidity all missing, then marked COMPLETED.
  */
 
+import { sentencesOf } from "./contract-checks.js";
+import { expandSubjectTerms } from "../domain/instruments.js";
+
 export type TimeSensitivity = "CURRENT" | "RECENT" | "HISTORICAL" | "ANY";
 
 export type RequirementStatus = "PENDING" | "PARTIALLY_SATISFIED" | "SATISFIED" | "EXHAUSTED" | "UNAVAILABLE";
@@ -490,7 +493,7 @@ export function questionTypeOf(question: string): QuestionType {
   if (/\bcompare\w*|\bcompared (with|to)\b|\bversus\b|\bvs\.?\b|\bweek over week\b|\bweek[- ]over[- ]week\b|\bmonth over month\b|\bbetter than\b|\bperformance (vs|versus)\b/.test(q)) return "COMPARISON";
   if (/\bearnings\b|\breport\b|\bresults\b|\bfomc\b|\bcpi print\b|\bupcoming\b|\baround its next\b|\bnext (earnings|report|meeting|print)\b/.test(q)) return "EVENT";
   if (/\bmacro\b|\brisk assets\b|\brisk[- ]on\b|\brisk appetite\b|\bregime\b|\bconditions?\b|\bfinancial conditions\b|\bliquidity\b/.test(q)) return "MACRO_REGIME";
-  if (/\bdriv\w*|\bdriving\b|\bwhy\b|\bwhat happened\b|\bwhat(?:'s| is|s) (behind|pushing|pressuring|moving)\b|\bpressur\w*|\bcaus\w*|\bexplain\w*/.test(q)) return "CAUSAL";
+  if (/\bdriv\w*|\bdriving\b|\bwhy\b|\bwhat happened\b|\bwhat(?:'s| is|s) (behind|pushing|pressuring|moving)\b|\bpressur\w*|\bcaus\w*|\bexplain\w*|\b(?:is|are|was|were)\b[^.?!]{0,60}\baffect\w*\b/.test(q)) return "CAUSAL";
   return "SYNTHESIS";
 }
 
@@ -1144,6 +1147,63 @@ export function freshnessSufficient(req: Pick<ResearchRequirement, "timeSensitiv
 }
 
 /**
+ * DRIVER-ADMISSION LAW (evidence type is not evidence content): a requirement that asks for
+ * DRIVERS, CAUSES, REASONS or FACTORS may only be satisfied by evidence that itself carries
+ * driver content — a causal marker or a named factor in a sentence BOUND TO THE TARGET.
+ * Vocabulary overlap alone (the target's own ticker appearing in a quote, or a fresh news
+ * item mentioning the target) is TARGET RELEVANCE, never TARGET DRIVER: "BTC is trading at
+ * 86,000", "BTC RSI reads 38" and "Bitcoin rises as volume was light" never establish what
+ * is driving BTC. Generic question-shape vocabulary only — no asset or question list; state
+ * requirements ("current price level", "previous period performance") are untouched, and the
+ * subject-name equivalence used below is entity vocabulary, not driver vocabulary.
+ */
+const DRIVER_REQUIREMENT_SHAPE =
+  /\b(driv\w*|catalysts?|reasons?|explanations?|factors?|supply|demand|differentials?|pressur\w*|push\w*|behind)\b/i;
+
+/** Sentence-level causal mechanisms (never bare price movement): cause, effect, attribution. */
+const DRIVER_CAUSAL_MARKERS =
+  /\b(driv\w*|drove|because of|due to|as a result|resulted in|led to|caused|causing|triggered|sparked|pushed|pushing|pressur\w*|weigh\w* on|fuell?ed|fuelling|fueling|stemming from|on the back of|in response to|attributed to|behind|transmit\w*|pass[- ]through)\b|\b(?:fell|drop\w*|rallied|rose|climbed|surged|plunged|tumbled|jumped|gained|slipped|declined|advanced|rebounded|revers\w*|spiked|slid)\b[^.?!]{0,40}\b(?:after|following)\b/i;
+
+/**
+ * Named factor vocabulary (flows, positioning, policy, supply/demand, macro prints, corporate
+ * events): what drivers are MADE OF. Deliberately excludes price/state/technical vocabulary
+ * (price, level, volume, RSI, MACD, % change) so target-state evidence can never qualify.
+ */
+const DRIVER_FACTOR_VOCABULARY =
+  /\b(inflows?|outflows?|flows?|positioning|liquidations?|funding|leverage|shorts|longs|halvings?|forks?|hacks?|exploits?|airdrops?|unlocks?|whales?|reserves?|listings?|delistings?|approvals?|adoption|partnerships?|upgrades?|downgrades?|regulations?|regulators?|policy|tariffs?|sanctions?|elections?|geopolitics?|wars?|conflicts?|strikes?|shutdowns?|ceilings?|budgets?|issuance|opec|production|output|supply|demand|inventor\w*|shipments?|weather|earnings?|revenues?|guidance|margins?|deliver\w*|estimates?|forecasts?|rates?|yields?|inflation|cpi|ppi|payrolls?|pmi|recession|liquidity|dollar|central[- ]banks?|gdp|pce|unemployment)\b/i;
+
+/** Does this requirement ask for driver/explanation content (vs state, timing, baseline...)? */
+function asksForDriverEvidence(req: ResearchRequirement): boolean {
+  if (req.relationshipType === "DRIVER") return true;
+  return DRIVER_REQUIREMENT_SHAPE.test(req.description);
+}
+
+/**
+ * Does the item itself carry driver content? SENTENCE-LEVEL binding: when the text mentions
+ * the target, some single sentence must mention the target AND state a mechanism/factor — a
+ * factor sentence about an unrelated subject beside a target sentence never counts. Structured
+ * payloads that never spell the target (declared `about` only) are admitted on factor content
+ * alone: a supply/inventory series IS factor data even when its JSON contains no asset name.
+ */
+function carriesDriverContent(item: CoverageEvidence, subjectTerms: ReadonlySet<string> | undefined): boolean {
+  const declared = new Set<string>(
+    (item.subject ?? "")
+      .toUpperCase()
+      .split(/[^A-Z0-9]+/)
+      .filter((t) => t.length >= 2),
+  );
+  const binding = expandSubjectTerms(new Set([...(subjectTerms ?? []), ...declared]));
+  const textMentionsSubject = concernsSubject(item.text, binding);
+  for (const sentence of sentencesOf(item.text)) {
+    const subjectBound = !textMentionsSubject || concernsSubject(sentence, binding);
+    if (subjectBound && (DRIVER_CAUSAL_MARKERS.test(sentence) || DRIVER_FACTOR_VOCABULARY.test(sentence))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Deterministic match: an item satisfies a requirement when it concerns the question's
  * subject (when one resolved) AND its domain or vocabulary overlaps the requirement AND it
  * is fresh enough for the requirement's time horizon. Freshness failure with everything else
@@ -1220,6 +1280,17 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
   // PRICE_MARKET — never does. Domain agreement as a match PATH still has its own clause below,
   // accepted only when the requirement carries no distinguishing vocabulary.
   const itemTokens = meaningfulTokens(`${item.text} ${itemDomain}`, { stripCurrencyUnits: concernsForeignCrypto });
+  // DECLARED-SUBJECT ALIASES ARE THE SAME ENTITY: a provider tags an observation about
+  // "Bitcoin" while the requirement says "BTC" (or the reverse). The declared subject's own
+  // spellings join the item's vocabulary as ENTITY words — this only re-admits the same
+  // subject under its other name; driver content is still decided by the sentence-level law
+  // below, so a quote declared BTC can never satisfy a driver requirement this way.
+  if (declaredSubject.trim() !== "") {
+    const declaredTerms = expandSubjectTerms(
+      new Set(declaredSubject.toUpperCase().split(/[^A-Z0-9]+/).filter((t) => t.length >= 2)),
+    );
+    for (const alias of declaredTerms) itemTokens.add(canonicalToken(alias));
+  }
   // SUBJECT IS THE ENTITY, NEVER THE CONTENT VOCABULARY — for ENGINE-DERIVED rows served by
   // quote evidence. The resolved subject is already the gate above: it says WHO the observation
   // is about. An engine row is phrased analytically ("the drivers behind X", "the supply
@@ -1237,7 +1308,9 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
   // requires subject-scoped evidence to satisfy them.
   const quoteEvidence = /(^|_)MARKET_DATA$/i.test(String(item.evidenceType ?? ""));
   if (req.engineRequired === true && quoteEvidence && opts.subjectTerms !== undefined) {
-    for (const subject of opts.subjectTerms) {
+    // Expanded spellings too (BTC AND BITCOIN): otherwise the declared-alias union above
+    // would hand the quote its subject back and re-open the very path this strip closes.
+    for (const subject of expandSubjectTerms(opts.subjectTerms)) {
       reqTokens.delete(subject);
       itemTokens.delete(subject);
     }
@@ -1291,6 +1364,12 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
     overlaps = true;
   }
   if (!overlaps) return "NO_MATCH";
+  // DRIVER ADMISSION: overlapping vocabulary proves the item is ABOUT the target's driver
+  // question — only sentence-level mechanism/factor content proves it IS driver evidence.
+  // Placed before freshness so state evidence reads NO_MATCH (it is not stale driver
+  // evidence — it is not driver evidence at all), while a genuine driver outside the window
+  // still reads STALE_ONLY.
+  if (asksForDriverEvidence(req) && !carriesDriverContent(item, opts.subjectTerms)) return "NO_MATCH";
   return freshnessSufficient(req, item, now) ? "SATISFIES" : "STALE_ONLY";
 }
 

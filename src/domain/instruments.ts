@@ -121,6 +121,25 @@ const ASSET_ALIASES: Readonly<Record<string, readonly string[]>> = {
   LINK: ["CHAINLINK"], DOT: ["POLKADOT"], TRX: ["TRON"],
 };
 
+/**
+ * Expanded spelling set of a subject term (BTC <-> BITCOIN, ...): the ticker and every name a
+ * question/evidence would legitimately use for the same entity. Used where a SENTENCE or a
+ * vocabulary bag must recognise the subject however the counterparty spelled it, without
+ * turning alias equivalence into content vocabulary (the subject gate stays raw).
+ */
+export function expandSubjectTerms(terms: ReadonlySet<string> | undefined): Set<string> {
+  const out = new Set<string>();
+  for (const t of terms ?? []) out.add(t.toUpperCase());
+  for (const [name, ticker] of CRYPTO_ALIASES) {
+    if (out.has(ticker)) out.add(name);
+    if (out.has(name)) out.add(ticker);
+  }
+  for (const [ticker, aliases] of Object.entries(ASSET_ALIASES)) {
+    if (out.has(ticker)) for (const alias of aliases) out.add(alias.toUpperCase());
+  }
+  return out;
+}
+
 /** Does the question text itself name this asset (exact ticker word or a known alias)? */
 export function questionNamesAsset(question: string, asset: string): boolean {
   const q = question.toUpperCase();

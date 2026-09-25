@@ -780,9 +780,12 @@ describe("CATEGORY E: CRYPTO MARKET", () => {
       ]),
       capabilityParams: { asset: "BTC" },
       assertions: [
-        // Macro observations about yields and PMI are not BTC evidence
+        // Macro observations about yields and PMI are not BTC evidence, and a BTC price quote
+        // is TARGET STATE, not TARGET DRIVER: with no driver-content BTC evidence the run
+        // must complete only as an acknowledged driver-coverage gap — never the old
+        // EVIDENCE_SUFFICIENT that state evidence manufactured for a driver question.
         { kind: "forbidden_in_context", value: ["Treasury yield", "ISM"] },
-        { kind: "completion", value: "EVIDENCE_SUFFICIENT" },
+        { kind: "completion", value: "REQUIREMENT_GAPS_UNRESOLVED" },
       ],
     },
   ];
@@ -1179,9 +1182,11 @@ describe("CROSS-CATEGORY: Requirement engine integration", () => {
     const withChallengeAttempted = ledger.map((r) =>
       r.role === "CHALLENGE" ? { ...r, recoveryAttempts: Math.max(r.recoveryAttempts, 1) } : r,
     );
+    // Driver-content evidence for the driver-shaped requirement: under the driver-admission
+    // law a price quote (TARGET STATE) can no longer satisfy "current BTC price drivers".
     const items: CoverageEvidence[] = [{
       ref: "ev_btc_1",
-      text: "BTC trades at 80,750 USD, up 2.1 percent.",
+      text: "BTC dropped 4 percent today after leveraged liquidations cascaded through futures as funding reset.",
       subject: "BTC",
       freshness: "CURRENT",
     }];

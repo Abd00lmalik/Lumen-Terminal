@@ -65,7 +65,7 @@ export function questionIntentOf(question: string): QuestionIntent {
   if (/\ball (the )?(information|evidence|data|research)\b|\bsynthesi[sz]e\b|\bwhat does .* say\b|\beverything\b|\boverview\b|\bcross[- ]domain\b/.test(q)) {
     return "CROSS_DOMAIN_SYNTHESIS";
   }
-  if (/\bdriv\w*|\bdriving\b|\bpressur\w*|\bpushing\b|\bbehind\b.*\bprices?\b|\bwhat is moving\b|\bmain (factors|drivers)\b|\bwhat.s (moving|pushing|pressuring)\b/.test(q)) {
+  if (/\bdriv\w*|\bdriving\b|\bpressur\w*|\bpushing\b|\bbehind\b.*\bprices?\b|\bwhat is moving\b|\bmain (factors|drivers)\b|\bwhat.s (moving|pushing|pressuring)\b|\b(?:is|are|was|were)\b[^.?!]{0,60}\baffect\w*\b/.test(q)) {
     return "CURRENT_DRIVERS";
   }
   if (/\bright now\b|\bcurrently\b|\bcurrent (state|condition|status|level|price|regime)\b|\bas of now\b|\btoday\b|\bhow is\b.*\btrading\b|\bstate of\b|\bconditions?\b.*\b(risk|market|macro)\b/.test(q)) {
@@ -173,7 +173,7 @@ export type EpistemicLevel =
   | "COMPARATIVE_DRIVER_JUDGMENT";
 
 const DRIVER_MARKERS =
-  /\b(driven by|drives|drove|because of|due to|as a result|leading to|causing|pushed|pushing|pressuring|behind|stemming from|on the back of|fuelling|fueling|transmit\w*|pass[- ]through)\b/i;
+  /\b(driv\w*|drove|affect\w*|because of|due to|as a result|leading to|causing|caused|pushed|pushing|pressuring|behind|stemming from|on the back of|fuelling|fueling|transmit\w*|pass[- ]through)\b/i;
 const COMPARATIVE_MARKERS =
   /\b(more than|less than|compared with|compared to|relative to|versus|vs\.?|outperformed|underperformed|widened|narrowed|higher than|lower than|week[- ]over[- ]week|month[- ]over[- ]month)\b/i;
 const ANALYTICAL_MARKERS =
@@ -453,6 +453,16 @@ function evaluateDimension(
   }
   const rows = requirementsForDimension(dimension, ledger);
   if (rows.length === 0) {
+    // A REQUIRED DRIVER DIMENSION with no ledger row is a COVERAGE GAP, never "not
+    // applicable": reporting it N/A dropped it from blocking and from unresolved, so a
+    // ledger holding only state rows reached ANSWERED with the driver dimension silently
+    // skipped (the vacuous-ANSWERED hole). Other rowless dimensions keep NOT_APPLICABLE:
+    // e.g. a week-over-week comparison intentionally has no historical-episode row, and
+    // forcing it MISSING would fail runs whose baseline evidence is complete. Structurally
+    // imposed N/A (scope gates, no transmission links) keeps its own notes above.
+    if (dimension === "CURRENT_DRIVERS") {
+      return { dimension, fit: "MISSING", requirementIds: [], note: "no ledger row states this dimension" };
+    }
     return { dimension, fit: "NOT_APPLICABLE", requirementIds: [], note: "no ledger row states this dimension" };
   }
   const satisfied = rows.filter((r) => r.status === "SATISFIED");
@@ -519,9 +529,10 @@ function computeMateriality(
   const relevantSatisfied = withEvidence.filter((r) => r.status === "SATISFIED");
   if (relevantSatisfied.length === 0) return "RELEVANT";
   // Core dimensions the question actually posed (NOT_APPLICABLE means the ledger has no row
-  // for that dimension — e.g. a synthesis ask whose CROSS_DOMAIN row was never created — and
-  // must not pin materiality at RELEVANT forever). When applicable core dimensions exist,
-  // at least one must be SATISFIED before the ladder climbs past RELEVANT.
+  // for that dimension — e.g. a comparison with no historical-episode row — and must not pin
+  // materiality at RELEVANT forever; a rowless CURRENT_DRIVERS dimension is instead MISSING,
+  // a blocking coverage gap). When applicable core dimensions exist, at least one must be
+  // SATISFIED before the ladder climbs past RELEVANT.
   const applicableCore = dimensionStatuses.filter(
     (d) => d.dimension !== "MATERIALITY" && d.dimension !== "COUNTEREVIDENCE" && d.fit !== "NOT_APPLICABLE",
   );
