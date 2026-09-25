@@ -197,18 +197,19 @@ Verification categories are never collapsed (`VERIFIED LIVE` / `VERIFIED DETERMI
 
 | Layer | Result |
 |---|---|
-| Deterministic tests | **389 backend + 11 frontend passed / 0 failed** (25 env-gated live tests skipped without credentials) |
+| Deterministic tests | **817 backend + 60 frontend passed / 0 failed** (25 env-gated live tests skipped without credentials) |
 | Backend typecheck | clean |
 | Frontend typecheck + production build | clean |
 | **Production deployment** | **VERIFIED LIVE at https://asklumen.vercel.app**; same-origin serverless API, health 200, real research COMPLETED |
 | Live research (Suite B) | Flow 1 and Flow 5 COMPLETED with real evidence; Flow 5 live UI run verified |
 | Live provider fallback | VERIFIED LIVE from production: Bitget empty coverage → news/sentiment fallbacks served, provenance trail preserved |
 | Browser E2E (Suite C / CDP) | real ask-bar submission → new backend research object → judgment (backend-side proof) |
+| **Research history (Phase B)** | **VERIFIED LIVE at API level**: windowed history list, run aggregate with `recordTier`, typed 404s for a `requestId`/monitor ref; browser journey BLOCKED by a live provider outage on 2026-09-25 (see `handoff.md`) |
 | Security scans | no secrets, `.env` ignored, one fetch boundary in the frontend, no trading surface |
 
 ## Known limitations
 
-- **Production workspace state is per-instance memory** (documented in `DEPLOYMENT.md` §3); serverless disks are ephemeral; durable external persistence is a contained future upgrade behind the two-method `WorkspaceStore` interface.
+- **Production workspace state IS durable in Vercel Blob** (updated 2026-09-25; `DEPLOYMENT.md` §3). It used to be per-instance memory; that is no longer true. History rows can still be genuinely degraded (`recordTier` JUDGMENT/SUMMARY) for runs completed before records were persisted, or for a run whose serverless invocation was killed before its record landed — the UI marks those honestly rather than inventing a result.
 - **News / sentiment / macro upstreams** can be unreachable from some networks (Bitget endpoint blocking); registry-owned fallbacks now cover news/sentiment/macro; all-fail remains an honest EMPTY, never fabricated.
 - **G1 depth beyond OHLCV**; historical funding/OI/liquidations are not mirrored by any reachable source; reported `UNAVAILABLE`.
 - **Monitoring is a handoff, not a worker**; proposed/activated monitors persist, but nothing runs in the background. This is intentional for this phase.

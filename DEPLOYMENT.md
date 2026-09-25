@@ -56,10 +56,41 @@ There are no `VITE_*` secrets and no credentials in the frontend bundle; the sec
 
 ## 3. Persistence; honest limits
 
-The default production store is **in-memory** (`createProductionStore` in
-`api/research.ts`): serverless local disks are ephemeral, so workspace state survives
-across requests on a warm function instance and is lost on cold start. The UI never
-claims durable persistence, and the health endpoint does not advertise any.
+**Production is durable Vercel Blob when the store is configured** (updated 2026-09-25).
+`createProductionStore` in `api/research.ts` returns `VercelBlobStore` whenever
+`BLOB_READ_WRITE_TOKEN` is present (it is, in this project), so research history survives
+cold starts, refreshes and other instances. Without that token it falls back to
+`WORKSPACE_FILE` (file) or an honest per-instance `MemoryStore` — serverless local disks
+are ephemeral, so nothing is ever CLAIMED to be durable that is not.
+
+**Blob store laws (Phase B, learned from a production incident):**
+
+- **Reads bypass the CDN cache** — `get(..., { useCache: false })`. The SDK default is
+  `true`, and a blob's default cache lifetime is a month, so a cached read could return a
+  snapshot that predated another instance's write. Merge-before-write then merged the stale
+  body and the write ERASED the other instance's completed runs (observed live: history
+  shrank between reads; a finished run vanished). Never remove `useCache: false`.
+- **Writes are conditional on the ETag they merged from** (`ifMatch`; `createOnly` for the
+  first write). A precondition failure means another instance won the race: the store
+  re-reads, re-merges and retries (bounded by `MAX_WRITE_ATTEMPTS`), never clobbers.
+- **Writes carry `cacheControlMaxAge: 60`** — a mutable snapshot must not sit in a cache for
+  the default month.
+- **Every blob operation has a hard deadline** (`BLOB_IO_TIMEOUT_MS` = 20s, abort signal). A
+  hung transport fails honestly instead of stalling the invocation until the platform kills
+  it (which loses the finished run's record).
+- **Failure semantics:** a failed save is reported (the POST fails with a typed persistence
+  error), a missing blob is "no workspace yet", a corrupt snapshot is not a crash, and one
+  failed save never poisons the store for later saves.
+- **Records are one per completed run and are never evicted** (`ResearchResponseRecord`); a
+  run's evidence/judgment objects live once in the graph and are rehydrated by ref on read.
+  A run whose invocation died before its record landed is still listed and opens as an
+  explicitly degraded `SUMMARY` (`recordTier` in `GET /api/research/:ref`) — never faked.
+
+### Historical note (pre-Phase-B)
+
+The production store used to be **per-instance memory**; this section described that limit
+until 2026-09-25. The UI never claimed durable persistence and the health endpoint never
+advertised any.
 
 - **Local development** uses the real `FileStore` (`.data/workspace.json`); state
   survives restarts and restart-ID-collisions are handled (ID counters are re-seeded

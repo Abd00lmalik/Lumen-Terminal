@@ -21,8 +21,8 @@
 | POST | `/api/session` | Bootstrap a session; returns the continuity snapshot. |; |
 | GET | `/api/workspace` | Current continuity snapshot (safe DTO). | 404 if no session |
 | POST | `/api/research` | Submit a natural-language research request. `?stream=1` → SSE. | see error model |
-| GET | `/api/research` | Research history with explicit `isCurrent` status. | 404 if no session |
-| GET | `/api/research/:ref` | One research object. | 404 |
+| GET | `/api/research` | Research history: ONE lightweight entry per RUN, newest first, windowed/filterable (`?limit&offset&sort=recent|oldest&status&q`). Explicit `isCurrent` status. | 400 bad window / 404 if no session |
+| GET | `/api/research/:ref` | The run AGGREGATE (see §"History list + run aggregate"): research object fields + the retained response surface + provenance/timestamps/saved/thesis associations + honest `recordTier`. | 404 |
 | GET | `/api/evidence` `/api/evidence/:ref` | Evidence with epistemic class/freshness preserved. | 404 |
 | GET | `/api/claims` | Claims. | 404 if no session |
 | GET | `/api/hypotheses` | Hypotheses with ranking/status. | 404 if no session |
@@ -77,6 +77,21 @@ Response (`ResearchResponseDTO`):
 }
 ```
 
+### History list + run aggregate (Phase B, 2026-09-25)
+
+**List (`GET /api/research`)** returns `ResearchRunSummaryDTO[]` — one entry per research RUN (a submission's internal plan-step research objects are grouped under the run's answer-bearing object, exposed as `internalRefs`). A row is deliberately lightweight (question, status, `createdAt`/`updatedAt` from provenance, `confidence`, `questionResolutionStatus`, `insightPreview`, `judgmentPreview`, `saved`, `degraded`, `isCurrent`) — never an object dump.
+
+- `limit` (default 50, max 200), `offset`, `sort` (`recent` default → newest first, or `oldest`), `status` (exact, plus `CURRENT` for the active run), `q` (case-insensitive substring over question/objective). Invalid values (`limit=0`, `limit=999`, `limit=abc`, `offset=-1`, `sort=sideways`) are a typed **400**, never a silently different list.
+- Only research objects are listed: a monitor/other ref can never appear, so `GET /api/research/mon_…` is a typed 404.
+
+**Aggregate (`GET /api/research/:ref`)** is the ONE call the run view needs; the frontend does not stitch list + workspace + evidence + judgments.
+
+- `researchRef` is ALWAYS the ref the request was made with (list and open can never disagree).
+- When the run's presentation record is retained, the aggregate carries the full response surface: `answer`, `limitations`, `researchGaps`, `researchDiagnostics` (disclosure), `evidence[]`, `judgments[]`, `evidenceRefs`, `judgmentRef`.
+- Hoisted presentation fields: `questionResolution`, `actionableInsight`, `watchNext`, `confidence`, `stoppedBecause` (= the completion gate), `causalLinks`, `weakestCausalLink`.
+- Run-level: `createdAt`/`updatedAt`, `isCurrent`, `provenance[]`, `saved` (a SAVE artifact derives from this run), `thesisAssessments[]` (assessments whose `researchRef` is this run), `summary { evidenceCount, claimCount, hypothesisCount, judgmentCount }`.
+- **Honest reconstruction tier:** `recordTier` = `FULL` (record retained; `degraded: false`) | `JUDGMENT` (legacy pre-record run: the answer is its real persisted judgment) | `SUMMARY` (only the research object remains — the question, status and provenance are shown and NO answer/judgment is fabricated). `degraded` = `recordTier !== "FULL"`.
+
 ## SSE stream (`POST /api/research?stream=1`)
 
 `text/event-stream`; named events only; `progress`, `final`, `error`. Progress events are emitted at **actual application lifecycle transitions** (threaded from the engine's optional progress listener; nothing fabricated):
@@ -96,6 +111,8 @@ Response (`ResearchResponseDTO`):
 | `response_ready` | final response assembled |
 
 Terminal event: `final` (the `ResearchResponseDTO`) or `error` (the `ApiErrorDTO`). No event ever contains model reasoning, prompts, raw provider payloads, or secrets.
+
+**Client law (2026-09-25):** a stream that ENDS without any terminal event (e.g. the serverless function killed at the platform limit) is reported as a lost connection, not left spinning — the client emits exactly one terminal signal per run (`final`, `error`, or connection-lost) and the UI says the completed research object, if any, is reachable from Research history.
 
 ## Error model
 
