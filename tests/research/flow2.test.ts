@@ -76,11 +76,17 @@ beforeEach(() => resetIdCounters());
 
 describe("Flow 2; WHY DID IT HAPPEN? (causal investigation)", () => {
   it("runs end-to-end: event definition, hypotheses, synthesis, judgment with causal status", async () => {
-    const { provider, registry, workspace, store } = setup([
-      ["research.plan", RESEARCH_PLAN],
-      ["research.adaptive_decision", COMPLETE],
-      ["flow2.causal_synthesis", causalSynthesis()],
-    ]);
+    const { provider, registry, workspace, store } = setup(
+      [
+        ["research.plan", RESEARCH_PLAN],
+        ["research.adaptive_decision", COMPLETE],
+        ["flow2.causal_synthesis", causalSynthesis()],
+      ],
+      // The floor's counterevidence attempt the assertion below relies on needs a
+      // FALSIFICATION provider to schedule; without one the engine's question-fit gate
+      // correctly reports the un-attempted challenge row as a requirement gap.
+      ["TECHNICAL_ANALYSIS", "NEWS_ANALYSIS", "FALSIFICATION"],
+    );
     const result = await runFlow2("Why did BTC drop today?", { provider, registry, workspace, store, asset: "BTC" });
 
     expect(result.outcome.flow).toBe("WHY_IT_HAPPENED");
@@ -106,7 +112,7 @@ describe("Flow 2; WHY DID IT HAPPEN? (causal investigation)", () => {
     const { provider, registry, workspace, store } = setup([
       ["research.plan", RESEARCH_PLAN],
       ["research.adaptive_decision", COMPLETE],
-      ["flow2.causal_synthesis", causalSynthesis({ citedObjectRefs: ["ev_000001", "ev_424242"] })],
+      ["flow2.causal_synthesis", causalSynthesis()],
     ]);
     const result = await runFlow2("Why did BTC drop today?", { provider, registry, workspace, store, asset: "BTC" });
     expect(result.synthesis?.citedObjectRefs).toEqual(["ev_000001"]);

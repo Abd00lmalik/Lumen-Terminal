@@ -29,7 +29,7 @@
  * Failures are recorded on the outcome (violationReport) instead of being swallowed, so an
  * external benchmark can see every rejection the boundary made.
  */
-import type { ConfidenceComponents } from "./confidence.js";
+import type { ConfidenceComponents, ConfidenceLevel } from "./confidence.js";
 import {
   contractGapStatement,
   contractViolations,
@@ -39,6 +39,11 @@ import {
 } from "./contract-checks.js";
 import { computeConfidence } from "./confidence.js";
 import { blockingRequirements, type ResearchRequirement } from "./requirements.js";
+import {
+  evaluateQuestionResolution,
+  resolutionConfidenceCeiling,
+  type QuestionResolution,
+} from "./question-resolution.js";
 
 /** The prose a research path produced for the trader (flow response or adaptive answer). */
 export interface ContractOutcomeInput {
@@ -58,6 +63,17 @@ export interface ContractOutcomeInput {
   readonly calculationsMissing?: number;
   /** A confidence the path already computed (reused as-is; the boundary does not re-derive). */
   readonly computedConfidence?: ConfidenceComponents;
+  /**
+   * QUESTION RESOLUTION (research contract): the trader's verbatim question. When present the
+   * boundary runs the QUESTION_FIT gate — evidence quality AND coverage AND question resolution
+   * must all pass, or EVIDENCE_SUFFICIENT is demoted and confidence is capped by resolution
+   * status. Absent only in legacy unit fixtures that predate the gate.
+   */
+  readonly question?: string;
+  /** Total evidence objects collected this run (materiality ladder input). */
+  readonly evidenceCount?: number;
+  /** Evidence type tags of the admitted observations (attempt-compatibility probe input). */
+  readonly evidenceTypes?: readonly string[];
 }
 
 /** The violation record the boundary hands back (one entry per rejected claim). */
@@ -82,6 +98,11 @@ export interface ContractValidatedOutcome<L> {
   readonly violationReport: readonly ContractViolationRecord[];
   /** The engine's gap statement appended to uncertainty when violations survived stripping. */
   readonly contractGap?: string;
+  /**
+   * QUESTION RESOLUTION (research contract): the engine's own verdict on whether the run
+   * resolves the trader's information need — independent of the model's self-report.
+   */
+  readonly questionResolution?: QuestionResolution;
 }
 
 /**
@@ -124,24 +145,61 @@ export function validateContractOutcome<L>(
   }
   const contractGap = surviving.length > 0 ? contractGapStatement(surviving) : undefined;
 
-  // 2. COMPLETION LAW (engine-owned, ONE law): "sufficient" must mean the engine's coverage
+  // 2. QUESTION RESOLUTION (research contract: QUESTION RESOLUTION ≠ EVIDENCE COLLECTION).
+  // The engine evaluates whether THIS run's evidence + prose resolve the trader's verbatim
+  // question. The model cannot self-declare ANSWERED; the ledger and the prose decide.
+  let questionResolution: QuestionResolution | undefined;
+  if (input.question !== undefined && input.question.trim() !== "") {
+    questionResolution = evaluateQuestionResolution({
+      question: input.question,
+      ledger: input.ledger as readonly ResearchRequirement[],
+      evidenceText: input.evidenceText,
+      prose,
+      executedCapabilities: input.executedCapabilities,
+      ...(input.evidenceTypes !== undefined ? { evidenceTypes: input.evidenceTypes } : {}),
+      ...(input.evidenceCount !== undefined ? { evidenceCount: input.evidenceCount } : {}),
+    });
+  }
+
+  // 3. COMPLETION LAW (engine-owned, ONE law): "sufficient" must mean the engine's coverage
   // verdict reports no BLOCKING requirement — a plausible paragraph never promotes an uncovered
   // ledger to EVIDENCE_SUFFICIENT. Exactly the adaptive loop's `coverageVerdict` predicate runs
   // here, so the boundary can never disagree with the loop that produced the run (identical for
-  // flow-routed runs: same ledger, same law).
+  // flow-routed runs: same ledger, same law). QUESTION_FIT extends the same law: evidence
+  // quality AND evidence coverage AND question resolution must all pass.
   const blocking = blockingRequirements(input.ledger as readonly ResearchRequirement[]);
   let stoppedBecause = input.stoppedBecause;
   if (stoppedBecause === "EVIDENCE_SUFFICIENT" && blocking.length > 0) {
     stoppedBecause = "REQUIREMENT_GAPS_UNRESOLVED";
   }
+  if (stoppedBecause === "EVIDENCE_SUFFICIENT" && questionResolution !== undefined && questionResolution.status !== "ANSWERED") {
+    // QUESTION_FIT FAILED: the run may hold valid evidence and still fail to resolve the
+    // question (wrong dimensions, stale window, prose that does not answer). Never COMPLETED
+    // and never HIGH confidence on a failed QUESTION_FIT.
+    stoppedBecause =
+      questionResolution.status === "NOT_ANSWERED"
+        ? "MODEL_INSUFFICIENT_EVIDENCE"
+        : "REQUIREMENT_GAPS_UNRESOLVED";
+  }
 
-  // 3. CONFIDENCE CEILING (same policy on every path): computed from the ledger, not vibed.
-  const confidence = input.computedConfidence ?? computeConfidence({
-    requirements: input.ledger as readonly ResearchRequirement[],
-    stoppedBecause,
-    failedPaths: input.failedPaths,
-    ...(input.calculationsMissing !== undefined ? { calculationsMissing: input.calculationsMissing } : {}),
-  });
+  // 4. CONFIDENCE CEILING (same policy on every path): recomputed when the gate demoted the
+  // stop reason so honestGap reflects the demoted state; otherwise the path's own computation
+  // is reused as-is. Always capped by question-resolution status (NOT_ANSWERED → LOW,
+  // PARTIALLY_ANSWERED → MODERATE) — resolution gates confidence, never the reverse.
+  let confidence = stoppedBecause === input.stoppedBecause && input.computedConfidence !== undefined
+    ? input.computedConfidence
+    : computeConfidence({
+        requirements: input.ledger as readonly ResearchRequirement[],
+        stoppedBecause,
+        failedPaths: input.failedPaths,
+        ...(input.calculationsMissing !== undefined ? { calculationsMissing: input.calculationsMissing } : {}),
+      });
+  if (questionResolution !== undefined) {
+    const ceiling = resolutionConfidenceCeiling(questionResolution.status);
+    if (confidenceRank(confidence.level) > confidenceRank(ceiling)) {
+      confidence = { ...confidence, level: ceiling };
+    }
+  }
 
   const outcome = updateOutcome({
     prose,
@@ -156,5 +214,12 @@ export function validateContractOutcome<L>(
     confidence,
     violationReport: report,
     ...(contractGap !== undefined ? { contractGap } : {}),
+    ...(questionResolution !== undefined ? { questionResolution } : {}),
   };
+}
+
+const LEVEL_RANK: Readonly<Record<ConfidenceLevel, number>> = { UNKNOWN: 0, LOW: 1, MODERATE: 2, HIGH: 3 };
+
+function confidenceRank(level: ConfidenceLevel): number {
+  return LEVEL_RANK[level];
 }

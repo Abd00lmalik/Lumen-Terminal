@@ -256,7 +256,7 @@ function schemaError(tool: string, capability: CapabilityName, params: Record<st
 
 export class EquityMarketDataAdapter implements ProviderAdapter {
   readonly providerId = "equity/yahoo-chart";
-  readonly capabilities: readonly CapabilityName[] = ["EQUITY_MARKET_DATA"];
+  readonly capabilities: readonly CapabilityName[] = ["EQUITY_MARKET_DATA", "COMMODITY_MARKET_DATA", "FX_MARKET_DATA"];
   readonly limitations: readonly string[] = [
     "Yahoo Finance chart data: delayed US equities; not a licensed real-time feed",
     "daily OHLCV history is provider-limited to the requested range",
@@ -273,7 +273,7 @@ export class EquityMarketDataAdapter implements ProviderAdapter {
   }
 
   async execute(capability: CapabilityName, params: Record<string, unknown>): Promise<ToolResultInput> {
-    if (capability !== "EQUITY_MARKET_DATA") {
+    if (capability !== "EQUITY_MARKET_DATA" && capability !== "COMMODITY_MARKET_DATA" && capability !== "FX_MARKET_DATA") {
       throw new Error(`${this.providerId} has no mapping for capability ${capability}`);
     }
     const symbol = symbolOf(params);

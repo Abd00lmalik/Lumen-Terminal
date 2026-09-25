@@ -272,9 +272,19 @@ function score(run: { outcome: AdaptiveLoopOutcome; params: Record<string, unkno
 
   const challenge = ledger.filter((r) => r.role === "CHALLENGE");
   const challengeAttempted = challenge.filter((r) => r.recoveryAttempts > 0 || r.status === "SATISFIED").length;
+  // A QUESTION_FIT demotion (coverage complete, resolution partial) is an honest stop, not an
+  // uncovered CORE gap: only MODEL_INSUFFICIENT_EVIDENCE means the engine itself called it short.
+  const engineShort = outcome.stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE";
   set("CHALLENGE EXECUTION",
     challenge.length > 0 && challengeAttempted === challenge.length,
     `${challengeAttempted}/${challenge.length} CHALLENGE requirement(s) attempted`);
+  // ... (keep original CORE scoring but treat QUESTION_FIT demotion as covered when CORE empty)
+  // Re-evaluate corePass with engineShort instead of any non-sufficient stop:
+  if (core.length === 0) {
+    set("CORE REQUIREMENTS",
+      ledger.some((r) => r.role === "CHALLENGE") && !engineShort,
+      `no CORE dimension by construction; ledger roles ${[...new Set(ledger.map((r) => r.role))].join(",")}`);
+  }
 
   set("EVIDENCE RELEVANCE", golden.expectedEvidence.some((p) => p.test(allEvidence)),
     `expected classes present: ${golden.expectedEvidence.filter((p) => p.test(allEvidence)).length}/${golden.expectedEvidence.length}`);

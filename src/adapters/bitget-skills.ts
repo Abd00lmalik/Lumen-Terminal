@@ -41,7 +41,7 @@ export const MACRO_ANALYST: SkillDescriptor = {
 
 export const MARKET_INTEL: SkillDescriptor = {
   providerId: "bitget-signal/market-intel",
-  capabilities: ["MARKET_DATA_ANALYSIS"],
+  capabilities: ["MARKET_DATA_ANALYSIS", "CRYPTO_MARKET_DATA"],
   limitations: [
     "NOT true on-chain intelligence (final lock §3): whale tracking, exchange reserves, token unlocks, ETF flow figures, and on-chain cycle indicators are NOT available",
     "ETF-flow figures are news-search PROXIES; whale/positioning are derivatives-positioning PROXIES (FINDINGS.md §2.2)",
@@ -168,7 +168,7 @@ export function createMarketIntelAdapter(transport: McpTransport): BitgetSkillAd
     descriptor: MARKET_INTEL,
     transport,
     toolFor: (capability) =>
-      capability === "MARKET_DATA_ANALYSIS"          ? {
+      capability === "MARKET_DATA_ANALYSIS" || capability === "CRYPTO_MARKET_DATA"          ? {
             toolName: "crypto_market",
             // actions: search | price | ohlcv | markets | trending | global.
             // Default action: the engine plans capabilities, not tool args (orchestration

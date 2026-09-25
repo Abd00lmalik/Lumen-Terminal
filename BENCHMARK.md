@@ -115,11 +115,58 @@ map to real lifecycle stages; partial/failure states render truthfully; browser 
 full path through the real frontend.
 
 ### D12; Architectural regression guards
-No Flow→Tool hardcoding; no model→tool direct execution; no frontend→Workspace mutation; no
-frontend→Gemini; no client-side secrets; no fabricated source counts/citations; no fake
+No Flow�+'Tool hardcoding; no model�+'tool direct execution; no frontend�+'Workspace mutation; no
+frontend�+'Gemini; no client-side secrets; no fabricated source counts/citations; no fake
 progress; no automatic SAVE/monitor activation; no thesis mutation during evaluation; no
-memory overriding current research; no retrieval-failure-as-negative-evidence; no provider
+memory overriding current research; no retrieval-failure-as-negative-revidence; no provider
 logic in domain objects; no credentials in git.
+
+### D13; Question resolution (the actionable-insight benchmark)
+A run passes only when the ENGINE's own question-resolution verdict says the trader's question
+was answered — not when evidence was collected. See "ACTIONABLE_INSIGHT_BENCHMARK" below.
+
+## ACTIONABLE_INSIGHT_BENCHMARK
+
+> QUESTION RESOLUTION ≠ EVIDENCE COLLECTION.
+
+`tests/benchmark/actionable-insight.test.ts` — deterministic (MOCKED-INTEGRATION): real adaptive
+research loop, real requirement engine, real contract boundary; scripted capability providers and
+a scripted planner (`plan()` declares the model's own requirement seeds). No provider is special-
+cased, no question/asset branch exists in the engine.
+
+**Structure**
+
+- **12 positive SCENARIOS** (one per intent shape: WHAT_HAPPENED, WHY_DID_IT_HAPPEN,
+  CURRENT_DRIVERS, CURRENT_STATE, WHAT_COULD_AFFECT_IT, HISTORICAL_COMPARISON, THESIS_EVALUATION,
+  FALSIFICATION, FRAMEWORK_EVALUATION, CROSS_DOMAIN_SYNTHESIS, EVENT timing, MACRO regime): each
+  asserts ALL NINE benchmark dimensions — `QUESTION_FIT`, `EVIDENCE_RELEVANCE`, `RECENCY`,
+  `ANSWER_COVERAGE`, `CLAIM_SUPPORT`, `EXPLANATORY_SUFFICIENCY`, `SYNTHESIS_INTEGRITY`,
+  `ACTIONABILITY`, `UNCERTAINTY_CALIBRATION`.
+- **12 ADVERSARIAL scenarios A–L** (wrong-domain evidence, stale evidence, empty providers,
+  price-only answers to driver questions, historical material against CURRENT questions, missing
+  framework artifacts …): each asserts the four integrity dimensions — QUESTION_FIT,
+  UNCERTAINTY_CALIBRATION, SYNTHESIS_INTEGRITY, ACTIONABILITY — plus explicit golden ceilings
+  (`minStatus`, `maxConfidence`).
+- **CRITICAL NEGATIVE / POSITIVE pair**: a run holding only price data + stale news must NOT
+  report ANSWERED or HIGH confidence; the equivalent gold run with real driver evidence must.
+
+**How a scenario scores** — every dimension is computed from the production outcome
+(`outcome.questionResolution`, `outcome.stoppedBecause`, `outcome.confidence`, the requirement
+ledger, the synthesis text), never from fixtures:
+
+- QUESTION_FIT: intent matches the golden intent and `status >= minStatus` (the same gate the
+  contract boundary demotes on).
+- ANSWER_COVERAGE: `ANSWERED`, or `PARTIALLY_ANSWERED` with named unresolved dimensions.
+- UNCERTAINTY_CALIBRATION: confidence ≤ the golden ceiling; an ANSWERED run must not carry
+  unexplained gaps.
+- EVIDENCE_RELEVANCE / FRESHNESS: expected classes present, no CURRENT requirement served by
+  stale-only evidence, no forbidden (wrong-asset) evidence in the answer.
+
+**Result** — 27/27 tests green (with `tests/research/requirement-coverage`,
+`flow2`, `subject-isolation`, `final-judgment`, `event-loop`, and the
+decision-quality/process/requirement-completeness benchmarks): the full default suite
+(`npm test`) passes hermetically.
+
 
 ## Pass criteria
 

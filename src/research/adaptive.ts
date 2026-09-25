@@ -30,6 +30,12 @@ import { synthesizeAnswer, renderAnswerSynthesis, type AnswerSynthesis } from ".
 import { boundConfidence, computeConfidence, type ConfidenceComponents } from "./confidence.js";
 import { validateContractOutcome } from "./contract-boundary.js";
 import {
+  evaluateQuestionResolution,
+  missingRecoveryDimensions,
+  requirementsForMissingDimensions,
+  type QuestionResolution,
+} from "./question-resolution.js";
+import {
   assessCoverage,
   buildRequirements,
   CAPABILITY_SUPPORT,
@@ -240,6 +246,11 @@ export interface AdaptiveLoopOutcome {
    * survived was stripped from the answer (research-contract validation).
    */
   readonly contractViolations?: readonly { readonly type: string; readonly detail: string }[];
+  /**
+   * QUESTION RESOLUTION (research contract): the engine's own verdict on whether this run
+   * resolves the trader's information need — intent, required dimensions, materiality, claims.
+   */
+  readonly questionResolution?: QuestionResolution;
 }
 
 /** Schemas as prompt fragments; the model must answer in one of these shapes. */
@@ -256,6 +267,7 @@ export const PLANNER_CAPABILITIES: readonly string[] = [
   "CROSS_DOMAIN_SYNTHESIS", "ONCHAIN_ANALYSIS", "DEFI_ANALYSIS", "PROJECT_RESEARCH",
   "EQUITY_MARKET_DATA", "EQUITY_FUNDAMENTALS", "EARNINGS_CALENDAR", "OPTIONS_CHAIN_ANALYSIS", "EQUITY_NEWS",
   "LOCAL_KNOWLEDGE_RETRIEVAL",
+  "CRYPTO_MARKET_DATA", "COMMODITY_MARKET_DATA", "FX_MARKET_DATA",
 ];
 /**
  * The planner's capability vocabulary lives here and ONLY here; the zero-dead-end
@@ -266,9 +278,9 @@ export const PLAN_SYSTEM = [
   `The system executes capabilities on your behalf and returns validated evidence. Available capabilities: ${PLANNER_CAPABILITIES.join(", ")}.
   Plan rules:`,
   "- Request CAPABILITIES. Never name providers or vendor tools.",
-  "- Crypto assets: MARKET_DATA_ANALYSIS, TECHNICAL_ANALYSIS, SENTIMENT_ANALYSIS, NEWS_ANALYSIS, MACRO_ANALYSIS, DERIVATIVES_ANALYSIS (funding/open interest), HISTORICAL_COMPARISON, FALSIFICATION, SOURCE_VALIDATION or WEB_SEARCH (same discovery capability), CROSS_DOMAIN_SYNTHESIS.",
+  "- Crypto assets: CRYPTO_MARKET_DATA (spot/derivatives price, volume, funding) or MARKET_DATA_ANALYSIS, TECHNICAL_ANALYSIS, SENTIMENT_ANALYSIS, NEWS_ANALYSIS, MACRO_ANALYSIS, DERIVATIVES_ANALYSIS (funding/open interest), HISTORICAL_COMPARISON, FALSIFICATION, SOURCE_VALIDATION or WEB_SEARCH (same discovery capability), CROSS_DOMAIN_SYNTHESIS.",
   "- Equities and listed instruments (stocks, ETFs): EQUITY_MARKET_DATA (price, OHLCV, volume), EQUITY_FUNDAMENTALS (revenue, margins, valuation, shares), EARNINGS_CALENDAR (next/last earnings dates and consensus estimates), OPTIONS_CHAIN_ANALYSIS (options chains, only when options are explicitly relevant), EQUITY_NEWS (company headlines), plus the shared NEWS_ANALYSIS / MACRO_ANALYSIS / HISTORICAL_COMPARISON / FALSIFICATION / SOURCE_VALIDATION capabilities.",
-  "- Commodities (gold, silver, oil), FX pairs, indexes (SPX, VIX, DXY) and broad cross-asset questions: NEWS_ANALYSIS and MACRO_ANALYSIS carry the investigation; EQUITY_MARKET_DATA may be added ONLY when a concrete tradable target is named (gold, EUR/USD, VIX all resolve). Do NOT request equity or crypto market-data capabilities when no target is resolvable; a capability without a target only produces provider-failure noise.",
+  "- Commodities (gold, silver, oil), FX pairs, indexes (SPX, VIX, DXY) and broad cross-asset questions: COMMODITY_MARKET_DATA (gold/silver/oil/copper price, OHLCV) and FX_MARKET_DATA (EUR/USD, USD/JPY and other pairs) carry market data when a concrete tradable target is named; NEWS_ANALYSIS and MACRO_ANALYSIS carry the narrative. Do NOT request asset-class market-data capabilities when no target is resolvable; a capability without a target only produces provider-failure noise.",
   "- On-chain and DeFi questions (wallet/token activity, protocol TVL, L2 metrics, DEX structure): ONCHAIN_ANALYSIS (address/holder/trade observations where an address is resolvable) and DEFI_ANALYSIS (protocol/chain/L2 metrics); PROJECT_RESEARCH covers project descriptions, DEX pair discovery, and narrative/trending context.",
   "- Broad synthesis questions that may span domains: CROSS_DOMAIN_SYNTHESIS is available as a deep-research capability of last resort; prefer specific capabilities first. WEB_SEARCH (bounded source discovery) is available when narrative or primary-source hunting matters.",
   "- For a company question, plan the smallest set that can answer it: market data for what happened, earnings/estimates for event context, company news for narrative, macro or index context only when the question crosses into the broader market.",
@@ -403,6 +415,8 @@ export async function runAdaptiveResearch(
   let finalDecision!: AdaptiveDecision;
   let stoppedBecause!: AdaptiveLoopOutcome["stoppedBecause"];
   let modelFailure: ModelFailure | undefined;
+  /** QUESTION RESOLUTION (research contract): set at synthesis/boundary or computed post-loop. */
+  let questionResolution: QuestionResolution | undefined;
   // REQUIREMENT COVERAGE (engine-owned completion law): the planner declares what must be
   // KNOWN; when it does not, requirements derive from its tasks. Coverage is re-assessed
   // after every round from this run's actual evidence, and the ENGINE (never the model)
@@ -687,6 +701,43 @@ export async function runAdaptiveResearch(
       // honestly insufficient, naming the requirement it could not satisfy.
       const verdict = coverageVerdict(requirements);
       if (verdict.complete) {
+        // QUESTION-RESOLUTION RECOVERY (research contract): coverage can be complete while a
+        // recovery-target dimension (CURRENT_DRIVERS, RECENCY, DRIVER_RELATIONSHIP,
+        // COUNTEREVIDENCE, MATERIALITY) is still missing — valid evidence for the wrong
+        // dimensions never resolves the question. Bounded recovery targets those dimensions
+        // before accepting EVIDENCE_SUFFICIENT; no identical provider is re-called.
+        const missingDims = missingRecoveryDimensions(
+          contractQuestion,
+          requirements,
+          allExecutions.flatMap((e) => e.evidenceIds).length,
+        );
+        const dimensionReqs = requirementsForMissingDimensions(requirements, missingDims);
+        const dimensionCaps = dimensionReqs.length > 0
+          ? recoveryCapabilities(dimensionReqs, {
+              isAvailable: capabilityUsable,
+              exclude: allExecutions.map((e) => e.capability),
+            })
+          : [];
+        if (
+          missingDims.length > 0 &&
+          dimensionCaps.length > 0 &&
+          recoveryHasBudget(options.deadlineMs, at, recoveryRoundsUsed, MAX_RECOVERY_ROUNDS, round, maxRounds)
+        ) {
+          requirements = requirements.map((r) =>
+            dimensionReqs.some((d) => d.id === r.id) ? { ...r, recoveryAttempts: r.recoveryAttempts + 1 } : r,
+          );
+          recoveryRoundCapabilities = dimensionCaps;
+          recoveryRoundObjective = retrievalBrief(objective, dimensionReqs);
+          options.onProgress?.(
+            progressEvent(
+              "capability_started",
+              at(),
+              `recovering missing question dimensions (${missingDims.join(", ")}) via ${dimensionCaps.join(", ")}`,
+              { capability: dimensionCaps[0] ?? "recovery", dimensions: missingDims.join(",") },
+            ),
+          );
+          continue;
+        }
         stoppedBecause = "EVIDENCE_SUFFICIENT";
         finalDecision = decision;
         break;
@@ -953,7 +1004,7 @@ export async function runAdaptiveResearch(
   // the computed level and any model-stated confidence is capped by it, so a run with an
   // unresolved CORE requirement cannot present high conviction on good prose alone.
   const failedPaths = allExecutions.filter((e) => e.result.failure.type !== "NONE").length;
-  const confidence = computeConfidence({
+  let confidence = computeConfidence({
     requirements,
     stoppedBecause,
     failedPaths,
@@ -1002,6 +1053,9 @@ export async function runAdaptiveResearch(
           failedPaths,
           calculationsMissing: requirements.filter((r) => r.calculation !== undefined && r.status !== "SATISFIED").length,
           computedConfidence: confidence,
+          question: contractQuestion,
+          evidenceCount: collected.length,
+          evidenceTypes: [...new Set(collected.map((e) => e.evidenceType))],
         },
         (patch) => ({
           ...synthesis!,
@@ -1013,8 +1067,27 @@ export async function runAdaptiveResearch(
       );
       synthesis = enforced.outcome;
       answer = enforced.prose;
+      // The boundary is the ONE law: it may have demoted the stop reason (QUESTION_FIT) and it
+      // caps confidence by question resolution. Returning the pre-boundary computation here made
+      // a demoted run report the un-demoted level — a partial answer carried MODERATE confidence
+      // while its own stop reason said the requirement gaps were unresolved.
+      confidence = enforced.confidence;
       if (enforced.stoppedBecause !== stoppedBecause) stoppedBecause = enforced.stoppedBecause as typeof stoppedBecause;
+      questionResolution = enforced.questionResolution;
     }
+  }
+  // QUESTION RESOLUTION on every path (including no-synthesis): the engine's own verdict so
+  // the API can surface it and an external benchmark can score question fit independently.
+  if (questionResolution === undefined) {
+    questionResolution = evaluateQuestionResolution({
+      question: contractQuestion,
+      ledger: requirements,
+      evidenceText: collected.map((e) => `${e.observation} ${e.subject ?? ""}`).join(" ").slice(0, 40000),
+      prose: answer ?? "",
+      executedCapabilities: [...new Set(allExecutions.map((e) => e.capability))],
+      evidenceTypes: [...new Set(collected.map((e) => e.evidenceType))],
+      evidenceCount: collected.length,
+    });
   }
   return {
     research: mustResearch(workspace, researchRef),
@@ -1033,6 +1106,7 @@ export async function runAdaptiveResearch(
     ...(floorCapabilities.length > 0 ? { floorCapabilities } : {}),
     recoveryRounds: recoveryRoundsUsed,
     ...(synthesis?.contractViolations !== undefined ? { contractViolations: synthesis.contractViolations } : {}),
+    ...(questionResolution !== undefined ? { questionResolution } : {}),
   };
 }
 

@@ -175,6 +175,41 @@ Research is bounded by an engine-owned budget, not by the platform's function ti
 - a budget stop is distinguishable from a provider failure: no model failure is recorded and every
   provider call that ran may still have succeeded.
 
+## Question resolution: the benchmarked invariant
+
+> QUESTION RESOLUTION ≠ EVIDENCE COLLECTION. Evidence that was retrieved but does not establish a
+> required answer dimension is not an answer.
+
+`src/research/question-resolution.ts` evaluates the run's OUTCOME against the trader's verbatim
+question, independently of which providers ran:
+
+- **Intent** (`questionIntentOf`) — `CURRENT_STATE | WHAT_HAPPENED | CURRENT_DRIVERS |
+  WHY_DID_IT_HAPPEN | WHAT_COULD_AFFECT_IT | HISTORICAL_COMPARISON | THESIS_EVALUATION |
+  FALSIFICATION | FRAMEWORK_EVALUATION | CROSS_DOMAIN_SYNTHESIS`, read from the question's wording
+  (never a question list).
+- **Required answer dimensions** per intent (`requiredDimensionsFor`) — e.g. `WHY_DID_IT_HAPPEN`
+  needs `WHAT_HAPPENED`, `CURRENT_DRIVERS`, `DRIVER_RELATIONSHIP`, `RECENCY`, `MATERIALITY`,
+  `COUNTEREVIDENCE`. Dimensions are evaluated against the requirement ledger rows that state them
+  (`requirementsForDimension` + `DIMENSION_PATTERNS`).
+- **Temporal scope** (`temporalScopeOf`: CURRENT/WEEKLY/MONTHLY/HISTORICAL/ANY) and the
+  **materiality ladder** (`NONE → OBSERVED → RELEVANT → MATERIAL → CURRENTLY_ACTIVE`), derived from
+  the answer's own claims — not from evidence volume.
+- **Status law** (`evaluateQuestionResolution`): `NOT_ANSWERED` when there is no relevant evidence,
+  no satisfied dimension, or materiality below `RELEVANT`; `ANSWERED` when every applicable
+  dimension is `SATISFIED` and materiality ≥ `MATERIAL`; otherwise `PARTIALLY_ANSWERED`.
+- **Attempt law** (per dimension): a row counts covered when it is satisfied, or when it was
+  honestly attempted — `recoveryAttempts > 0`, `EXHAUSTED`, or `UNAVAILABLE` — but only if the run
+  could have served it: `rowCouldBeAttempted` requires the requirement's domains to intersect the
+  domains of the evidence types actually run. "We never saw that evidence kind" is therefore never
+  reported as covered.
+- **Confidence**: `resolutionConfidenceCeiling` (`NOT_ANSWERED → LOW`, `PARTIALLY_ANSWERED →
+  MODERATE`, `ANSWERED → HIGH`) caps the ledger-derived `computeConfidence`, and
+  `deriveActionableInsight` renders what the evidence shows, what it does not show, what would
+  change the conclusion, and what to watch — with trade directives stripped.
+
+The invariant is enforced at the shared boundary, not trusted from the producing loop: see
+"The shared final contract boundary" below (`QUESTION_FIT`).
+
 ## The shared final contract boundary
 
 The contract is a system-wide invariant, not an adaptive-loop-only one. Every research path that
@@ -196,6 +231,11 @@ by a second, weaker rule:
 - unsupported causal prose is stripped from the response and reported (`contractViolations`);
 - `EVIDENCE_SUFFICIENT` is demoted to `REQUIREMENT_GAPS_UNRESOLVED` whenever the engine's coverage
   verdict still reports a blocking requirement;
+- **QUESTION_FIT** (`validateContractOutcome`, when the run carries the trader's question):
+  evidence quality AND coverage AND question resolution must all pass. A run holding valid
+  evidence that does not resolve the question (`status !== ANSWERED`) is demoted to
+  `REQUIREMENT_GAPS_UNRESOLVED` — or to `MODEL_INSUFFICIENT_EVIDENCE` when the status is
+  `NOT_ANSWERED` — never `COMPLETED`, never HIGH confidence;
 - confidence is pinned to the engine-computed ceiling (`computeConfidence` over the ledger, including
 the weakest-link cap);
 - violations that survive stripping become the engine's `contractGap` statement, which replaces a

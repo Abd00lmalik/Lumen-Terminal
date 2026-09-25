@@ -89,7 +89,7 @@ function coinIdOf(params: Record<string, unknown>): string | undefined {
 
 export class CoinGeckoMarketDataAdapter implements ProviderAdapter {
   readonly providerId = "fallback/coingecko-market";
-  readonly capabilities: readonly CapabilityName[] = ["MARKET_DATA_ANALYSIS"];
+  readonly capabilities: readonly CapabilityName[] = ["MARKET_DATA_ANALYSIS", "CRYPTO_MARKET_DATA"];
   readonly limitations: readonly string[] = [
     "CoinGecko public API: aggregated USD market data, not an exchange-native order-book view",
     "spot price/24h statistics only; no order book, no OHLCV klines from this fallback",
@@ -104,7 +104,7 @@ export class CoinGeckoMarketDataAdapter implements ProviderAdapter {
   }
 
   async execute(capability: CapabilityName, params: Record<string, unknown>): Promise<ToolResultInput> {
-    if (capability !== "MARKET_DATA_ANALYSIS") {
+    if (capability !== "MARKET_DATA_ANALYSIS" && capability !== "CRYPTO_MARKET_DATA") {
       throw new Error(`${this.providerId} has no mapping for capability ${capability}`);
     }
     const coinId = coinIdOf(params);

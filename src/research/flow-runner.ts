@@ -21,6 +21,7 @@ import type { CapabilityRegistry } from "../adapters/capability-registry.js";
 import { PLANNER_CAPABILITIES, partialDecision, engineMarketClass, retrievalBrief, withinWaveBudget } from "./adaptive.js";
 import { computeConfidence, type ConfidenceComponents } from "./confidence.js";
 import { validateContractOutcome } from "./contract-boundary.js";
+import { type QuestionResolution } from "./question-resolution.js";
 import type { ModelProvider } from "../model/provider.js";
 import { ModelFailure } from "../model/provider.js";
 import {
@@ -174,6 +175,8 @@ export interface FlowOutcome {
   readonly contractViolations?: readonly { readonly type: string; readonly detail: string; readonly action: "STRIPPED" | "REJECTED_PROSE" }[];
   /** The engine's gap statement for violations that survived (appended to the flow response). */
   readonly contractGap?: string;
+  /** QUESTION RESOLUTION (research contract): whether this flow run resolves the trader's need. */
+  readonly questionResolution?: QuestionResolution;
 }
 
 // ---------------------------------------------------------------------------
@@ -531,6 +534,9 @@ export function validateFlowOutcome<F extends { outcome: FlowOutcome; response: 
       failedPaths: options.failedPaths,
       ...(options.calculationsMissing !== undefined ? { calculationsMissing: options.calculationsMissing } : {}),
       ...(outcome.confidence !== undefined ? { computedConfidence: outcome.confidence } : {}),
+      question: currentRun()?.userQuestion ?? outcome.plan?.objective ?? "",
+      evidenceCount: outcome.evidence.length,
+      evidenceTypes: [...new Set(outcome.evidence.map((e) => e.evidenceType))],
     },
     (patch) => ({
       ...outcome,
@@ -544,6 +550,7 @@ export function validateFlowOutcome<F extends { outcome: FlowOutcome; response: 
     ...enforced.outcome,
     stoppedBecause: enforced.stoppedBecause as FlowOutcome["stoppedBecause"],
     ...(enforced.contractGap !== undefined ? { contractGap: enforced.contractGap } : {}),
+    ...(enforced.questionResolution !== undefined ? { questionResolution: enforced.questionResolution } : {}),
   };
   // APPLY THE STRIPPING: the flow shows the contract-valid prose. When every claim was
   // unsupported the engine substitutes its own deterministic gap statement (never the

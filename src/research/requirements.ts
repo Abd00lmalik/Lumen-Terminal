@@ -277,6 +277,12 @@ const CONCEPT_SYNONYMS: Readonly<Record<string, string>> = {
   GDP: "GROWTH", GROWTH: "GROWTH", RECESSION: "GROWTH",
   EQUITIES: "EQUITY", STOCKS: "EQUITY", STOCK: "EQUITY", SHARES: "EQUITY",
   PRICES: "PRICE", PRICE: "PRICE", QUOTES: "QUOTE", QUOTE: "QUOTE",
+  // RELATIVE PERFORMANCE: a cross-pair ratio and an outperformance claim are the SAME
+  // information kind - one asset measured against another - so an ETH/BTC ratio observation
+  // can serve a thesis row written as "support for ETH outperformance". Shared market
+  // vocabulary, never a per-question bridge: nothing here names an asset or a question.
+  RATIO: "RELATIVE_PERFORMANCE", OUTPERFORMANCE: "RELATIVE_PERFORMANCE", OUTPERFORM: "RELATIVE_PERFORMANCE",
+  OUTPERFORMS: "RELATIVE_PERFORMANCE", OUTPERFORMED: "RELATIVE_PERFORMANCE", RELATIVE: "RELATIVE_PERFORMANCE",
   HISTORICAL: "HISTORICAL", HISTORICALLY: "HISTORICAL", HISTORY: "HISTORICAL", PRIOR: "HISTORICAL",
 };
 
@@ -304,7 +310,24 @@ function canonicalToken(token: string): string {
   if (CONCEPT_SYNONYMS[token] !== undefined) return CONCEPT_SYNONYMS[token]!;
   // Naive plural folding for content words: "margins" -> "MARGIN", "drivers" -> "DRIVER".
   if (token.length > 4 && token.endsWith("S")) return token.slice(0, -1);
+  // Light inflection folding (both sides, no vocabulary lists): an observation that the
+  // asset "dropped" must share a token with a requirement asking for "the drop", and
+  // "positioning" with "positions". Only regular -ed/-ing forms fold, the stem must stay a
+  // content-sized word, and a doubled final consonant from the inflection is removed.
+  if (token.length >= 6 && token.endsWith("ED")) {
+    const stem = undouble(token.slice(0, -2));
+    if (stem.length >= 4) return stem;
+  } else if (token.length >= 7 && token.endsWith("ING")) {
+    const stem = undouble(token.slice(0, -3));
+    if (stem.length >= 4) return stem;
+  }
   return token;
+}
+
+/** Drop a doubled final consonant produced by inflection ("DROPP" -> "DROP", "STOPP" -> "STOP"). */
+function undouble(stem: string): string {
+  const last = stem.slice(-1);
+  return stem.length > 3 && stem.endsWith(last + last) ? stem.slice(0, -1) : stem;
 }
 
 function meaningfulTokens(text: string, opts: { stripCurrencyUnits?: boolean } = {}): Set<string> {
@@ -327,9 +350,11 @@ function meaningfulTokens(text: string, opts: { stripCurrencyUnits?: boolean } =
 
 /** Time sensitivity of a question/requirement text; the freshness policy driver. */
 export function timeSensitivityOf(text: string): TimeSensitivity {
-  if (/\b(right now|now|today|currently|current|this week|this month|latest|moment)\b/i.test(text)) return "CURRENT";
-  if (/\b(recent|recently|these days|near term|lately)\b/i.test(text)) return "RECENT";
+  // Historical material outranks a "current" adjective in the same sentence ("comparable
+  // historical episodes for the current setup" is a historical requirement).
   if (/\bhistor\w*|\bpast\b|\bpreviously\b|\bbefore\b|\bsince \d{4}\b|\bin \d{4}\b/i.test(text)) return "HISTORICAL";
+  if (/\b(right now|now|today|yesterday|currently|current|this week|this month|latest|moment)\b/i.test(text)) return "CURRENT";
+  if (/\b(recent|recently|these days|near term|lately)\b/i.test(text)) return "RECENT";
   return "ANY";
 }
 
@@ -382,7 +407,14 @@ export function buildRequirements(seeds: readonly RequirementSeed[]): readonly R
     const description = seed.description.trim();
     const domains = domainsOfRequirement(description);
     const importance = seed.importance ?? "CRITICAL";
-    const timeSensitivity = seed.timeSensitivity ?? timeSensitivityOf(description);
+    // The HISTORICAL freshness law (today's live observation never satisfies it) is enforced
+    // only when the requirement's own text speaks of historical material. A planner tag alone
+    // cannot make a requirement unsatisfiable by the evidence that answers it: "drivers of the
+    // drop" or "what happened yesterday" must be judgeable against fresh observations.
+    const derived = timeSensitivityOf(description);
+    const timeSensitivity = seed.timeSensitivity === "HISTORICAL" && derived !== "HISTORICAL"
+      ? derived
+      : (seed.timeSensitivity ?? derived);
     const role = seed.role ?? roleOf(description, importance);
     return {
       id: requirementId(i),
@@ -458,7 +490,7 @@ export function questionTypeOf(question: string): QuestionType {
   if (/\bcompare\w*|\bcompared (with|to)\b|\bversus\b|\bvs\.?\b|\bweek over week\b|\bweek[- ]over[- ]week\b|\bmonth over month\b|\bbetter than\b|\bperformance (vs|versus)\b/.test(q)) return "COMPARISON";
   if (/\bearnings\b|\breport\b|\bresults\b|\bfomc\b|\bcpi print\b|\bupcoming\b|\baround its next\b|\bnext (earnings|report|meeting|print)\b/.test(q)) return "EVENT";
   if (/\bmacro\b|\brisk assets\b|\brisk[- ]on\b|\brisk appetite\b|\bregime\b|\bconditions?\b|\bfinancial conditions\b|\bliquidity\b/.test(q)) return "MACRO_REGIME";
-  if (/\bdriv\w*|\bdriving\b|\bwhy\b|\bwhat happened\b|\bwhat.s (behind|pushing|pressuring|moving)\b|\bpressur\w*|\bcaus\w*|\bexplain\w*/.test(q)) return "CAUSAL";
+  if (/\bdriv\w*|\bdriving\b|\bwhy\b|\bwhat happened\b|\bwhat(?:'s| is|s) (behind|pushing|pressuring|moving)\b|\bpressur\w*|\bcaus\w*|\bexplain\w*/.test(q)) return "CAUSAL";
   return "SYNTHESIS";
 }
 
@@ -1036,6 +1068,24 @@ export function concernsAdmittedTarget(itemText: string, admittedTargets: Readon
 }
 
 /**
+ * ECONOMIC SERIES -> the vocabulary their observations are reported in. A series CODE is how a
+ * question names its subject (UNRATE for the labor market, CPI for prices) while providers
+ * report the same series in its own words ("labor breadth", "jobless claims", "inflation
+ * elevated"): the subject gate compares literal terms, so without this every observation for an
+ * economic-series question was rejected at ingestion, the run collected zero evidence and
+ * reported NOT_ANSWERED for a question that had perfectly relevant macro evidence in hand.
+ * Concept equivalence - a fact about how these series are written about - never a question
+ * keyword list: nothing here mentions any question, scenario or asset beyond the series code
+ * the question itself resolved to.
+ */
+const SERIES_SUBJECT_VOCABULARY: Readonly<Record<string, readonly string[]>> = {
+  UNRATE: ["UNEMPLOYMENT", "LABOR", "LABOUR", "JOBS", "JOBLESS", "PAYROLL", "PAYROLLS", "CLAIMS", "EMPLOYMENT"],
+  CPI: ["INFLATION", "PRICES", "PRICE"],
+  PPI: ["INFLATION", "PRICES", "PRICE"],
+  GDP: ["GROWTH", "RECESSION"],
+};
+
+/**
  * Whole-word subject check shared with the context gate (quote pairs included). Exported so
  * the research loop can apply it at INGESTION: wrong-target provider output must not become
  * this run's evidence at all (the context gate remains as defense in depth).
@@ -1059,6 +1109,10 @@ export function concernsSubject(text: string, subjectTerms: ReadonlySet<string>)
       if (parts.some((p) => p.length >= 2) && parts.every((p) => tokens.has(p))) return true;
     }
     if (new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(upper)) return true;
+    for (const concept of SERIES_SUBJECT_VOCABULARY[term] ?? []) {
+      if (tokens.has(concept)) return true;
+      if (new RegExp(`\\b${concept}\\b`).test(upper)) return true;
+    }
   }
   return false;
 }
@@ -1160,7 +1214,34 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
   const itemTokenSet = new Set(item.text.toUpperCase().split(/[^A-Z0-9]+/));
   const questionSubjects = opts.subjectTerms ?? new Set<string>();
   const concernsForeignCrypto = [...FOREIGN_CRYPTO_ASSETS].some((t) => itemTokenSet.has(t) && !questionSubjects.has(t));
+  // The item's domain label joins its vocabulary because it is a fact about the observation
+  // itself ("this IS historical material"): that is what lets a historical-comparison
+  // requirement meet the historical item while a live quote — whose folded label is
+  // PRICE_MARKET — never does. Domain agreement as a match PATH still has its own clause below,
+  // accepted only when the requirement carries no distinguishing vocabulary.
   const itemTokens = meaningfulTokens(`${item.text} ${itemDomain}`, { stripCurrencyUnits: concernsForeignCrypto });
+  // SUBJECT IS THE ENTITY, NEVER THE CONTENT VOCABULARY — for ENGINE-DERIVED rows served by
+  // quote evidence. The resolved subject is already the gate above: it says WHO the observation
+  // is about. An engine row is phrased analytically ("the drivers behind X", "the supply
+  // factors affecting X"), and a quote/series payload repeats the subject while carrying only
+  // numbers — so subject overlap alone let a price snapshot satisfy the drivers requirement and
+  // a quote satisfy the supply requirement (benchmark A / L / oil: a drivers question answered
+  // with pure price data reported ANSWERED). Those rows must match on their own criterion — a
+  // declared evidence class or their analytic vocabulary.
+  // Against NON-quote evidence the engine row keeps the subject as vocabulary: an earnings-date
+  // observation IS the event evidence a row asks for when nothing else was retrieved, and a
+  // headline about the subject is content, not filler.
+  // MODEL-DECLARED requirements always keep the subject word: their text carries the model's
+  // own criterion ("current oil price movement this week", "price level of the dollar"), where
+  // naming the subject is part of what was asked for, and the pinned target relevance law
+  // requires subject-scoped evidence to satisfy them.
+  const quoteEvidence = /(^|_)MARKET_DATA$/i.test(String(item.evidenceType ?? ""));
+  if (req.engineRequired === true && quoteEvidence && opts.subjectTerms !== undefined) {
+    for (const subject of opts.subjectTerms) {
+      reqTokens.delete(subject);
+      itemTokens.delete(subject);
+    }
+  }
   // Vocabulary overlap is REQUIRED (a whole domain of observations cannot satisfy every
   // requirement in that domain: a yield quote is not inflation evidence). Domain agreement
   // is accepted only when the requirement itself has no distinguishing vocabulary left.
@@ -1396,6 +1477,9 @@ export const CAPABILITY_SUPPORT: Readonly<Record<string, CapabilitySupport>> = {
   OPTIONS_CHAIN_ANALYSIS: { domains: ["OPTIONS"], dataTypes: ["CHAIN", "IMPLIED_VOLATILITY", "OPEN_INTEREST", "STRIKE", "POSITIONING"], freshness: ["CURRENT", "RECENT"] },
   EQUITY_NEWS: { domains: ["NEWS", "EARNINGS", "FUNDAMENTALS"], dataTypes: ["HEADLINE", "COMPANY_EVENT", "ANNOUNCEMENT", "CATALYST"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   LOCAL_KNOWLEDGE_RETRIEVAL: { domains: ["GENERAL"], dataTypes: ["FRAMEWORK", "SAVED_RESEARCH", "METHODOLOGY", "NOTE"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
+  CRYPTO_MARKET_DATA: { domains: ["PRICE_MARKET"], dataTypes: ["PRICE", "OHLCV", "VOLUME", "QUOTE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
+  COMMODITY_MARKET_DATA: { domains: ["PRICE_MARKET"], dataTypes: ["PRICE", "OHLCV", "VOLUME", "QUOTE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
+  FX_MARKET_DATA: { domains: ["PRICE_MARKET"], dataTypes: ["PRICE", "OHLCV", "VOLUME", "QUOTE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
 };
 
 /**
@@ -1479,6 +1563,7 @@ export const SUBJECT_REQUIRED_CAPABILITIES: readonly string[] = [
   "MARKET_DATA_ANALYSIS", "TECHNICAL_ANALYSIS", "EQUITY_MARKET_DATA", "EQUITY_FUNDAMENTALS",
   "EARNINGS_CALENDAR", "OPTIONS_CHAIN_ANALYSIS", "EQUITY_NEWS", "DERIVATIVES_ANALYSIS",
   "ONCHAIN_ANALYSIS", "DEFI_ANALYSIS",
+  "CRYPTO_MARKET_DATA", "COMMODITY_MARKET_DATA", "FX_MARKET_DATA",
 ];
 
 /**
@@ -1602,6 +1687,7 @@ export function assessEvidenceQuality(
 
   // Directness: primary sources vs secondary reporting/analysis
   const hasPrimarySource = evidenceItems.some((e) => e.sourceType === "PRIMARY");
+  const hasTypedSource = evidenceItems.some((e) => e.sourceType !== undefined);
   const hasOnlySecondary = evidenceItems.every(
     (e) => e.sourceType === "SECONDARY" || e.sourceType === "COMMUNITY" || e.sourceType === "ANALYSIS"
   );
@@ -1618,6 +1704,10 @@ export function assessEvidenceQuality(
     quality = "SUPPORTED_INFERENCE";
   } else if (hasOnlySecondary) {
     // Only secondary reporting = correlational at best
+    quality = "CORRELATIONAL";
+  } else if (!hasTypedSource) {
+    // Satisfied evidence with no source-type metadata: correlational (weak provenance),
+    // never UNRESOLVED — UNRESOLVED means the claim itself could not be tied to evidence.
     quality = "CORRELATIONAL";
   } else {
     // Insufficient data

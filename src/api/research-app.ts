@@ -317,6 +317,26 @@ export class ResearchApp {
       readonly floorCapabilities?: readonly string[];
       readonly recoveryRounds?: number;
       readonly confidence?: ConfidenceComponents;
+      readonly questionResolution?: {
+        readonly intent: string;
+        readonly temporalScope: string;
+        readonly status: string;
+        readonly dimensions: readonly { readonly dimension: string; readonly fit: string }[];
+        readonly unresolvedDimensions: readonly string[];
+        readonly materiality: string;
+        readonly evidenceCount: number;
+        readonly relevantEvidenceCount: number;
+        readonly staleEvidenceCount: number;
+        readonly answerClaims: readonly { readonly text?: string; readonly evidenceRefs?: readonly string[] }[];
+        readonly claimEvidenceLinks: number;
+        readonly actionableInsight: {
+          readonly whatEvidenceShows: readonly string[];
+          readonly whatEvidenceDoesNotShow: readonly string[];
+          readonly whatItMeans: string;
+          readonly whatWouldChangeConclusion: readonly string[];
+          readonly watchItems: readonly string[];
+        };
+      };
     }
     const loopOutcomes = [
       result.research,
@@ -400,6 +420,35 @@ export class ResearchApp {
               })) ?? [],
               ...(computed?.weakestCausalLink !== undefined
                 ? { weakestCausalLink: computed.weakestCausalLink.target }
+                : {}),
+              // QUESTION RESOLUTION: surface the engine's own question-fit verdict so the
+              // external benchmark can score resolution independently of evidence collection.
+              ...(loopOutcomes.find((o) => o.questionResolution !== undefined)?.questionResolution !== undefined
+                ? {
+                    questionResolution: (() => {
+                      const q = loopOutcomes.find((o) => o.questionResolution !== undefined)!.questionResolution!;
+                      return {
+                        intent: q.intent,
+                        temporalScope: q.temporalScope,
+                        status: q.status,
+                        dimensions: q.dimensions.map((d) => ({ dimension: d.dimension, fit: d.fit })),
+                        unresolvedDimensions: [...q.unresolvedDimensions],
+                        materiality: q.materiality,
+                        evidenceCount: q.evidenceCount,
+                        relevantEvidenceCount: q.relevantEvidenceCount,
+                        staleEvidenceCount: q.staleEvidenceCount,
+                        answerClaimCount: q.answerClaims.length,
+                        claimEvidenceLinks: q.claimEvidenceLinks,
+                        actionableInsight: {
+                          whatEvidenceShows: [...q.actionableInsight.whatEvidenceShows],
+                          whatEvidenceDoesNotShow: [...q.actionableInsight.whatEvidenceDoesNotShow],
+                          whatItMeans: q.actionableInsight.whatItMeans,
+                          whatWouldChangeConclusion: [...q.actionableInsight.whatWouldChangeConclusion],
+                          watchItems: [...q.actionableInsight.watchItems],
+                        },
+                      };
+                    })(),
+                  }
                 : {}),
             };
           })();

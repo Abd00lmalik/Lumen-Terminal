@@ -603,6 +603,8 @@ export interface ResearchDiagnosticsDTO {
   readonly causalLinks?: readonly CausalLinkDiagnosticDTO[];
   /** The link that binds the judgment (convenience for single-chain runs). */
   readonly weakestCausalLink?: string;
+  /** QUESTION RESOLUTION (research contract): whether this run resolves the trader's need. */
+  readonly questionResolution?: QuestionResolutionDTO;
 }
 
 export interface CausalLinkDiagnosticDTO {
@@ -615,6 +617,33 @@ export interface CausalLinkDiagnosticDTO {
   readonly status: string;
   readonly requirementId: string;
   readonly evidenceRefs: readonly string[];
+}
+
+export interface QuestionResolutionDTO {
+  /** Engine-derived decision intent (CURRENT_DRIVERS, THESIS_EVALUATION, ...). */
+  readonly intent: string;
+  /** Temporal window the question's wording requires (CURRENT, WEEKLY, MONTHLY, HISTORICAL, ANY). */
+  readonly temporalScope: string;
+  /** ANSWERED | PARTIALLY_ANSWERED | NOT_ANSWERED (engine-owned; model cannot self-declare). */
+  readonly status: string;
+  /** Per-dimension fit: the dimension and MISSING | PARTIAL | SATISFIED | NOT_APPLICABLE. */
+  readonly dimensions: readonly { readonly dimension: string; readonly fit: string }[];
+  readonly unresolvedDimensions: readonly string[];
+  /** NONE | OBSERVED | RELEVANT | MATERIAL | CURRENTLY_ACTIVE */
+  readonly materiality: string;
+  readonly evidenceCount: number;
+  readonly relevantEvidenceCount: number;
+  readonly staleEvidenceCount: number;
+  readonly answerClaimCount: number;
+  readonly claimEvidenceLinks: number;
+  /** Actionable insight fields the answer carries (never trade instructions). */
+  readonly actionableInsight: {
+    readonly whatEvidenceShows: readonly string[];
+    readonly whatEvidenceDoesNotShow: readonly string[];
+    readonly whatItMeans: string;
+    readonly whatWouldChangeConclusion: readonly string[];
+    readonly watchItems: readonly string[];
+  };
 }
 
 export interface ResearchResponseDTO {
