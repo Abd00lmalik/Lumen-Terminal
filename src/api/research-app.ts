@@ -179,7 +179,15 @@ export class ResearchApp {
     // One user submission = one research RUN: every Research object this submission creates
     // (plan steps, flow phases) is stamped with this run id and the trader's verbatim
     // question, so history shows ONE entry per question (run-context.ts).
-    beginRun({ runId: newId(idPrefixes.run), userQuestion: submittedQuestion });
+    //
+    // IDENTITY LAW (audit B1, found in production): the numeric prefix ALONE is not unique.
+    // Counters are seeded from the ids in the snapshot the instance loaded, and a run id is
+    // never an object id — so two serverless instances (or two cold starts) both minted
+    // `run_000001` for different submissions. Production evidence: one "run" held 85 research
+    // objects from many submissions, so a history entry could pair one submission's question
+    // with another submission's answer. The per-invocation token makes a run id globally
+    // unique; the readable prefix is kept for logs.
+    beginRun({ runId: `${newId(idPrefixes.run)}-${crypto.randomUUID().slice(0, 8)}`, userQuestion: submittedQuestion });
     try {
       // Honest wall-clock budget: finish (and persist) before the caller's execution window
       // expires so a run always delivers its real state instead of dying mid-flight. Sized for
@@ -563,7 +571,7 @@ export class ResearchApp {
     const groups = new Map<string, Research[]>();
     const order: string[] = [];
     for (const r of all) {
-      const key = r.runId ?? `solo:${r.id}`;
+      const key = runKey(r);
       const bucket = groups.get(key);
       if (bucket === undefined) {
         groups.set(key, [r]);
@@ -657,7 +665,9 @@ export class ResearchApp {
     // is persisted against the run's ANSWER-bearing member, which is not necessarily the ref
     // the history entry exposes. Resolution therefore checks the whole run group, so clicking
     // a history entry always yields the run's real answer instead of a bare summary.
-    const members = r.runId !== undefined ? ws.listResearch().filter((m) => m.runId === r.runId) : [r];
+    // The group is the SAME set the history list used (see runKey), so listing and opening can
+    // never disagree about which members belong to the run.
+    const members = runMembers(ws.listResearch(), r);
     const memberIds = members.map((m) => m.id);
     const memberIdSet = new Set(memberIds);
 
@@ -737,7 +747,7 @@ export class ResearchApp {
       ...(diagnostics !== undefined ? { stoppedBecause: diagnostics.completionGate } : {}),
       ...(diagnostics?.causalLinks !== undefined ? { causalLinks: diagnostics.causalLinks } : {}),
       ...(diagnostics?.weakestCausalLink !== undefined ? { weakestCausalLink: diagnostics.weakestCausalLink } : {}),
-      summary: runCounts(members),
+      summary: runCounts(members, response),
       thesisAssessments: ws.listThesisAssessments()
         .filter((a) => a.researchRef !== undefined && memberIdSet.has(a.researchRef))
         .map(thesisAssessmentToDTO),
@@ -997,8 +1007,35 @@ function runTimestamps(members: readonly Research[]): { createdAt?: string; upda
   return { createdAt: min, updatedAt: max };
 }
 
-/** Object counts for a run (union across its members; the run view's summary line). */
-function runCounts(members: readonly Research[]): ResearchRunAggregateDTO["summary"] {
+/**
+ * Identity of the RUN a research object belongs to, as a group key.
+ *
+ * A run is (runId, verbatim question): the question comes from the same submission context
+ * that stamped the run id, so members of one submission always agree on both. The question is
+ * part of the key because legacy data contains run ids that were NOT unique — the run counter
+ * restarted at 1 on every cold process (a run id is never an object id, so it was never
+ * seeded), which stamped unrelated submissions with the same `run_000001`. Grouping on the id
+ * alone merged those submissions: one history entry then showed one submission's question with
+ * another submission's answer. Legacy objects without a run id stay their own entry.
+ */
+function runKey(r: Research): string {
+  return r.runId === undefined ? `solo:${r.id}` : `${r.runId}\u0000${r.userQuestion ?? ""}`;
+}
+
+/** The members of the run `seed` belongs to (same key), in creation order. */
+function runMembers(all: readonly Research[], seed: Research): Research[] {
+  if (seed.runId === undefined) return [seed];
+  const key = runKey(seed);
+  return all.filter((m) => runKey(m) === key);
+}
+
+/**
+ * Object counts for a run. When the run's record is retained, its refs are authoritative: they
+ * are exactly the objects this request produced and that the run view renders. Only a run with
+ * no retained record falls back to the union across its members (which can accumulate objects
+ * from internal steps and would otherwise contradict the evidence the user actually sees).
+ */
+function runCounts(members: readonly Research[], response?: ResearchResponseDTO): ResearchRunAggregateDTO["summary"] {
   const evidence = new Set<string>();
   const claims = new Set<string>();
   const hypotheses = new Set<string>();
@@ -1011,10 +1048,10 @@ function runCounts(members: readonly Research[]): ResearchRunAggregateDTO["summa
     if (m.currentJudgmentRef !== undefined) judgments.add(m.currentJudgmentRef);
   }
   return {
-    evidenceCount: evidence.size,
+    evidenceCount: response !== undefined ? response.evidenceRefs.length : evidence.size,
     claimCount: claims.size,
     hypothesisCount: hypotheses.size,
-    judgmentCount: judgments.size,
+    judgmentCount: response !== undefined ? response.judgments.length : judgments.size,
   };
 }
 

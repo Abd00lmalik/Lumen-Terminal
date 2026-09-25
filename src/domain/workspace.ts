@@ -29,7 +29,7 @@ import {
 } from "./memory.js";
 import type { ObjectStatus } from "./lifecycle.js";
 import { appendProvenance, createProvenance, type ProvenanceOrigin } from "./provenance.js";
-import { newId, seedIdCountersFromIds } from "./ids.js";
+import { newId, bumpIdCounterPast, idPrefixes, seedIdCountersFromIds } from "./ids.js";
 import { currentRun } from "./run-context.js";
 
 /**
@@ -798,6 +798,17 @@ export class Workspace {
       ...snap.analyses, ...snap.judgments, ...snap.branches, ...(snap.theses ?? []),
       ...(snap.savedArtifacts ?? []), ...(snap.memories ?? []), ...(snap.monitors ?? []),
     ].map((o) => o?.id).filter((id): id is string => typeof id === "string"));
+    // RUN-IDENTITY CONTINUITY (audit B1): a run id is NOT an object id — it exists only as
+    // `Research.runId` — so the seeding above never sees one and the run counter restarted at 1
+    // on every cold process. Unrelated submissions were then stamped with the same run id and
+    // merged into ONE history entry (production: one "run" held 85 research objects from many
+    // submissions, pairing a question with another run's answer). New run ids also carry a
+    // per-invocation token, so uniqueness no longer depends on this counter; seeding keeps the
+    // readable numeric part monotonic across restarts.
+    for (const id of snap.researches.map((r) => r?.runId)) {
+      const parsed = typeof id === "string" ? /^run_(\d+)/.exec(id) : null;
+      if (parsed !== null) bumpIdCounterPast(idPrefixes.run, Number(parsed[1]));
+    }
     return ws;
   }
 
