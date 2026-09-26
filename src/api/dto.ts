@@ -16,7 +16,7 @@ import type {
 import type { EvidenceClass } from "../domain/objects.js";
 import type { ObjectStatus } from "../domain/lifecycle.js";
 import type { MemoryEntry, MemoryStatus, MemoryCategory, Monitor, MonitorCondition } from "../domain/memory.js";
-import type { SavedArtifact, Thesis, ThesisAssessmentRecord, ThesisStatus } from "../domain/thesis.js";
+import type { SavedArtifact, SavedKind, Thesis, ThesisAssessmentRecord, ThesisStatus } from "../domain/thesis.js";
 import type { Provenance, ProvenanceOrigin } from "../domain/provenance.js";
 
 // ---------------------------------------------------------------------------
@@ -420,6 +420,93 @@ export function artifactToDTO(a: SavedArtifact): SavedArtifactDTO {
     ...(a.thesisRef !== undefined ? { thesisRef: a.thesisRef } : {}),
     createdAt: a.createdAt,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Saved workspace (Phase C): the trader's explicitly-kept artifacts
+// ---------------------------------------------------------------------------
+
+export type SavedKindDTO = SavedKind; // RESEARCH | JUDGMENT | EVIDENCE | INSIGHT | WATCH_NEXT
+
+/** Where a saved artifact came from (provenance context; never invented). */
+export interface SavedOriginDTO {
+  readonly researchRef?: string;
+  /** The originating research question, when that run is still present. */
+  readonly question?: string;
+  /** The originating run's date (provenance-derived). */
+  readonly createdAt?: string;
+  /** The originating run's reconstruction tier (FULL | JUDGMENT | SUMMARY). */
+  readonly recordTier?: ResearchRecordTierDTO;
+  readonly degraded?: boolean;
+  /** False when the originating run is no longer available; the artifact stays readable. */
+  readonly available: boolean;
+}
+
+/** Saved-artifact library row (GET /api/saved): what the trader keeps, not everything researched. */
+export interface SavedItemSummaryDTO {
+  readonly savedId: string;
+  readonly kind: SavedKindDTO;
+  readonly title: string;
+  readonly summary: string;
+  readonly researchRef?: string;
+  readonly sourceRef?: string;
+  readonly tags: readonly string[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  /** Engine confidence of the originating artifact when it carries one. */
+  readonly confidence?: string;
+  /** Engine question-resolution verdict of the originating run (RESEARCH kind). */
+  readonly questionResolutionStatus?: string;
+  /** Freshness of a saved evidence artifact (CURRENT | STALE | HISTORICAL). */
+  readonly freshness?: string;
+  readonly degraded?: boolean;
+  readonly recordTier?: ResearchRecordTierDTO;
+}
+
+/** Full saved artifact (GET /api/saved/:savedId): artifact first, provenance context after. */
+export interface SavedItemDTO extends SavedItemSummaryDTO {
+  readonly content: string;
+  readonly derivedFromRefs: readonly string[];
+  readonly rationale: string;
+  /** Structured content persisted for this kind; rendered verbatim. */
+  readonly snapshot?: Readonly<Record<string, unknown>>;
+  readonly provenance: readonly ProvenanceEntryDTO[];
+  readonly origin: SavedOriginDTO;
+}
+
+export function savedArtifactToDTO(a: SavedArtifact, origin: SavedOriginDTO): SavedItemDTO {
+  const snapshotConfidence = typeof a.snapshot?.["confidence"] === "string" ? a.snapshot["confidence"] : undefined;
+  const snapshotFreshness = typeof a.snapshot?.["freshness"] === "string" ? a.snapshot["freshness"] : undefined;
+  const snapshotResolution = typeof a.snapshot?.["questionResolutionStatus"] === "string" ? a.snapshot["questionResolutionStatus"] : undefined;
+  return {
+    savedId: a.id,
+    kind: a.kind,
+    title: a.title,
+    summary: a.summary,
+    ...(a.researchRef !== undefined ? { researchRef: a.researchRef } : {}),
+    ...(a.sourceRef !== undefined ? { sourceRef: a.sourceRef } : {}),
+    tags: [...a.tags],
+    createdAt: a.createdAt,
+    updatedAt: a.updatedAt,
+    ...(snapshotConfidence !== undefined ? { confidence: snapshotConfidence } : {}),
+    ...(snapshotResolution !== undefined ? { questionResolutionStatus: snapshotResolution } : {}),
+    ...(snapshotFreshness !== undefined ? { freshness: snapshotFreshness } : {}),
+    ...(origin.degraded !== undefined ? { degraded: origin.degraded } : {}),
+    ...(origin.recordTier !== undefined ? { recordTier: origin.recordTier } : {}),
+    content: a.content,
+    derivedFromRefs: [...a.derivedFromRefs],
+    rationale: a.rationale,
+    ...(a.snapshot !== undefined ? { snapshot: a.snapshot } : {}),
+    provenance: provenanceToDTO(a.provenance),
+    origin,
+  };
+}
+
+/** Library row projection: a saved artifact WITHOUT its full body (bounded list payloads). */
+export function savedArtifactToSummaryDTO(a: SavedArtifact, origin: SavedOriginDTO): SavedItemSummaryDTO {
+  const full = savedArtifactToDTO(a, origin);
+  const { content: _c, derivedFromRefs: _d, rationale: _r, snapshot: _s, provenance: _p, origin: _o, ...summary } = full;
+  return summary;
 }
 
 export type MemoryStatusDTO = MemoryStatus; // CURRENT | STALE | HISTORICAL

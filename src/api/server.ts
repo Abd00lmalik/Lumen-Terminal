@@ -85,7 +85,7 @@ export async function buildApi(deps: ApiDeps): Promise<{ app: FastifyInstance; r
   // development convenience; no broad production assumptions are made here.
   await app.register(cors, {
     origin: ["http://localhost:5173", "http://localhost:4173", "http://127.0.0.1:5173", "http://127.0.0.1:4173"],
-    methods: ["GET", "POST"],
+    methods: ["GET", "POST", "DELETE"],
   });
 
   // No global auth: single local trader identity for the hackathon MVP

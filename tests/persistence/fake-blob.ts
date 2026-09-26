@@ -36,6 +36,11 @@ export class FakeBlob {
         if (options.signal?.aborted === true) throw new Error("aborted");
         return this.value === undefined ? undefined : { ...this.value };
       },
+      head: async (_pathname, access, signal) => {
+        this.assertAccess(access);
+        if (signal?.aborted === true) throw new Error("aborted");
+        return this.value === undefined ? undefined : { etag: this.value.etag };
+      },
       write: async (_pathname, body, access, guard, options) => {
         this.assertAccess(access);
         this.writes.push({ body, guard, access, options });

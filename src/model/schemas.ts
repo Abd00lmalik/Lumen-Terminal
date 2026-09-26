@@ -363,6 +363,14 @@ export interface SaveProposal {
   /** Workspace object refs the artifact derives from (provenance; lui-save-action.md). */
   readonly derivedFromRefs: readonly string[];
   readonly rationale: string;
+  /**
+   * Phase C saved-artifact kind (RESEARCH | JUDGMENT | EVIDENCE | INSIGHT | WATCH_NEXT).
+   * OPTIONAL so a model that predates the vocabulary still validates; the LUI maps the
+   * legacy artifactType onto a kind when it is absent.
+   */
+  readonly kind?: string;
+  /** Exact originating object ref (judgment/evidence) when the SAVE targets one. */
+  readonly sourceRef?: string;
 }
 
 export const SAVE_SCHEMA: OutputSchema = {
@@ -372,7 +380,10 @@ export const SAVE_SCHEMA: OutputSchema = {
     content: "string",
     derivedFromRefs: "string[]",
     rationale: "string",
+    kind: "string",
+    sourceRef: "string",
   },
+  optional: ["kind", "sourceRef"],
 };
 
 /** 13. MANAGE_STATE change; working-state mutation proposal (M3 §17). */

@@ -16,6 +16,14 @@ import { Workspace, type WorkspaceSnapshot } from "../domain/workspace.js";
 export interface WorkspaceStore {
   save(snapshot: WorkspaceSnapshot): Promise<void>;
   load(): Promise<Workspace | undefined>;
+  /**
+   * Optional: re-read the durable snapshot from origin storage bypassing any short-lived read
+   * cache. Used by the application layer to keep FOCUSED reads (the Saved library) fresh across
+   * serverless instances, where one instance's explicit SAVE/UNSAVE lives only in the durable
+   * store while a warm instance still holds an older graph in memory. Implementations without a
+   * cache may simply alias `load`.
+   */
+  loadFresh?(): Promise<Workspace | undefined>;
 }
 
 export class MemoryStore implements WorkspaceStore {

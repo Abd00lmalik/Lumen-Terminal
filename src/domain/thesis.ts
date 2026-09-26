@@ -176,29 +176,123 @@ export function reviseThesis(
 
 // ---------------------------------------------------------------------------
 // SAVED_ARTIFACT; persistent reusable memory via SAVE (lui-save-action.md, memory.md)
+//
+// Phase C (Saved workspace): HISTORY is everything Lumen researched; SAVED is what the
+// trader EXPLICITLY chose to keep. The artifact carries the origin it was promoted from
+// (researchRef always; sourceRef identifies the exact originating object) so a saved fact
+// can never masquerade as an independent, origin-less fact. Kinds are deliberately limited
+// to the artifacts the research surfaces actually produce (no new taxonomy invented).
 // ---------------------------------------------------------------------------
+
+/** Phase C artifact kinds. Deliberately closed: no invented artifact types. */
+export type SavedKind = "RESEARCH" | "JUDGMENT" | "EVIDENCE" | "INSIGHT" | "WATCH_NEXT";
+
+export const SAVED_KINDS: readonly SavedKind[] = ["RESEARCH", "JUDGMENT", "EVIDENCE", "INSIGHT", "WATCH_NEXT"];
+
+export function isSavedKind(value: unknown): value is SavedKind {
+  return typeof value === "string" && (SAVED_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * Map a legacy artifact `type` (pre-Phase-C vocabulary: finding, research-conclusion,
+ * framework, ...) onto a Phase C kind. Legacy records keep their exact content; only the
+ * missing classification is supplied, so old workspaces load without a migration write.
+ */
+export function legacyKindFromType(type: string | undefined): SavedKind {
+  const t = (type ?? "").toLowerCase();
+  if (t.includes("judg") || t.includes("conclusion") || t.includes("verdict")) return "JUDGMENT";
+  if (t.includes("eviden")) return "EVIDENCE";
+  if (t.includes("insight")) return "INSIGHT";
+  if (t.includes("watch")) return "WATCH_NEXT";
+  return "RESEARCH";
+}
 
 export interface SavedArtifact {
   readonly id: string;
-  readonly type: string; // e.g. "finding", "research-conclusion", "framework", "preference"
+  /** Phase C kind (RESEARCH | JUDGMENT | EVIDENCE | INSIGHT | WATCH_NEXT). */
+  readonly kind: SavedKind;
+  /** Legacy/free-form artifact type retained for continuity views (framework, preference, ...). */
+  readonly type: string;
+  readonly title: string;
+  /** Concise one-line summary for the library row. */
+  readonly summary: string;
   readonly content: string;
   /** Workspace objects the artifact derives from; provenance, not decoration. */
   readonly derivedFromRefs: readonly string[];
   readonly rationale: string;
+  /** Originating research run; NEVER absent for a research-derived artifact. */
   readonly researchRef?: string;
+  /** Exact originating object (judgment/evidence ref, watch index, insight marker). */
+  readonly sourceRef?: string;
   readonly thesisRef?: string;
+  readonly tags: readonly string[];
+  /** Structured, already-persisted content for this kind (rendered verbatim; never re-derived). */
+  readonly snapshot?: Readonly<Record<string, unknown>>;
   readonly provenance: Provenance;
   readonly createdAt: ISO;
+  readonly updatedAt: ISO;
+}
+
+function clip(text: string, max: number): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length <= max ? clean : `${clean.slice(0, max - 1)}…`;
+}
+
+/**
+ * Deterministic identity of a saved artifact: originating research + kind + source object.
+ * Title/question TEXT is never identity — retitling must not fork a second artifact, and
+ * re-saving the same artifact must be idempotent.
+ */
+export function savedArtifactIdentity(a: Pick<SavedArtifact, "researchRef" | "kind" | "sourceRef">): string {
+  const origin = a.researchRef ?? "";
+  const source = a.sourceRef ?? a.researchRef ?? "";
+  return `${origin}::${a.kind}::${source}`;
+}
+
+/**
+ * Normalize a persisted (possibly legacy) artifact into the full Phase C shape. Legacy
+ * records lack kind/title/tags/updatedAt/snapshot; the missing data is derived from what the
+ * record actually holds (never invented), and the record is otherwise preserved verbatim.
+ */
+export function normalizeSavedArtifact(a: SavedArtifact): SavedArtifact {
+  const raw = a as Partial<SavedArtifact>;
+  const kind = isSavedKind(raw.kind) ? raw.kind : legacyKindFromType(raw.type);
+  const content = typeof raw.content === "string" ? raw.content : "";
+  const title = typeof raw.title === "string" && raw.title.trim() !== ""
+    ? raw.title
+    : clip(typeof raw.summary === "string" && raw.summary !== "" ? raw.summary : content, 120);
+  const summary = typeof raw.summary === "string" && raw.summary !== "" ? raw.summary : clip(content, 240);
+  const createdAt = typeof raw.createdAt === "string" ? raw.createdAt : new Date(0).toISOString();
+  return Object.freeze({
+    ...a,
+    kind,
+    type: typeof raw.type === "string" && raw.type !== "" ? raw.type : kind.toLowerCase(),
+    title,
+    summary,
+    content,
+    derivedFromRefs: Array.isArray(raw.derivedFromRefs) ? raw.derivedFromRefs : [],
+    rationale: typeof raw.rationale === "string" ? raw.rationale : "",
+    tags: Array.isArray(raw.tags) ? raw.tags : [],
+    provenance: Array.isArray(raw.provenance) ? raw.provenance : createProvenance({ kind: "system", detail: "legacy saved artifact" }),
+    createdAt,
+    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : createdAt,
+  });
 }
 
 export function createSavedArtifact(
   input: {
-    type: string;
+    kind?: SavedKind;
+    type?: string;
+    title?: string;
+    summary?: string;
     content: string;
     derivedFromRefs?: readonly string[];
-    rationale: string;
+    rationale?: string;
     researchRef?: string;
+    sourceRef?: string;
     thesisRef?: string;
+    tags?: readonly string[];
+    snapshot?: Readonly<Record<string, unknown>>;
   },
   origin: ProvenanceOrigin,
   at: Date = new Date(),
@@ -206,15 +300,30 @@ export function createSavedArtifact(
   if (input.content.trim() === "") {
     throw new Error("SavedArtifact requires non-empty content; never persist an empty SAVE");
   }
+  const kind: SavedKind = input.kind ?? legacyKindFromType(input.type);
+  if (!isSavedKind(kind)) {
+    throw new Error(`SavedArtifact kind must be one of ${SAVED_KINDS.join(", ")}`);
+  }
+  const type = input.type ?? kind.toLowerCase();
+  const title = input.title !== undefined && input.title.trim() !== "" ? input.title.trim() : clip(input.summary ?? input.content, 120);
+  const summary = input.summary !== undefined && input.summary.trim() !== "" ? clip(input.summary, 240) : clip(input.content, 240);
+  const iso = at.toISOString();
   return Object.freeze({
     id: newId(idPrefixes.artifact),
-    type: input.type,
+    kind,
+    type,
+    title,
+    summary,
     content: input.content,
     derivedFromRefs: Object.freeze([...(input.derivedFromRefs ?? [])]),
-    rationale: input.rationale,
+    rationale: input.rationale ?? "",
     ...(input.researchRef !== undefined ? { researchRef: input.researchRef } : {}),
+    ...(input.sourceRef !== undefined ? { sourceRef: input.sourceRef } : {}),
     ...(input.thesisRef !== undefined ? { thesisRef: input.thesisRef } : {}),
-    provenance: createProvenance(origin, `saved artifact (${input.type}) created with trader confirmation`, at),
-    createdAt: at.toISOString(),
+    tags: Object.freeze([...(input.tags ?? [])]),
+    ...(input.snapshot !== undefined ? { snapshot: Object.freeze({ ...input.snapshot }) } : {}),
+    provenance: createProvenance(origin, `saved artifact (${kind}) created with trader confirmation`, at),
+    createdAt: iso,
+    updatedAt: iso,
   });
 }

@@ -135,6 +135,44 @@ export interface SavedArtifactView {
   readonly derivedFromRefs: readonly string[];
 }
 
+// ---------------------------------------------------------------------------
+// Saved workspace (Phase C): the trader's explicitly-kept artifacts
+// ---------------------------------------------------------------------------
+
+export type SavedKind = "RESEARCH" | "JUDGMENT" | "EVIDENCE" | "INSIGHT" | "WATCH_NEXT";
+
+export interface SavedOriginView {
+  readonly researchRef?: string;
+  readonly question?: string;
+  readonly createdAt?: string;
+  readonly recordTier?: string;
+  readonly degraded?: boolean;
+  /** False when the originating run is no longer available; the artifact stays readable. */
+  readonly available: boolean;
+}
+
+/** Library row + full artifact view model (one shape; the page reads what is present). */
+export interface SavedItemView {
+  readonly savedId: string;
+  readonly kind: SavedKind;
+  readonly title: string;
+  readonly summary: string;
+  readonly researchRef?: string;
+  readonly sourceRef?: string;
+  readonly tags: readonly string[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly confidence?: string;
+  readonly questionResolutionStatus?: string;
+  readonly freshness?: string;
+  readonly degraded?: boolean;
+  readonly recordTier?: string;
+  readonly content?: string;
+  readonly rationale?: string;
+  readonly provenance?: readonly { readonly at: string; readonly originKind: string; readonly note?: string }[];
+  readonly origin?: SavedOriginView;
+}
+
 export interface ResearchRunStage {
   readonly name: string;
   readonly detail: string;

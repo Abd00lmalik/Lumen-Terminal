@@ -7,10 +7,11 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { ResearchApp, TRADER_ORIGIN, MAX_RESEARCH_LIMIT, type ResearchListOptions } from "./research-app.js";
+import { ResearchApp, TRADER_ORIGIN, MAX_RESEARCH_LIMIT, MAX_SAVED_LIMIT, type ResearchListOptions, type SavedListOptions } from "./research-app.js";
 import { ApiFailure, InvalidRequestError, mapApiError } from "./errors.js";
 import { formatSseEvent, sseHeaders, type SseEvent } from "./sse.js";
 import type { ProgressEvent } from "../research/progress.js";
+import { SAVED_KINDS } from "../domain/thesis.js";
 import type { ApiErrorDTO } from "./dto.js";
 
 function isString(v: unknown): v is string {
@@ -67,6 +68,70 @@ function readResearchListOptions(query: unknown): ResearchListOptions {
     ...(sort !== undefined ? { sort } : {}),
     ...(status !== undefined ? { status } : {}),
     ...(search !== undefined ? { q: search } : {}),
+  };
+}
+
+/**
+ * Parse + validate the Saved-library window (?limit&offset&sort&kind&q). Same plain discipline
+ * as the history window: bounded window, order, exact kind, case-insensitive substring.
+ */
+function readSavedListOptions(query: unknown): SavedListOptions {
+  const q = (typeof query === "object" && query !== null ? query : {}) as Record<string, unknown>;
+  const text = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+  const count = (value: unknown, field: string): number | undefined => {
+    const raw = text(value);
+    if (raw === undefined) return undefined;
+    const parsed = Number(raw);
+    if (!Number.isInteger(parsed)) throw new InvalidRequestError(`"${field}" must be an integer`);
+    return parsed;
+  };
+  const limit = count(q.limit, "limit");
+  if (limit !== undefined && (limit < 1 || limit > MAX_SAVED_LIMIT)) {
+    throw new InvalidRequestError(`"limit" must be between 1 and ${MAX_SAVED_LIMIT}`);
+  }
+  const offset = count(q.offset, "offset");
+  if (offset !== undefined && offset < 0) throw new InvalidRequestError('"offset" must be >= 0');
+  const sort = text(q.sort);
+  if (sort !== undefined && sort !== "recent" && sort !== "oldest") {
+    throw new InvalidRequestError('"sort" must be "recent" or "oldest"');
+  }
+  const kind = text(q.kind);
+  if (kind !== undefined && !(SAVED_KINDS as readonly string[]).includes(kind.toUpperCase())) {
+    throw new InvalidRequestError(`"kind" must be one of ${SAVED_KINDS.join(", ")}`);
+  }
+  const search = text(q.q) ?? text(q.search) ?? text(q.query);
+  return {
+    ...(limit !== undefined ? { limit } : {}),
+    ...(offset !== undefined ? { offset } : {}),
+    ...(sort !== undefined ? { sort } : {}),
+    ...(kind !== undefined ? { kind } : {}),
+    ...(search !== undefined ? { q: search } : {}),
+  };
+}
+
+/** Explicit SAVE payload; kind/structure validation happens in the application layer. */
+function readSavedCreate(body: unknown): { researchRef: string; kind: string; sourceRef?: string; tags?: string[]; rationale?: string } {
+  if (typeof body !== "object" || body === null) throw new InvalidRequestError("JSON object body required");
+  const record = body as Record<string, unknown>;
+  const researchRef = typeof record.researchRef === "string" ? record.researchRef : undefined;
+  if (researchRef === undefined) throw new InvalidRequestError('"researchRef" must be a string');
+  const kind = typeof record.kind === "string" ? record.kind : undefined;
+  if (kind === undefined) throw new InvalidRequestError('"kind" must be a string');
+  const sourceRef = record.sourceRef === undefined ? undefined : record.sourceRef;
+  if (sourceRef !== undefined && typeof sourceRef !== "string") throw new InvalidRequestError('"sourceRef" must be a string when present');
+  const rationale = record.rationale === undefined ? undefined : record.rationale;
+  if (rationale !== undefined && typeof rationale !== "string") throw new InvalidRequestError('"rationale" must be a string when present');
+  const tags = record.tags === undefined ? undefined : record.tags;
+  if (tags !== undefined && (!Array.isArray(tags) || tags.some((t) => typeof t !== "string"))) {
+    throw new InvalidRequestError('"tags" must be a string array when present');
+  }
+  return {
+    researchRef,
+    kind,
+    ...(sourceRef !== undefined ? { sourceRef } : {}),
+    ...(tags !== undefined ? { tags: tags as string[] } : {}),
+    ...(rationale !== undefined ? { rationale } : {}),
   };
 }
 
@@ -229,6 +294,31 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
 
   app.get("/api/memory", { handler: withErrors(async () => researchApp.listMemories()) });
   app.get("/api/artifacts", { handler: withErrors(async () => researchApp.listSavedArtifacts()) });
+
+  // ------------------------------------------------------------------
+  // Saved workspace (Phase C): explicit SAVE/UNSAVE by the trader. POST/DELETE are the typed
+  // SAVE/UNSAVE actions; the application layer resolves the target against the real graph and
+  // only confirms after the write lands. Natural-language SAVE still runs through the LUI.
+  // ------------------------------------------------------------------
+
+  app.get("/api/saved", {
+    handler: withErrors(async (req) => researchApp.listSaved(readSavedListOptions(req.query))),
+  });
+  app.get("/api/saved/:savedId", {
+    handler: withErrors(async (req) => researchApp.getSaved((req.params as { savedId: string }).savedId)),
+  });
+  app.post("/api/saved", async (req, reply) => {
+    try {
+      const payload = readSavedCreate(req.body);
+      const dto = await researchApp.createSaved(payload);
+      return reply.code(201).send(dto);
+    } catch (err) {
+      handleError(reply, err);
+    }
+  });
+  app.delete("/api/saved/:savedId", {
+    handler: withErrors(async (req) => researchApp.deleteSaved((req.params as { savedId: string }).savedId)),
+  });
 
   // ------------------------------------------------------------------
   // Monitoring handoff state (F0 mandate §13); NO background infrastructure exists or is

@@ -94,6 +94,14 @@ export interface BlobClient {
   read(pathname: string, access: BlobAccess, options: BlobReadOptions): Promise<{ body: string; etag: string } | undefined>;
   /** Write the blob; the guard makes the write fail when the blob changed since we read it. */
   write(pathname: string, body: string, access: BlobAccess, guard?: BlobWriteGuard, options?: BlobWriteOptions): Promise<void>;
+  /**
+   * Current STRONG ETag for conditional writes, or undefined when unavailable (blob absent /
+   * metadata hiccup). Production finding: a blob GET returns a WEAK etag (`W/"…"`), and an
+   * `If-Match` conditional write requires a STRONG validator, so the GET etag produced
+   * "Precondition failed: ETag mismatch" on every conditional write. The metadata endpoint
+   * (`head`) returns the strong etag. Optional so an in-memory fake without metadata still works.
+   */
+  head?(pathname: string, access: BlobAccess, signal?: AbortSignal): Promise<{ etag: string } | undefined>;
 }
 
 /**
@@ -113,9 +121,42 @@ export function snapshotWriteOptions(signal?: AbortSignal): BlobWriteOptions {
 /** The real @vercel/blob transport (lazy import keeps local dev without the package working). */
 export function vercelBlobClient(): BlobClient {
   return {
+    async head(pathname, _access, signal) {
+      const { head } = await import("@vercel/blob");
+      try {
+        const meta = await head(pathname, { ...(signal !== undefined ? { abortSignal: signal } : {}) });
+        return meta.etag !== "" ? { etag: meta.etag } : undefined;
+      } catch {
+        return undefined;
+      }
+    },
     async read(pathname, access, options) {
-      const { get } = await import("@vercel/blob");
-      const blob = await get(pathname, {
+      const { get, head } = await import("@vercel/blob");
+      // PUBLIC-STORE CDN BYPASS (Phase C production finding): the SDK's `useCache: false`
+      // only appends its cache-buster for PRIVATE stores (see @vercel/blob get.ts). A public
+      // blob GET is served from the CDN, so `useCache: false` was a no-op there: the read
+      // returned a STALE body AND a stale ETag, and every conditional write then failed with
+      // "Precondition failed: ETag mismatch" (production: POST /api/saved returned 500).
+      // For public stores, read the current metadata and fetch the body through a unique URL
+      // so neither the body nor the ETag can be a cached copy. Private stores keep the SDK's
+      // own cache-buster. Reads stay inside the store's bounded I/O deadline (the extra head
+      // request is part of the same bounded operation).
+      let target = pathname;
+      if (options.useCache === false && access === "public") {
+        let base = pathname;
+        try {
+          const meta = await head(pathname, {
+            ...(options.signal !== undefined ? { abortSignal: options.signal } : {}),
+          });
+          base = meta.url;
+        } catch {
+          // Missing blob / metadata hiccup: fall through with the pathname; get() reports the
+          // absence honestly (null) rather than the store inventing content.
+          base = pathname;
+        }
+        target = `${base}${base.includes("?") ? "&" : "?"}cachebust=${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      }
+      const blob = await get(target, {
         access,
         useCache: options.useCache,
         ...(options.signal !== undefined ? { abortSignal: options.signal } : {}),
@@ -262,9 +303,15 @@ export class VercelBlobStore implements WorkspaceStore {
             merged = snapshot; // unparseable remote: our state wins (never lose our own runs)
           }
         }
+        // CONDITIONAL-WRITE VALIDATOR (Phase C production finding): use the STRONG etag from
+        // the metadata endpoint, never the weak `W/"…"` etag a GET returns — an If-Match
+        // write requires a strong validator, so the GET etag failed every conditional write.
+        const strongEtag = await this.readStrongEtag();
         const body = JSON.stringify(merged);
         const guard: BlobWriteGuard | undefined =
-          remote !== undefined ? { ifMatch: remote.etag } : { createOnly: true };
+          strongEtag !== undefined ? { ifMatch: strongEtag }
+            : remote !== undefined ? { ifMatch: remote.etag }
+              : { createOnly: true };
         try {
           await this.withDetectedAccess(async (access) => {
             await this.bounded("write", (signal) =>
@@ -283,6 +330,17 @@ export class VercelBlobStore implements WorkspaceStore {
       }
     });
     await this.queue;
+  }
+
+  /**
+   * Re-read the blob from origin storage regardless of the TTL cache (cross-instance READ
+   * freshness). The Saved library read path uses this so a warm instance can never serve a
+   * library that omits another instance's explicit SAVE/UNSAVE. The fresh read still updates
+   * the local cache so a following merge/save stays coherent.
+   */
+  async loadFresh(): Promise<Workspace | undefined> {
+    this.cacheAt = 0;
+    return this.load();
   }
 
   async load(): Promise<Workspace | undefined> {
@@ -308,6 +366,21 @@ export class VercelBlobStore implements WorkspaceStore {
     } catch {
       // A corrupt snapshot is "no workspace yet", not a crash.
       return this.cache !== undefined ? Workspace.fromSnapshot(this.cache) : undefined;
+    }
+  }
+
+  /** Current STRONG etag for the conditional write guard (undefined when the client has no
+   *  metadata support, the blob is absent, or the metadata call failed). Bounded like every
+   *  other transport operation. */
+  private async readStrongEtag(): Promise<string | undefined> {
+    const head = this.client.head;
+    if (head === undefined) return undefined;
+    try {
+      const access = this.access ?? "private";
+      const meta = await this.bounded("head", (signal) => head(BLOB_PATH, access, signal));
+      return meta?.etag !== undefined && meta.etag !== "" ? meta.etag : undefined;
+    } catch {
+      return undefined;
     }
   }
 

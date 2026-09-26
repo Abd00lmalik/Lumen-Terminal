@@ -9,7 +9,7 @@ const NAV = [
   { to: "/home", label: "Home", glyph: "⌂" },
   { to: "/research", label: "Research", glyph: "◎" },
   { to: "/history", label: "History", glyph: "⟲" },
-  { to: "/memory", label: "Saved", glyph: "❑" },
+  { to: "/saved", label: "Saved", glyph: "❑" },
   { to: "/thesis", label: "Thesis", glyph: "◈" },
   { to: "/challenge", label: "Challenge", glyph: "⨂" },
   { to: "/monitor", label: "Monitor", glyph: "∿" },

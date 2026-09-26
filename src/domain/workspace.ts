@@ -18,8 +18,8 @@ import {
   type Analysis, type Judgment,
 } from "./objects.js";
 import {
-  createThesis, reviseThesis, createSavedArtifact,
-  type Thesis, type SavedArtifact, type ThesisStatus, type ThesisAssessmentRecord, type ThesisAssessmentStatus,
+  createThesis, reviseThesis, createSavedArtifact, normalizeSavedArtifact, savedArtifactIdentity, isSavedKind,
+  type Thesis, type SavedArtifact, type SavedKind, type ThesisStatus, type ThesisAssessmentRecord, type ThesisAssessmentStatus,
 } from "./thesis.js";
 import {
   createMemoryEntry, decayMemory, revalidateMemory, proposeMonitor, transitionMonitor,
@@ -72,6 +72,13 @@ export interface WorkspaceSnapshot {
    * stays fully reconstructable after a restart.
    */
   readonly researchResponses?: readonly ResearchResponseRecord[];
+  /**
+   * Phase C unsave tombstones (id -> unsavedAt ISO). SAVED artifacts are DELETED on unsave,
+   * and the multi-instance merge is a UNION — so without an explicit deletion record a stale
+   * instance's write would resurrect an artifact the trader removed. A tombstone makes the
+   * deletion durable across instances and cold starts (unsave always wins the merge).
+   */
+  readonly savedTombstones?: readonly { readonly id: string; readonly at: string }[];
 }
 
 export class Workspace {
@@ -85,6 +92,8 @@ export class Workspace {
   private readonly branches = new Map<string, Branch>();
   private readonly theses = new Map<string, Thesis>();
   private readonly savedArtifacts = new Map<string, SavedArtifact>();
+  /** Saved ids the trader explicitly UNSAVED (tombstones; see WorkspaceSnapshot). */
+  private readonly savedTombstones = new Map<string, string>();
   private readonly memories = new Map<string, MemoryEntry>();
   private readonly monitors = new Map<string, Monitor>();
   private readonly thesisAssessments: ThesisAssessmentRecord[] = [];
@@ -511,6 +520,93 @@ export class Workspace {
     return [...this.savedArtifacts.values()];
   }
 
+  /** Find a saved artifact by its deterministic identity (researchRef + kind + sourceRef). */
+  findSavedArtifactByIdentity(
+    input: { readonly researchRef?: string; readonly kind: SavedKind; readonly sourceRef?: string },
+  ): SavedArtifact | undefined {
+    const key = savedArtifactIdentity({ kind: input.kind, ...(input.researchRef !== undefined ? { researchRef: input.researchRef } : {}), ...(input.sourceRef !== undefined ? { sourceRef: input.sourceRef } : {}) });
+    for (const artifact of this.savedArtifacts.values()) {
+      if (savedArtifactIdentity(artifact) === key) return artifact;
+    }
+    return undefined;
+  }
+
+  /**
+   * Idempotent SAVE (Phase C): saving the SAME originating artifact twice returns/updates the
+   * existing record instead of minting duplicates. Repeated saves re-affirm provenance (an
+   * appended entry makes the update visible to the merge) and refresh the snapshot/tags.
+   */
+  upsertSavedArtifact(
+    input: Parameters<typeof createSavedArtifact>[0] & { readonly kind: SavedKind },
+    origin: ProvenanceOrigin,
+    at?: Date,
+  ): { readonly artifact: SavedArtifact; readonly created: boolean } {
+    const existing = this.findSavedArtifactByIdentity(input);
+    const now = at ?? new Date();
+    if (existing === undefined) {
+      return { artifact: this.saveArtifact(input, origin, now), created: true };
+    }
+    const updated = Object.freeze({
+      ...existing,
+      ...(input.title !== undefined ? { title: input.title } : {}),
+      ...(input.summary !== undefined ? { summary: input.summary } : {}),
+      ...(input.content !== undefined ? { content: input.content } : {}),
+      ...(input.tags !== undefined ? { tags: Object.freeze([...new Set([...existing.tags, ...input.tags])]) } : {}),
+      ...(input.snapshot !== undefined ? { snapshot: Object.freeze({ ...input.snapshot }) } : {}),
+      provenance: appendProvenance(existing.provenance, origin, "saved artifact re-affirmed (idempotent SAVE)", now),
+      updatedAt: now.toISOString(),
+    }) as SavedArtifact;
+    this.savedArtifacts.set(updated.id, updated);
+    return { artifact: updated, created: false };
+  }
+
+  /**
+   * Unsave: remove ONLY the saved artifact (its tombstone keeps the removal durable across
+   * instances). Never touches the originating research, evidence, judgment or memory.
+   */
+  removeSavedArtifact(id: string, at?: Date): boolean {
+    const existed = this.savedArtifacts.delete(id);
+    if (existed) this.savedTombstones.set(id, (at ?? new Date()).toISOString());
+    return existed;
+  }
+
+  listSavedTombstones(): readonly { readonly id: string; readonly at: string }[] {
+    return [...this.savedTombstones.entries()].map(([id, at]) => ({ id, at }));
+  }
+
+  /**
+   * Merge a persisted snapshot's Saved collection into this graph (multi-instance READ
+   * freshness). A warm serverless instance loads the workspace ONCE at construction; another
+   * instance's SAVE/UNSAVE then lives only in the blob, so this graph would serve a stale
+   * library. Scoped to Saved (never the whole graph) so an in-flight research run is never
+   * clobbered. Tombstones win; a newer `updatedAt` replaces an older copy; existing local
+   * artifacts are never dropped by a snapshot that simply has not seen them.
+   */
+  absorbSavedState(snapshot: WorkspaceSnapshot): void {
+    for (const t of snapshot.savedTombstones ?? []) this.savedTombstones.set(t.id, t.at);
+    for (const a of snapshot.savedArtifacts ?? []) {
+      if (this.savedTombstones.has(a.id)) continue;
+      const incoming = normalizeSavedArtifact(a);
+      const existing = this.savedArtifacts.get(a.id);
+      if (existing === undefined || incoming.updatedAt > existing.updatedAt) this.savedArtifacts.set(a.id, incoming);
+    }
+    for (const id of this.savedTombstones.keys()) this.savedArtifacts.delete(id);
+  }
+
+  /**
+   * Roll back an in-memory saved-artifact mutation whose persistence FAILED, so the library the
+   * client reads can never show an artifact the durable store does not hold (no phantom save,
+   * no tombstone invented by a failed unsave). Used only by the application layer on write error.
+   */
+  revertSavedArtifactChange(previous: SavedArtifact | undefined, createdId?: string): void {
+    if (createdId !== undefined) this.savedArtifacts.delete(createdId);
+    if (createdId !== undefined) this.savedTombstones.delete(createdId);
+    if (previous !== undefined) {
+      this.savedArtifacts.set(previous.id, previous);
+      this.savedTombstones.delete(previous.id);
+    }
+  }
+
   // ----- research memory (M5; memory.md; SAVE is the promotion path) --------
 
   /** Record a persistent memory entry. Only confirmed SAVEs may call this (M5 §6/§7). */
@@ -766,6 +862,7 @@ export class Workspace {
       memories: this.listMemories(),
       monitors: this.listMonitors(),
       thesisAssessments: this.listThesisAssessments(),
+      ...(this.savedTombstones.size > 0 ? { savedTombstones: this.listSavedTombstones() } : {}),
       // M6 (audit D1): the trader's explicit selection is working state and must round-trip.
       ...(this.activeThesisId !== undefined ? { activeThesisId: this.activeThesisId } : {}),
       ...(this.researchResponses.size > 0
@@ -785,7 +882,10 @@ export class Workspace {
     for (const j of snap.judgments) ws.judgments.set(j.id, j);
     for (const b of snap.branches) ws.branches.set(b.id, b);
     for (const t of snap.theses ?? []) ws.theses.set(t.id, t);
-    for (const a of snap.savedArtifacts ?? []) ws.savedArtifacts.set(a.id, a);
+    // Phase C: normalize legacy artifacts (no kind/title/tags) on load; restore unsave tombstones.
+    for (const a of snap.savedArtifacts ?? []) ws.savedArtifacts.set(a.id, normalizeSavedArtifact(a));
+    for (const t of snap.savedTombstones ?? []) ws.savedTombstones.set(t.id, t.at);
+    for (const id of ws.savedTombstones.keys()) ws.savedArtifacts.delete(id);
     for (const m of snap.memories ?? []) ws.memories.set(m.id, m);
     for (const m of snap.monitors ?? []) ws.monitors.set(m.id, m);
     for (const a of snap.thesisAssessments ?? []) ws.thesisAssessments.push(a);
@@ -839,4 +939,4 @@ export class Workspace {
   }
 }
 
-export { createResearch, createBranch, createClaim, createEvidence, createHypothesis, createAnalysis, createJudgment, createSource, createThesis, reviseThesis, createSavedArtifact };
+export { createResearch, createBranch, createClaim, createEvidence, createHypothesis, createAnalysis, createJudgment, createSource, createThesis, reviseThesis, createSavedArtifact, isSavedKind };

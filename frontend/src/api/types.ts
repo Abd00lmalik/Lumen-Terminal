@@ -522,3 +522,62 @@ export interface MonitorsDto {
 export interface HealthDto {
   readonly status: string;
 }
+
+// ---------------------------------------------------------------------------
+// Saved workspace (Phase C): HISTORY = everything researched; SAVED = what the trader kept
+// ---------------------------------------------------------------------------
+
+export type SavedKindDto = "RESEARCH" | "JUDGMENT" | "EVIDENCE" | "INSIGHT" | "WATCH_NEXT";
+
+export interface SavedOriginDto {
+  readonly researchRef?: string;
+  readonly question?: string;
+  readonly createdAt?: string;
+  readonly recordTier?: ResearchRecordTierDto;
+  readonly degraded?: boolean;
+  /** False when the originating run is gone; the saved artifact itself stays readable. */
+  readonly available: boolean;
+}
+
+export interface SavedItemSummaryDto {
+  readonly savedId: string;
+  readonly kind: SavedKindDto;
+  readonly title: string;
+  readonly summary: string;
+  readonly researchRef?: string;
+  readonly sourceRef?: string;
+  readonly tags: readonly string[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly confidence?: string;
+  readonly questionResolutionStatus?: string;
+  readonly freshness?: string;
+  readonly degraded?: boolean;
+  readonly recordTier?: ResearchRecordTierDto;
+}
+
+export interface SavedItemDto extends SavedItemSummaryDto {
+  readonly content: string;
+  readonly derivedFromRefs: readonly string[];
+  readonly rationale: string;
+  readonly snapshot?: Readonly<Record<string, unknown>>;
+  readonly provenance: readonly ProvenanceEntryDto[];
+  readonly origin: SavedOriginDto;
+}
+
+/** Deliberately plain Saved-library window (mirrors the history window). */
+export interface SavedListQuery {
+  readonly limit?: number;
+  readonly offset?: number;
+  readonly sort?: "recent" | "oldest";
+  readonly kind?: SavedKindDto | "";
+  readonly q?: string;
+}
+
+export interface SavedCreateRequest {
+  readonly researchRef: string;
+  readonly kind: SavedKindDto;
+  readonly sourceRef?: string;
+  readonly tags?: readonly string[];
+  readonly rationale?: string;
+}

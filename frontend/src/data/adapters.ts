@@ -10,11 +10,12 @@
 import type {
   EvidenceDto, JudgmentDto, ResearchDto, ThesisDto, ThesisAssessmentDto,
   MonitorDto, MemoryDto, SavedArtifactDto, ContinuitySnapshotDto, ResearchResponseDto,
+  SavedItemDto, SavedItemSummaryDto,
 } from "../api/types.js";
 import { isResearchRef } from "./identity.js";
 import type {
   EvidenceItem, JudgmentView, ResearchSummary, ThesisView, ThesisAssessmentView,
-  MonitorView, MemoryItem, SavedArtifactView, ChallengeView, WorkspaceListItem,
+  MonitorView, MemoryItem, SavedArtifactView, ChallengeView, WorkspaceListItem, SavedItemView,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -165,6 +166,44 @@ export function artifactFromDto(a: SavedArtifactDto): SavedArtifactView {
     content: a.content,
     createdAt: a.createdAt,
     derivedFromRefs: [...a.derivedFromRefs],
+  };
+}
+
+/** Saved library row/full artifact → view model. Every field copied verbatim; nothing invented. */
+export function savedItemFromDto(d: SavedItemSummaryDto | SavedItemDto): SavedItemView {
+  const full = d as Partial<SavedItemDto>;
+  return {
+    savedId: d.savedId,
+    kind: d.kind,
+    title: d.title,
+    summary: d.summary,
+    ...(d.researchRef !== undefined ? { researchRef: d.researchRef } : {}),
+    ...(d.sourceRef !== undefined ? { sourceRef: d.sourceRef } : {}),
+    tags: [...d.tags],
+    createdAt: d.createdAt,
+    updatedAt: d.updatedAt,
+    ...(d.confidence !== undefined ? { confidence: d.confidence } : {}),
+    ...(d.questionResolutionStatus !== undefined ? { questionResolutionStatus: d.questionResolutionStatus } : {}),
+    ...(d.freshness !== undefined ? { freshness: d.freshness } : {}),
+    ...(d.degraded !== undefined ? { degraded: d.degraded } : {}),
+    ...(d.recordTier !== undefined ? { recordTier: d.recordTier } : {}),
+    ...(typeof full.content === "string" ? { content: full.content } : {}),
+    ...(typeof full.rationale === "string" ? { rationale: full.rationale } : {}),
+    ...(Array.isArray(full.provenance)
+      ? { provenance: full.provenance.map((p) => ({ at: p.at, originKind: p.originKind, ...(p.note !== undefined ? { note: p.note } : {}) })) }
+      : {}),
+    ...(full.origin !== undefined
+      ? {
+          origin: {
+            ...(full.origin.researchRef !== undefined ? { researchRef: full.origin.researchRef } : {}),
+            ...(full.origin.question !== undefined ? { question: full.origin.question } : {}),
+            ...(full.origin.createdAt !== undefined ? { createdAt: full.origin.createdAt } : {}),
+            ...(full.origin.recordTier !== undefined ? { recordTier: full.origin.recordTier } : {}),
+            ...(full.origin.degraded !== undefined ? { degraded: full.origin.degraded } : {}),
+            available: full.origin.available,
+          },
+        }
+      : {}),
   };
 }
 

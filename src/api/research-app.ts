@@ -19,7 +19,8 @@ import type { CapabilityRegistry } from "../adapters/capability-registry.js";
 import type { WorkspaceStore } from "../persistence/index.js";
 import { Workspace, type WorkspaceSnapshot } from "../domain/workspace.js";
 import type { Research } from "../domain/objects.js";
-import type { SavedArtifact } from "../domain/thesis.js";
+import type { SavedArtifact, SavedKind } from "../domain/thesis.js";
+import { isSavedKind, SAVED_KINDS } from "../domain/thesis.js";
 import { newId, idPrefixes } from "../domain/ids.js";
 import { beginRun, endRun } from "../domain/run-context.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
@@ -27,9 +28,10 @@ import type { ProgressListener } from "../research/progress.js";
 import {
   evidenceToDTO, evidenceSummaryDTO, judgmentToDTO, researchToDTO, continuitySnapshotToDTO,
   thesisToDTO, thesisAssessmentToDTO, artifactToDTO, memoryToDTO, monitorToDTO,
-  provenanceToDTO, toHistoricalAnalysisDTO, uiText,
+  provenanceToDTO, toHistoricalAnalysisDTO, uiText, savedArtifactToDTO, savedArtifactToSummaryDTO,
   type ResearchResponseDTO, type ResearchDiagnosticsDTO, type RequirementDiagnosticDTO, type AnswerDTO, type EvidenceDTO, type JudgmentDTO,
   type ResearchRunSummaryDTO, type ResearchRunAggregateDTO, type ResearchRecordTierDTO,
+  type SavedItemDTO, type SavedItemSummaryDTO, type SavedOriginDTO,
 } from "./dto.js";
 import { InvalidRequestError, ModelFailureError, PersistenceFailureError, NotFoundError } from "./errors.js";
 import { renderConfidence, type ConfidenceComponents } from "../research/confidence.js";
@@ -37,6 +39,28 @@ import { questionTypeOf } from "../research/requirements.js";
 
 /** F0 session stub (FRONTEND_ARCHITECTURE.md §18): one local trader identity, server-side only. */
 export const TRADER_ORIGIN: ProvenanceOrigin = { kind: "trader", detail: "F0 API session (local trader identity)" };
+
+/** Saved-list window bounds (mirror the research history window). */
+export const DEFAULT_SAVED_LIMIT = 50;
+export const MAX_SAVED_LIMIT = 200;
+
+export interface SavedListOptions {
+  readonly limit?: number;
+  readonly offset?: number;
+  readonly sort?: "recent" | "oldest";
+  /** Exact Phase C kind filter (RESEARCH | JUDGMENT | EVIDENCE | INSIGHT | WATCH_NEXT). */
+  readonly kind?: string;
+  readonly q?: string;
+}
+
+/** Explicit SAVE request (the trader's typed action; never inferred client-side). */
+export interface SavedCreateRequest {
+  readonly researchRef: string;
+  readonly kind: string;
+  readonly sourceRef?: string;
+  readonly tags?: readonly string[];
+  readonly rationale?: string;
+}
 
 export interface ResearchAppOptions {
   readonly provider: ModelProvider;
@@ -826,8 +850,286 @@ export class ResearchApp {
 
   // Memory / saved artifacts -------------------------------------------
 
+  /** List ALL saved artifacts (continuity/framework view; unchanged legacy surface). */
   listSavedArtifacts() {
     return this.ws().listSavedArtifacts().map(artifactToDTO);
+  }
+
+  // Saved workspace (Phase C) ------------------------------------------
+
+  /**
+   * Refresh ONLY the Saved collection from the durable store before a library read. A warm
+   * serverless instance loads the workspace once; another instance's explicit SAVE/UNSAVE then
+   * lives only in the blob, so this graph would serve a stale library (observed live: a saved
+   * artifact vanished from the list after refresh because the serving instance had never seen
+   * it). Scoped to Saved — never a whole-graph reload — so an in-flight research run is never
+   * clobbered. A read hiccup degrades to the local state (the library must still render).
+   */
+  private async refreshSaved(): Promise<void> {
+    const workspace = this.workspace;
+    if (workspace === undefined) return;
+    let fresh: Workspace | undefined;
+    try {
+      fresh = this.options.store.loadFresh !== undefined
+        ? await this.options.store.loadFresh()
+        : await this.options.store.load();
+    } catch {
+      return; // transient store read failure: serve what we hold, never fail the read
+    }
+    if (fresh === undefined) return;
+    workspace.absorbSavedState(fresh.toSnapshot());
+  }
+
+  /** Library rows: newest first, filterable by kind/search, windowed (bounded payloads). */
+  async listSaved(options: SavedListOptions = {}): Promise<SavedItemSummaryDTO[]> {
+    await this.refreshSaved();
+    const artifacts = [...this.ws().listSavedArtifacts()];
+    const wantedKind = options.kind?.trim().toUpperCase();
+    const needle = options.q?.trim().toLowerCase();
+    let rows = artifacts.map((a) => savedArtifactToSummaryDTO(a, this.savedOrigin(a.researchRef, false)));
+    if (wantedKind !== undefined && wantedKind.length > 0) {
+      rows = rows.filter((r) => r.kind === wantedKind);
+    }
+    if (needle !== undefined && needle.length > 0) {
+      rows = rows.filter((r) =>
+        [r.title, r.summary, r.researchRef, r.sourceRef, ...r.tags]
+          .some((text) => text !== undefined && text.toLowerCase().includes(needle)),
+      );
+    }
+    const sorted = [...rows].sort((a, b) => {
+      const byTime = a.createdAt.localeCompare(b.createdAt);
+      return byTime !== 0 ? byTime : a.savedId.localeCompare(b.savedId);
+    });
+    if ((options.sort ?? "recent") === "recent") sorted.reverse(); // newest first
+    const offset = options.offset ?? 0;
+    const limit = options.limit ?? DEFAULT_SAVED_LIMIT;
+    return sorted.slice(offset, offset + limit);
+  }
+
+  /** One saved artifact, artifact-first, with its provenance/origin context. */
+  async getSaved(savedId: string): Promise<SavedItemDTO> {
+    await this.refreshSaved();
+    const artifact = this.ws().getSavedArtifact(savedId);
+    if (artifact === undefined) throw new NotFoundError("saved artifact");
+    return savedArtifactToDTO(artifact, this.savedOrigin(artifact.researchRef, true));
+  }
+
+  /**
+   * Execute an EXPLICIT trader SAVE: resolve the target against the real graph, snapshot the
+   * actual persisted content, upsert (idempotent), persist, and only then confirm. The LLM is
+   * never involved and is never proof of persistence; a failed write surfaces honestly.
+   */
+  async createSaved(input: SavedCreateRequest): Promise<SavedItemDTO> {
+    const researchRef = typeof input.researchRef === "string" ? input.researchRef.trim() : "";
+    if (researchRef === "") throw new InvalidRequestError("researchRef is required");
+    if (!isSavedKind(input.kind)) {
+      throw new InvalidRequestError(`kind must be one of ${SAVED_KINDS.join(", ")}`);
+    }
+    const kind: SavedKind = input.kind;
+    // Refresh before the identity lookup so a warm instance reuses another instance's existing
+    // artifact for the same identity (idempotency must hold across instances, not just locally).
+    await this.refreshSaved();
+    const ws = this.ws();
+    const research = ws.getResearch(researchRef);
+    if (research === undefined) throw new NotFoundError("research");
+    const members = runMembers(ws.listResearch(), research);
+    const tags = Array.isArray(input.tags) ? input.tags.filter((t): t is string => typeof t === "string" && t.trim() !== "").slice(0, 20) : [];
+
+    const draft = this.savedDraftFor(kind, researchRef, members, input.sourceRef);
+    const previous = ws.findSavedArtifactByIdentity({ researchRef, kind, ...(draft.sourceRef !== undefined ? { sourceRef: draft.sourceRef } : {}) });
+    const { artifact, created } = ws.upsertSavedArtifact(
+      {
+        kind,
+        type: kind.toLowerCase(),
+        title: draft.title,
+        summary: draft.summary,
+        content: draft.content,
+        derivedFromRefs: draft.derivedFromRefs,
+        rationale: input.rationale ?? "trader explicitly saved this artifact from its originating research",
+        researchRef,
+        ...(draft.sourceRef !== undefined ? { sourceRef: draft.sourceRef } : {}),
+        tags,
+        ...(draft.snapshot !== undefined ? { snapshot: draft.snapshot } : {}),
+      },
+      TRADER_ORIGIN,
+    );
+    try {
+      await this.persist(); // confirmation is issued ONLY after the write actually succeeds
+    } catch (error) {
+      // A failed write must leave no phantom save: the in-memory mutation is rolled back so
+      // the library never shows an artifact the durable store does not hold.
+      ws.revertSavedArtifactChange(previous, created ? artifact.id : undefined);
+      throw error;
+    }
+    return savedArtifactToDTO(artifact, this.savedOrigin(researchRef, true));
+  }
+
+  /** Unsave: remove ONLY the saved artifact (tombstoned); original research is untouched. */
+  async deleteSaved(savedId: string): Promise<{ removed: string }> {
+    // Refresh so an artifact saved by another instance can still be unsaved here.
+    await this.refreshSaved();
+    const ws = this.ws();
+    const previous = ws.getSavedArtifact(savedId);
+    const existed = ws.removeSavedArtifact(savedId);
+    if (!existed) throw new NotFoundError("saved artifact");
+    try {
+      await this.persist();
+    } catch (error) {
+      ws.revertSavedArtifactChange(previous); // failed unsave must not leave the artifact removed
+      throw error;
+    }
+    return { removed: savedId };
+  }
+
+  /**
+   * Build the saved payload from REAL workspace objects for a kind. Missing/foreign targets
+   * are typed errors (never a silently-saved empty artifact).
+   */
+  private savedDraftFor(
+    kind: SavedKind,
+    researchRef: string,
+    members: readonly Research[],
+    requestedSourceRef: string | undefined,
+  ): { title: string; summary: string; content: string; sourceRef?: string; derivedFromRefs: readonly string[]; snapshot?: Readonly<Record<string, unknown>> } {
+    const ws = this.ws();
+    const memberIds = new Set(members.map((m) => m.id));
+    switch (kind) {
+      case "RESEARCH": {
+        const agg = this.getResearch(researchRef);
+        const question = agg.question.length > 0 ? agg.question : agg.objective;
+        const answer = agg.answer?.answer ?? "";
+        const hasAnswer = answer.trim() !== "";
+        const content = hasAnswer
+          ? answer
+          : `Summary only: this run's full answer record is not retained (${agg.recordTier}). Question: ${question}`;
+        const summary = hasAnswer
+          ? content
+          : `${question} (record: ${agg.recordTier.toLowerCase()})`;
+        return {
+          title: question,
+          summary,
+          content,
+          sourceRef: researchRef,
+          derivedFromRefs: [researchRef],
+          snapshot: {
+            question,
+            answer: hasAnswer ? answer : undefined,
+            confidence: agg.confidence,
+            questionResolutionStatus: agg.questionResolution?.status,
+            recordTier: agg.recordTier,
+            degraded: agg.degraded,
+          },
+        };
+      }
+      case "JUDGMENT": {
+        const sourceRef = requestedSourceRef?.trim() ?? "";
+        if (sourceRef === "") throw new InvalidRequestError("sourceRef (judgment ref) is required to save a judgment");
+        const j = ws.getJudgment(sourceRef);
+        if (j === undefined) throw new NotFoundError("judgment");
+        if (!members.some((m) => m.judgmentRefs.includes(sourceRef)) && !memberIds.has(sourceRef)) {
+          throw new InvalidRequestError("judgment does not belong to the referenced research run");
+        }
+        return {
+          title: "Judgment",
+          summary: j.statement,
+          content: j.statement,
+          sourceRef,
+          derivedFromRefs: [sourceRef],
+          snapshot: {
+            statement: j.statement,
+            confidence: j.confidence,
+            uncertainty: j.uncertainty,
+            implications: j.implications,
+            status: j.status,
+          },
+        };
+      }
+      case "EVIDENCE": {
+        const sourceRef = requestedSourceRef?.trim() ?? "";
+        if (sourceRef === "") throw new InvalidRequestError("sourceRef (evidence ref) is required to save evidence");
+        const e = ws.getEvidence(sourceRef);
+        if (e === undefined) throw new NotFoundError("evidence");
+        if (!members.some((m) => m.evidenceRefs.includes(sourceRef))) {
+          throw new InvalidRequestError("evidence does not belong to the referenced research run");
+        }
+        return {
+          title: e.evidenceType !== "" ? e.evidenceType : "Evidence",
+          summary: e.observation,
+          content: e.observation,
+          sourceRef,
+          derivedFromRefs: [sourceRef, ...e.sourceRefs],
+          snapshot: {
+            observation: e.observation,
+            evidenceClass: e.evidenceClass,
+            evidenceType: e.evidenceType,
+            freshness: e.freshness,
+            observedAt: e.observedAt,
+            sourceRefs: e.sourceRefs,
+            ...(e.proxyBasis !== undefined ? { proxyBasis: e.proxyBasis } : {}),
+          },
+        };
+      }
+      case "INSIGHT": {
+        const agg = this.getResearch(researchRef);
+        const insight = agg.actionableInsight;
+        if (insight === undefined || (insight.whatItMeans.trim() === "" && insight.whatEvidenceShows.length === 0)) {
+          throw new InvalidRequestError("this run carries no actionable insight to save");
+        }
+        return {
+          title: "Actionable insight",
+          summary: insight.whatItMeans !== "" ? insight.whatItMeans : insight.whatEvidenceShows[0]!,
+          content: insight.whatItMeans !== "" ? insight.whatItMeans : insight.whatEvidenceShows[0]!,
+          sourceRef: requestedSourceRef?.trim() !== undefined && requestedSourceRef.trim() !== "" ? requestedSourceRef.trim() : "insight",
+          derivedFromRefs: [researchRef],
+          snapshot: {
+            whatEvidenceShows: insight.whatEvidenceShows,
+            whatEvidenceDoesNotShow: insight.whatEvidenceDoesNotShow,
+            whatItMeans: insight.whatItMeans,
+            whatWouldChangeConclusion: insight.whatWouldChangeConclusion,
+            watchItems: insight.watchItems,
+          },
+        };
+      }
+      case "WATCH_NEXT": {
+        const agg = this.getResearch(researchRef);
+        const items = agg.watchNext ?? [];
+        const requested = requestedSourceRef?.trim() ?? "";
+        const match = /^(?:watch[_-]?)?(\d+)$/i.exec(requested);
+        const index = match !== null ? Number(match[1]) : 0;
+        const text = items[index];
+        if (text === undefined) {
+          throw new InvalidRequestError("this run has no watch-next item at the requested index");
+        }
+        return {
+          title: "Watch next",
+          summary: text,
+          content: text,
+          sourceRef: `watch_${index}`,
+          derivedFromRefs: [researchRef],
+          snapshot: { index, text },
+        };
+      }
+    }
+  }
+
+  /** Origin/provenance context for a saved artifact (never invented; unavailable is honest). */
+  private savedOrigin(researchRef: string | undefined, includeTier: boolean): SavedOriginDTO {
+    if (researchRef === undefined) return { available: false };
+    const r = this.ws().getResearch(researchRef);
+    if (r === undefined) return { researchRef, available: false };
+    const question = r.userQuestion ?? (r.question !== "" ? r.question : r.objective);
+    const base: SavedOriginDTO = {
+      researchRef,
+      ...(question !== "" ? { question } : {}),
+      available: true,
+    };
+    if (!includeTier) return base;
+    try {
+      const agg = this.getResearch(researchRef);
+      return { ...base, createdAt: agg.createdAt, recordTier: agg.recordTier, degraded: agg.degraded };
+    } catch {
+      return base;
+    }
   }
 
   /** Memory with explicit status; STALE/HISTORICAL are returned, never merged away. */

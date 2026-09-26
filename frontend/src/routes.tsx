@@ -2,6 +2,7 @@ import { Routes, Route } from "react-router-dom";
 import { LandingPage } from "./pages/LandingPage.js";
 import { HomePage } from "./pages/HomePage.js";
 import { HistoryPage } from "./pages/HistoryPage.js";
+import { SavedPage } from "./pages/SavedPage.js";
 import { ResearchWorkspacePage } from "./pages/ResearchWorkspacePage.js";
 import { ActiveResearchPage } from "./pages/ActiveResearchPage.js";
 import { EvidencePage } from "./pages/EvidencePage.js";
@@ -17,6 +18,7 @@ export function AppRoutes() {
       <Route path="/" element={<LandingPage />} />
       <Route path="/home" element={<HomePage />} />
       <Route path="/history" element={<HistoryPage />} />
+      <Route path="/saved" element={<SavedPage />} />
       <Route path="/research" element={<ResearchWorkspacePage />} />
       <Route path="/research/:ref" element={<ResearchWorkspacePage />} />
       <Route path="/research/active" element={<ActiveResearchPage />} />

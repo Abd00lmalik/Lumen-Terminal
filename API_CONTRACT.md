@@ -7,7 +7,18 @@
 **Hard rules baked into the surface:**
 - The client sends **natural language only**; never a flow name or action. Flow classification is internal LUI routing (the locked six actions remain the action model).
 - Gemini and Bitget are reachable **only inside the API process**. No key appears in any response or event.
-- There is **no endpoint that mutates memory/artifacts/theses directly**. SAVE runs through the LUI authorization boundary; thesis selection goes through the domain (`setActiveThesis`); monitor activation goes through the domain's trader-confirmation boundary.
+- The only endpoints that mutate persistent state directly are the **explicit SAVE/UNSAVE of a saved artifact** (`POST /api/saved`, `DELETE /api/saved/:savedId`): a trader's deliberate action, resolved against the real graph and confirmed only after the write succeeds. Everything else goes through a boundary: natural-language SAVE and memory promotion run through the LUI authorization boundary; thesis selection goes through the domain (`setActiveThesis`); monitor activation goes through the domain's trader-confirmation boundary.
+
+## Saved workspace (Phase C)
+
+HISTORY is everything Lumen researched; SAVED is exactly what the trader chose to keep. No completed run is auto-saved.
+
+- `kind` is a closed vocabulary: `RESEARCH | JUDGMENT | EVIDENCE | INSIGHT | WATCH_NEXT`.
+- Every artifact retains its origin: `researchRef` (the originating run) plus `sourceRef` (the exact originating judgment/evidence ref, `insight`, or `watch_<index>`). An origin-less saved fact is never created by this endpoint.
+- **Identity / idempotency:** `researchRef` + `kind` + `sourceRef`. Saving the same artifact twice returns the same `savedId` (updated in place; never an uncontrolled duplicate). Title/question text is not identity.
+- **DTOs:** library rows are `SavedItemSummaryDTO` (no body dump); `GET /api/saved/:savedId` returns `SavedItemDTO` with `content`, `snapshot`, `derivedFromRefs`, `provenance[]` and `origin` (question/date/`recordTier`/`degraded`/`available`). Internal workspace structures are never leaked.
+- **Failure semantics:** a failed write returns `500 PERSISTENCE_FAILURE` and rolls back the in-memory mutation; the response never claims "saved" unless the durable write actually succeeded. Unsave records a tombstone so a stale instance's later merge cannot resurrect the artifact.
+- **Read freshness:** `GET /api/saved` and `GET /api/saved/:savedId` refresh the Saved collection from the durable store before answering (a warm serverless instance can otherwise serve a library that omits another instance's SAVE/UNSAVE). Idempotency therefore also holds across instances: the same identity SAVEd on two instances converges on one `savedId`. The refresh is scoped to Saved; a transient store read failure degrades to local state rather than failing the read.
 - There is **no trading/execution endpoint**; the workbench is research-only.
 - **No background monitoring exists.** Monitor state is persistent handoff representation only.
 
@@ -32,7 +43,11 @@
 | POST | `/api/thesis/select` | Set the active thesis (working state via the domain; persisted). Body: `{"thesisRef": string}`. | 400 / 404 |
 | GET | `/api/assessments?thesisRef=` | Assessment history (optionally per thesis). | 404 if no session |
 | GET | `/api/memory` | Memory entries with explicit `status` (CURRENT/STALE/HISTORICAL). | 404 if no session |
-| GET | `/api/artifacts` | Saved artifacts (SAVE products). | 404 if no session |
+| GET | `/api/artifacts` | Saved artifacts (SAVE products; legacy continuity surface). | 404 if no session |
+| GET | `/api/saved` | Saved library: ONE row per kept artifact, newest first, windowed/filterable (`?limit&offset&sort=recent|oldest&kind&q`). | 400 bad window/kind / 404 if no session |
+| GET | `/api/saved/:savedId` | One saved artifact + its provenance/origin context. | 404 |
+| POST | `/api/saved` | Explicit SAVE. Body `{researchRef, kind, sourceRef?, tags?, rationale?}`. Idempotent per originating artifact. | 400 / 404 / 500 PERSISTENCE_FAILURE |
+| DELETE | `/api/saved/:savedId` | Explicit UNSAVE. Removes only the saved artifact; the original research is untouched. | 404 / 500 PERSISTENCE_FAILURE |
 | GET | `/api/monitors` | Monitors grouped by lifecycle: `proposals` / `active` / `paused` / `stale` / `completed`. | 404 if no session |
 | POST | `/api/monitors/:ref/activate` | Activate a monitor through the domain's trader boundary (local single-trader MVP). Still no background worker. | 400 / 404 |
 

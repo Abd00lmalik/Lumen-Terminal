@@ -68,6 +68,15 @@ export function mergeSnapshots(local: WorkspaceSnapshot, remote: WorkspaceSnapsh
         ? remote.activeThesisId
         : undefined;
 
+  // Phase C unsave tombstones: union both sides, then DROP any saved artifact whose id the
+  // trader explicitly unsaved. Without this a stale instance's union would resurrect a
+  // removed artifact (the merge is per-object last-write-wins, not a deletion system).
+  const mergedTombstones = new Map<string, string>();
+  for (const t of remote.savedTombstones ?? []) mergedTombstones.set(t.id, t.at);
+  for (const t of local.savedTombstones ?? []) mergedTombstones.set(t.id, t.at);
+  const mergedSavedArtifacts = mergeById(local.savedArtifacts, remote.savedArtifacts)
+    .filter((a) => !mergedTombstones.has(a.id));
+
   return {
     researches: mergeById(local.researches, remote.researches),
     sources: mergeById(local.sources, remote.sources),
@@ -78,7 +87,10 @@ export function mergeSnapshots(local: WorkspaceSnapshot, remote: WorkspaceSnapsh
     judgments: mergeById(local.judgments, remote.judgments),
     branches: mergeById(local.branches, remote.branches),
     theses: mergedTheses,
-    savedArtifacts: mergeById(local.savedArtifacts, remote.savedArtifacts),
+    savedArtifacts: mergedSavedArtifacts,
+    ...(mergedTombstones.size > 0
+      ? { savedTombstones: [...mergedTombstones.entries()].map(([id, at]) => ({ id, at })) }
+      : {}),
     memories: mergeById(local.memories, remote.memories),
     monitors: mergeById(local.monitors, remote.monitors),
     thesisAssessments: [...(remote.thesisAssessments ?? []), ...(local.thesisAssessments ?? [])],

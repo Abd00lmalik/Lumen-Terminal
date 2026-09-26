@@ -33,6 +33,7 @@ import {
 import { validateModelOutput } from "../model/provider.js";
 import type { Workspace } from "../domain/workspace.js";
 import type { SavedArtifact, Thesis } from "../domain/thesis.js";
+import { isSavedKind, legacyKindFromType, type SavedKind } from "../domain/thesis.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
 import { resolveInstrument, questionNamesAsset } from "../domain/instruments.js";
 import type { WorkspaceStore } from "../persistence/index.js";
@@ -103,7 +104,8 @@ const MONITOR_SCHEMA_DESC = [
 ].join("\n");
 
 const SAVE_SCHEMA_DESC = [
-  '{"artifactType": string, "content": string, "derivedFromRefs": string[], "rationale": string}',
+  '{"artifactType": string, "content": string, "derivedFromRefs": string[], "rationale": string,',
+  ' "kind": "RESEARCH"|"JUDGMENT"|"EVIDENCE"|"INSIGHT"|"WATCH_NEXT", "sourceRef": string}',
 ].join("\n");
 
 const STATE_CHANGE_SCHEMA_DESC = [
@@ -279,6 +281,8 @@ const MONITOR_SYSTEM = [
 const SAVE_SYSTEM = [
   "Prepare a SAVE proposal: promote the trader-validated content into persistent reusable memory.",
   "- artifactType: one of finding | research-conclusion | framework | preference | other.",
+  "- kind: the saved-artifact class: RESEARCH (the run's result), JUDGMENT (the conclusion), EVIDENCE (a specific observation), INSIGHT (the actionable insight), WATCH_NEXT (a watch item).",
+  "- sourceRef: the exact object ref being saved (a jd_/ev_ ref); empty when saving the run itself.",
   "- content: the exact content to persist (the trader's finding/conclusion, not your opinion).",
   "- derivedFromRefs: object refs from the provided context the artifact derives from; provenance, never invented.",
   "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
@@ -992,18 +996,41 @@ export class Lui {
         result.awaitingConfirmation = { status: "REQUIRED", stepIndex: 0, reason: "SAVE requires explicit trader confirmation before persistence" };
         return;
       }
-      const artifact = this.options.workspace.saveArtifact(
-        {
-          type: proposal.artifactType,
-          content: proposal.content ?? step.description,
-          derivedFromRefs,
-          rationale: proposal.rationale,
-          ...(ctx.researchRef !== undefined ? { researchRef: ctx.researchRef } : {}),
-          ...(ctx.thesis !== undefined ? { thesisRef: ctx.thesis.ref } : {}),
-        },
-        origin,
-        this.options.now?.(),
-      );
+      // Phase C: classify the SAVE into a saved-artifact kind. The model's `kind` wins when it
+      // is one of the closed vocabulary; otherwise the legacy artifactType maps onto a kind, so
+      // a pre-Phase-C model output still persists with a real classification.
+      const kind: SavedKind = isSavedKind(proposal.kind)
+        ? proposal.kind
+        : proposal.artifactType === "research-conclusion"
+          ? "JUDGMENT"
+          : legacyKindFromType(proposal.artifactType);
+      // sourceRef must be a REAL context object: never save against a ref the model invented.
+      const knownSource = proposal.sourceRef !== undefined && known.has(proposal.sourceRef) ? proposal.sourceRef : undefined;
+      const sourceRef = knownSource
+        ?? (kind === "JUDGMENT" ? ctx.judgment?.ref : kind === "EVIDENCE" ? derivedFromRefs[0] : undefined);
+      const content = proposal.content ?? step.description;
+      // ORIGIN LAW (Phase C): "save this" resolves the current active research context, so a
+      // research-anchored SAVE always carries a researchRef (the run the context is anchored
+      // to). Only a workspace with no research at all (a pure framework/preference SAVE) is
+      // origin-less, and that keeps the legacy create-new behavior.
+      const anchorRef = ctx.researchRef ?? ctx.currentResearchRef;
+      const input = {
+        kind,
+        type: proposal.artifactType,
+        title: content,
+        summary: content,
+        content,
+        derivedFromRefs,
+        rationale: proposal.rationale,
+        ...(anchorRef !== undefined ? { researchRef: anchorRef } : {}),
+        ...(sourceRef !== undefined ? { sourceRef } : {}),
+        ...(ctx.thesis !== undefined ? { thesisRef: ctx.thesis.ref } : {}),
+      };
+      // Idempotent when research-anchored (same origin + kind + source); a legacy origin-less
+      // SAVE keeps create-new semantics.
+      const artifact = anchorRef !== undefined
+        ? this.options.workspace.upsertSavedArtifact(input, origin, this.options.now?.()).artifact
+        : this.options.workspace.saveArtifact(input, origin, this.options.now?.());
       result.saved = artifact;
       // M5 §4: SAVE promotes the artifact into PERSISTENT RESEARCH MEMORY (the existing
       // saveArtifact is the record; the memory entry is the continuity layer with decay and
@@ -1017,7 +1044,7 @@ export class Lui {
           category: memoryCategory,
           content: artifact.content,
           artifactRef: artifact.id,
-          ...(ctx.researchRef !== undefined ? { sourceResearchRef: ctx.researchRef } : {}),
+          ...(anchorRef !== undefined ? { sourceResearchRef: anchorRef } : {}),
           ...(ctx.thesis !== undefined ? { thesisRef: ctx.thesis.ref } : {}),
           contextTags: [],
         },

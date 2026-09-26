@@ -19,11 +19,12 @@ import {
 import { evidenceFromDto, judgmentFromDto } from "../data/adapters.js";
 import { isResearchRef, preferTurn, runOpenRef, turnIdentity } from "../data/identity.js";
 import { isExpandedTurn, railBelongsToActive, selectActiveTurnRef } from "./researchView.js";
-import { ApiError, getWorkspace, listResearch, getResearch } from "../api/index.js";
+import { ApiError, getWorkspace, listResearch, getResearch, listSaved, createSaved, deleteSaved } from "../api/index.js";
+import { savedKey } from "../data/saved.js";
 import type { EvidenceItem, JudgmentView, ThesisView } from "../data/types.js";
 import type {
   ResearchResponseDto, ResearchDto, ContinuitySnapshotDto, HistoricalAnalysisDto,
-  ResearchRecordTierDto, QuestionResolutionDto,
+  ResearchRecordTierDto, QuestionResolutionDto, SavedKindDto,
 } from "../api/index.js";
 import { useResearchStream } from "../hooks/useResearchStream.js";
 
@@ -55,6 +56,14 @@ interface Turn {
   readonly degraded?: boolean;
   /** How completely this run could be reconstructed: FULL | JUDGMENT | SUMMARY. */
   readonly recordTier?: ResearchRecordTierDto;
+}
+
+/** Contextual SAVE/UNSAVE wiring passed to a rendered run (no wall of global buttons). */
+interface SaveContext {
+  /** identity key (research + kind + source) → savedId, for SAVE vs SAVED state. */
+  readonly savedIndex: ReadonlyMap<string, string>;
+  readonly onSave: (runRef: string, kind: SavedKindDto, sourceRef?: string) => void;
+  readonly onUnsave: (savedId: string) => void;
 }
 
 /**
@@ -149,8 +158,58 @@ export function ResearchWorkspacePage() {
   const [submitting, setSubmitting] = useState(false);
   const [runs, setRuns] = useState<readonly Turn[]>([]);
   const [ws, setWs] = useState<WorkspaceData>({ evidence: [], judgment: undefined, thesis: undefined, snapshot: undefined, loadError: undefined as unknown });
+  const [savedIndex, setSavedIndex] = useState<Map<string, string>>(new Map());
+  const [saveError, setSaveError] = useState<string | undefined>(undefined);
   const { state: stream, submit } = useResearchStream();
   const askedFromHome = useRef(""); // guards double-submission of a home-hero example in StrictMode
+
+  // The saved-artifact index (identity → savedId) is loaded from the backend, never inferred;
+  // it drives the SAVE/SAVED/UNSAVE state on every contextual control.
+  const refreshSaved = useCallback(async () => {
+    try {
+      const rows = await listSaved({ limit: 200 });
+      const next = new Map<string, string>();
+      for (const row of rows) next.set(savedKey(row.researchRef, row.kind, row.sourceRef), row.savedId);
+      setSavedIndex(next);
+    } catch {
+      // A failed read leaves the controls in an honest unknown state (offered to save again);
+      // it never falsely shows SAVED.
+    }
+  }, []);
+
+  useEffect(() => { void refreshSaved(); }, [refreshSaved]);
+
+  const saveTarget = useCallback(async (runRef: string, kind: SavedKindDto, sourceRef?: string): Promise<void> => {
+    setSaveError(undefined);
+    try {
+      const dto = await createSaved({ researchRef: runRef, kind, ...(sourceRef !== undefined ? { sourceRef } : {}) });
+      setSavedIndex((prev) => new Map(prev).set(savedKey(runRef, kind, sourceRef), dto.savedId));
+    } catch (err) {
+      // Persistence failure never reads as "Saved": the control stays unsaved and the honest
+      // typed failure is shown.
+      setSaveError(err instanceof ApiError ? `Not saved: ${err.code} · ${err.message}` : `Not saved: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, []);
+
+  const unsaveTarget = useCallback(async (savedId: string): Promise<void> => {
+    setSaveError(undefined);
+    try {
+      await deleteSaved(savedId);
+      setSavedIndex((prev) => {
+        const next = new Map(prev);
+        for (const [key, id] of next) if (id === savedId) next.delete(key);
+        return next;
+      });
+    } catch (err) {
+      setSaveError(err instanceof ApiError ? `Not unsaved: ${err.code} · ${err.message}` : `Not unsaved: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, []);
+
+  const saveContext: SaveContext = {
+    savedIndex,
+    onSave: (runRef, kind, sourceRef) => void saveTarget(runRef, kind, sourceRef),
+    onUnsave: (savedId) => void unsaveTarget(savedId),
+  };
 
   // Every terminal stream event lands as a visible turn: success shows the backend's DTO;
   // typed errors (including a lost connection) render honest failure turns. Nothing leaves
@@ -561,6 +620,8 @@ export function ResearchWorkspacePage() {
         <BackendDownNote error={ws.loadError}> No mock content is shown in its place.</BackendDownNote>
       )}
 
+      {saveError !== undefined && <Note tone="warn">{saveError}</Note>}
+
       {stream.running && (
         <Panel kicker="research running" title={stream.question}>
           <div className="panel-body" style={{ paddingTop: 6 }}>
@@ -601,7 +662,7 @@ export function ResearchWorkspacePage() {
         // request id (failure turns). Never a UUID where a ref is expected.
         const identity = turnIdentity({ requestId: turn.run.requestId, ...(turn.run.researchRef !== undefined ? { researchRef: turn.run.researchRef } : {}) });
         if (isExpandedTurn(turnIdentified, activeRef, stream.running)) {
-          return <RunView key={identity} turn={turn} evidenceById={evidenceById} onInspectEvidence={() => navigate("/evidence")} onConfirm={() => void ask(turn.question, true)} />;
+          return <RunView key={identity} turn={turn} evidenceById={evidenceById} onInspectEvidence={() => navigate("/evidence")} onConfirm={() => void ask(turn.question, true)} save={saveContext} />;
         }
         // Archival row: a previous research stays reachable, but never occupies the active
         // area while a new question is being researched. The open affordance navigates with
@@ -628,13 +689,35 @@ export function ResearchWorkspacePage() {
   );
 }
 
-function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
+function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
   turn: Turn;
   evidenceById: Map<string, EvidenceItem>;
   onInspectEvidence: () => void;
   onConfirm: () => void;
+  save: SaveContext;
 }) {
   const run = turn.run;
+  const runRef = run.researchRef;
+  // Contextual save control(s) render only when the run has a research identity (a transport
+  // failure turn has nothing to save). One control per artifact, near the artifact itself.
+  const saveControl = (kind: SavedKindDto, sourceRef: string | undefined, label: string) => {
+    if (runRef === undefined || !isResearchRef(runRef)) return null;
+    const identity = savedKey(runRef, kind, sourceRef);
+    const savedId = save.savedIndex.get(identity);
+    if (savedId !== undefined) {
+      return (
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+          <span className="badge blue" title={`${label} is saved`}>saved</span>
+          <button className="btn sm ghost" onClick={() => save.onUnsave(savedId)}>unsave</button>
+        </span>
+      );
+    }
+    return (
+      <button className="btn sm ghost" title={`Save ${label} to your library`} onClick={() => save.onSave(runRef, kind, sourceRef)}>
+        save
+      </button>
+    );
+  };
   const supporting = run.answer.supportingReasons;
   const opposing = run.answer.opposingReasons;
 
@@ -675,7 +758,10 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
         <section className="surface-judgment" aria-label="Research judgment">
           <div className="judgment-head">
             <span className="judgment-kicker">Judgment · {run.action.toLowerCase()}</span>
-            <ConfidenceMeter confidence={run.answer.confidence} />
+            <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+              <ConfidenceMeter confidence={run.answer.confidence} />
+              {saveControl("RESEARCH", undefined, "this research")}
+            </span>
           </div>
           <p className="verdict">{run.answer.answer}</p>
           {run.answer.keyUncertainty.length > 0 && (
@@ -720,7 +806,7 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
           show, what it means, and what would change the conclusion. Never trade
           instructions; the trader keeps the decision. */}
       {insight !== undefined && (insight.whatItMeans.length > 0 || insight.whatEvidenceShows.length > 0) && (
-        <Panel kicker="actionable insight" title="What this means for you">
+        <Panel kicker="actionable insight" title="What this means for you" right={saveControl("INSIGHT", "insight", "this insight")}>
           <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {insight.whatItMeans.length > 0 && (
               <div style={{ fontSize: 14, lineHeight: 1.65 }}>{insight.whatItMeans}</div>
@@ -782,6 +868,7 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
                       <FreshnessBadge freshness={item.freshness} />
                       {item.proxyBasis !== undefined && <ProxyNote basis={item.proxyBasis} />}
                       <span className="ev-time mono">{item.ref} · {timeAgo(item.observedAt)}</span>
+                      {saveControl("EVIDENCE", e.ref, "this evidence")}
                     </div>
                     {item.eventTimestamp !== undefined && (
                       <div className="ev-time mono" style={{ marginTop: 4 }}>observed: {item.eventTimestamp}</div>
@@ -838,6 +925,7 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
               <div className="finding" key={i} style={{ background: "none" }}>
                 <span className="tick" aria-hidden>◇</span>
                 <span>{w}</span>
+                {saveControl("WATCH_NEXT", `watch_${i}`, "this watch item")}
               </div>
             ))}
           </div>
@@ -857,6 +945,7 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm }: {
                   <span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)" }}>{j.ref}</span>
                   <StatusBadge status={j.status} />
                   {j.confidence !== undefined && <ConfidenceMeter confidence={j.confidence} />}
+                  {saveControl("JUDGMENT", j.ref, "this judgment")}
                 </div>
                 <div style={{ fontSize: 13, marginTop: 4 }}>{j.statement}</div>
                 {j.uncertainty.length > 0 && (

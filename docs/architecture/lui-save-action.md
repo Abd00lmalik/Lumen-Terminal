@@ -1012,3 +1012,28 @@ The system preserves history rather than silently overwriting meaningful prior s
 
 ```
 ```
+
+---
+
+## Phase C implementation note (2026-09-26); the Saved workspace
+
+This note records how SAVE is implemented in the running product; the semantics above are unchanged.
+
+**Saved vs History.** HISTORY is every research run Lumen performed. SAVED is only what the trader explicitly chose to keep. Nothing is auto-saved.
+
+**Typed artifact kinds.** A saved artifact carries a closed `kind`: `RESEARCH | JUDGMENT | EVIDENCE | INSIGHT | WATCH_NEXT`. No additional artifact types are invented.
+
+**SAVE is explicit and the LLM is never proof of persistence.**
+
+- **UI/API path:** `POST /api/saved` is the trader's typed action. The application layer resolves the target against the real graph, snapshots the actual persisted content, upserts (idempotent), persists, and only then confirms. A failed write returns `500 PERSISTENCE_FAILURE`, rolls the in-memory mutation back, and never reports "saved".
+- **Natural-language path:** the LUI still interprets SAVE, validates the proposed target/refs (invented refs dropped), and requires the origin to record explicit trader confirmation. A confirmed research-anchored SAVE carries the `researchRef` of the run the context is anchored to (so no origin-less saved fact), and is idempotent. An unconfirmed SAVE halts and persists nothing.
+
+**Identity.** `researchRef` + `kind` + `sourceRef` (the exact originating judgment/evidence ref, `insight`, or `watch_<index>`). Title/question text is never identity. Repeating a SAVE returns the existing artifact instead of duplicating it.
+
+**Provenance.** ORIGINAL RESEARCH → SAVED ARTIFACT; SOURCE → RETRIEVAL → EVIDENCE → SAVED EVIDENCE; EVIDENCE → ANALYSIS → JUDGMENT → SAVED JUDGMENT. Saving never upgrades an interpretation into an observation or an inference into a fact; `snapshot` holds the content AS the originating artifact already classified it.
+
+**Unsave.** Explicit, removes only the saved artifact, and records a tombstone so a stale instance's later merge cannot resurrect it. The original research, evidence, judgment, memory, thesis and monitor are never touched.
+
+**Persistence.** Saved artifacts live inside the existing workspace snapshot (no new database, no browser-local source of truth); they survive refresh, browser restart, cold start, function restart and multi-instance writes under the Phase B concurrency rules.
+
+**Cross-instance read freshness.** A warm serverless instance loads its workspace once, so another instance's SAVE/UNSAVE lives only in the durable blob. The library read paths refresh ONLY the Saved collection from the store before answering (`Workspace.absorbSavedState`; tombstones win, newer `updatedAt` replaces, local-only artifacts are never dropped) via `WorkspaceStore.loadFresh()` where the store caches reads. This keeps Saved honest without ever reloading — and so never clobbering — an in-flight research run.
