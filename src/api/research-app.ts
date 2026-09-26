@@ -19,8 +19,8 @@ import type { CapabilityRegistry } from "../adapters/capability-registry.js";
 import type { WorkspaceStore } from "../persistence/index.js";
 import { Workspace, type WorkspaceSnapshot } from "../domain/workspace.js";
 import type { Research } from "../domain/objects.js";
-import type { SavedArtifact, SavedKind } from "../domain/thesis.js";
-import { isSavedKind, SAVED_KINDS } from "../domain/thesis.js";
+import type { SavedArtifact, SavedKind, ThesisStatus } from "../domain/thesis.js";
+import { isSavedKind, SAVED_KINDS, reviseThesis } from "../domain/thesis.js";
 import { newId, idPrefixes } from "../domain/ids.js";
 import { beginRun, endRun } from "../domain/run-context.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
@@ -50,6 +50,13 @@ export interface SavedListOptions {
   readonly sort?: "recent" | "oldest";
   /** Exact Phase C kind filter (RESEARCH | JUDGMENT | EVIDENCE | INSIGHT | WATCH_NEXT). */
   readonly kind?: string;
+  /**
+   * Phase D: exact originating-run filter. Answers "what did I save from this research?".
+   * Uses the artifact's existing `researchRef` identity field; a syntactically valid but
+   * unknown ref returns an honest empty list, never fabricated data, and never cross-run
+   * leakage. Applied SERVER-SIDE so the client never fetches the whole library to filter.
+   */
+  readonly researchRef?: string;
   readonly q?: string;
 }
 
@@ -60,6 +67,40 @@ export interface SavedCreateRequest {
   readonly sourceRef?: string;
   readonly tags?: readonly string[];
   readonly rationale?: string;
+}
+
+/** Thesis list window (?status&q). */
+export interface ThesisListOptions {
+  readonly status?: string;
+  readonly q?: string;
+}
+
+/**
+ * Explicit thesis CREATE (Phase D). The statement is trader material and may be derived VERBATIM
+ * from a chosen source: a research run's answer (`researchRef`) or a saved artifact's content
+ * (`savedId`). Never an LLM paraphrase.
+ */
+export interface ThesisCreateRequest {
+  readonly title?: string;
+  readonly statement?: string;
+  readonly objective?: string;
+  readonly asset?: string;
+  readonly researchRef?: string;
+  readonly savedId?: string;
+  readonly invalidationConditions?: readonly string[];
+  readonly materialConditions?: readonly string[];
+}
+
+/** Explicit trader thesis UPDATE. Only trader-owned fields; never a silent system rewrite. */
+export interface ThesisUpdateRequest {
+  readonly title?: string;
+  readonly statement?: string;
+  readonly objective?: string;
+  readonly asset?: string;
+  readonly invalidationConditions?: readonly string[];
+  readonly materialConditions?: readonly string[];
+  readonly alternatives?: readonly string[];
+  readonly confidence?: "HIGH" | "MODERATE" | "LOW";
 }
 
 export interface ResearchAppOptions {
@@ -819,16 +860,228 @@ export class ResearchApp {
     return this.ws().listJudgments().map(judgmentToDTO);
   }
 
-  // Thesis workspace ---------------------------------------------------
+  // Thesis workspace (Phase D) -----------------------------------------
 
-  listTheses() {
-    return this.ws().listTheses().map((t) => ({ ...thesisToDTO(t), isActive: t.id === this.ws().getActiveThesis()?.id }));
+  /**
+   * Thesis freshness on multi-instance production (Saved had the same law via refreshSaved).
+   * A warm serverless instance loads the workspace ONCE; another instance's explicit thesis
+   * write (create/update/status/link/unlink) then lives only in the blob, so this graph would
+   * serve a stale thesis view forever. Scoped to Thesis — never a whole-graph reload — so an
+   * in-flight research run is never clobbered. A read hiccup degrades to the local state (the
+   * view must still render).
+   */
+  private async refreshTheses(): Promise<void> {
+    const workspace = this.workspace;
+    if (workspace === undefined) return;
+    let fresh: Workspace | undefined;
+    try {
+      fresh = this.options.store.loadFresh !== undefined
+        ? await this.options.store.loadFresh()
+        : await this.options.store.load();
+    } catch {
+      return; // transient store read failure: serve what we hold, never fail the read
+    }
+    if (fresh === undefined) return;
+    workspace.absorbThesisState(fresh.toSnapshot());
   }
 
-  getThesis(ref: string) {
+  /** Bounded list window: exact status filter + case-insensitive substring search. */
+  private static readonly THESIS_STATUSES = new Set([
+    "DRAFT", "ACTIVE", "CONFIRMED", "WEAKENED", "REJECTED", "INVALIDATED", "PAUSED", "SUPERSEDED", "ARCHIVED",
+  ]);
+
+  async listTheses(options: ThesisListOptions = {}) {
+    await this.refreshTheses();
+    const activeId = this.ws().getActiveThesis()?.id;
+    let rows = this.ws().listTheses().map((t) => ({ ...thesisToDTO(t), isActive: t.id === activeId }));
+    const wanted = options.status?.trim().toUpperCase();
+    if (wanted !== undefined && wanted.length > 0) rows = rows.filter((r) => r.status === wanted);
+    const needle = options.q?.trim().toLowerCase();
+    if (needle !== undefined && needle.length > 0) {
+      rows = rows.filter((r) =>
+        [r.title, r.statement, r.objective, r.asset]
+          .some((text) => text !== undefined && text.toLowerCase().includes(needle)),
+      );
+    }
+    return rows;
+  }
+
+  async getThesis(ref: string) {
+    await this.refreshTheses();
     const t = this.ws().getThesis(ref);
     if (t === undefined) throw new NotFoundError("thesis");
-    return { ...thesisToDTO(t), isActive: t.id === this.ws().getActiveThesis()?.id, assessments: this.ws().listThesisAssessments(ref).map(thesisAssessmentToDTO) };
+    return {
+      ...thesisToDTO(t),
+      isActive: t.id === this.ws().getActiveThesis()?.id,
+      assessments: this.ws().listThesisAssessments(ref).map(thesisAssessmentToDTO),
+      linkedResearch: this.linkedResearchRows(t.linkedResearchRefs),
+      linkedSaved: this.linkedSavedRows(t.linkedSavedIds),
+    };
+  }
+
+  /** Resolve linked research REFS to compact run rows; unavailable refs are honest, never fabricated. */
+  private linkedResearchRows(refs: readonly string[]) {
+    if (refs.length === 0) return [];
+    const rows = this.listResearch({});
+    return refs.map((ref) => {
+      const row = rows.find((r) => r.ref === ref || (r.internalRefs ?? []).includes(ref));
+      if (row === undefined) return { researchRef: ref, available: false as const };
+      return {
+        researchRef: row.ref,
+        ...(row.question !== undefined ? { question: row.question } : {}),
+        status: row.status,
+        createdAt: row.createdAt,
+        degraded: row.degraded === true,
+        available: true as const,
+      };
+    });
+  }
+
+  /** Resolve attached savedIds to summary rows; an unsaved artifact stays visible as unavailable. */
+  private linkedSavedRows(savedIds: readonly string[]) {
+    const ws = this.ws();
+    return savedIds.map((savedId) => {
+      const artifact = ws.getSavedArtifact(savedId);
+      if (artifact === undefined) return { savedId, available: false as const };
+      return { ...savedArtifactToSummaryDTO(artifact, this.savedOrigin(artifact.researchRef, false)), available: true as const };
+    });
+  }
+
+  /**
+   * Create a thesis from RESEARCH, from a SAVED artifact, or from a natural-language statement.
+   * The statement is trader material: it is never silently rewritten, and the statement that is
+   * persisted is exactly the one supplied or the one derived VERBATIM from the chosen source
+   * (the run's answer, or the saved artifact's content) — never an LLM paraphrase.
+   */
+  async createThesis(input: ThesisCreateRequest) {
+    const ws = this.ws();
+    let statement = typeof input.statement === "string" ? input.statement.trim() : "";
+    const linkedResearchRefs: string[] = [];
+    const linkedSavedIds: string[] = [];
+    let asset = typeof input.asset === "string" && input.asset.trim() !== "" ? input.asset.trim() : undefined;
+
+    if (input.researchRef !== undefined) {
+      const research = ws.getResearch(input.researchRef);
+      if (research === undefined) throw new NotFoundError("research");
+      const runRef = this.listResearch({}).find((r) => r.ref === input.researchRef || (r.internalRefs ?? []).includes(input.researchRef!))?.ref ?? research.id;
+      linkedResearchRefs.push(runRef);
+      if (statement === "") {
+        const record = this.findRunRecord(runMembers(ws.listResearch(), research).map((m) => m.id));
+        const derived = record?.answer?.answer ?? (research.question !== "" ? research.question : research.objective);
+        statement = preview(derived);
+      }
+    }
+
+    if (input.savedId !== undefined) {
+      const artifact = ws.getSavedArtifact(input.savedId);
+      if (artifact === undefined) throw new NotFoundError("saved artifact");
+      linkedSavedIds.push(input.savedId);
+      if (artifact.researchRef !== undefined && !linkedResearchRefs.includes(artifact.researchRef)) linkedResearchRefs.push(artifact.researchRef);
+      if (statement === "") statement = preview(artifact.content);
+    }
+
+    if (statement === "") {
+      throw new InvalidRequestError("a thesis statement is required (or supply a researchRef/savedId to derive it from)");
+    }
+
+    const thesis = ws.addThesis(
+      {
+        ...(typeof input.title === "string" && input.title.trim() !== "" ? { title: input.title.trim() } : {}),
+        statement,
+        objective: typeof input.objective === "string" && input.objective.trim() !== "" ? input.objective.trim() : statement,
+        ...(asset !== undefined ? { asset } : {}),
+        ...(asset !== undefined ? { scope: { entities: [asset] } } : {}),
+        ...(input.invalidationConditions !== undefined ? { invalidationConditions: input.invalidationConditions } : {}),
+        ...(input.materialConditions !== undefined ? { materialConditions: input.materialConditions } : {}),
+        linkedResearchRefs,
+        linkedSavedIds,
+        userConfirmed: true, // the API caller IS the trader; the domain records the confirmation
+      },
+      TRADER_ORIGIN,
+    );
+    await this.persist();
+    return await this.getThesis(thesis.id);
+  }
+
+  /** Explicit trader update of a thesis. Only trader-owned fields; never a silent system rewrite. */
+  async updateThesis(ref: string, patch: ThesisUpdateRequest) {
+    const ws = this.ws();
+    if (ws.getThesis(ref) === undefined) throw new NotFoundError("thesis");
+    const changes: Parameters<typeof reviseThesis>[1] = {
+      ...(patch.title !== undefined ? { title: patch.title } : {}),
+      ...(patch.statement !== undefined ? { statement: patch.statement } : {}),
+      ...(patch.objective !== undefined ? { objective: patch.objective } : {}),
+      ...(patch.asset !== undefined ? { asset: patch.asset } : {}),
+      ...(patch.invalidationConditions !== undefined ? { invalidationConditions: patch.invalidationConditions } : {}),
+      ...(patch.materialConditions !== undefined ? { materialConditions: patch.materialConditions } : {}),
+      ...(patch.alternatives !== undefined ? { alternatives: patch.alternatives } : {}),
+      ...(patch.confidence !== undefined ? { confidence: patch.confidence } : {}),
+    };
+    if (Object.keys(changes).length === 0) throw new InvalidRequestError("no updatable thesis fields supplied");
+    const revised = ws.reviseThesis(ref, changes, TRADER_ORIGIN, "trader explicit update");
+    await this.persist();
+    return await this.getThesis(revised.id);
+  }
+
+  /** Deterministic lifecycle transition (validated by the domain's THESIS_TRANSITIONS). */
+  async setThesisStatus(ref: string, status: string) {
+    const wanted = typeof status === "string" ? status.trim().toUpperCase() : "";
+    if (!ResearchApp.THESIS_STATUSES.has(wanted)) {
+      throw new InvalidRequestError(`"status" must be one of ${[...ResearchApp.THESIS_STATUSES].join(", ")}`);
+    }
+    const ws = this.ws();
+    if (ws.getThesis(ref) === undefined) throw new NotFoundError("thesis");
+    try {
+      ws.transitionThesis(ref, wanted as ThesisStatus, TRADER_ORIGIN, "trader set thesis status");
+    } catch (error) {
+      throw new InvalidRequestError(error instanceof Error ? error.message : String(error));
+    }
+    await this.persist();
+    return this.getThesis(ref);
+  }
+
+  /** Archive (soft delete) a thesis. Never a hard delete; the record and its history stay. */
+  async archiveThesis(ref: string): Promise<{ archived: string }> {
+    const ws = this.ws();
+    const t = ws.getThesis(ref);
+    if (t === undefined) throw new NotFoundError("thesis");
+    if (t.status !== "ARCHIVED") ws.transitionThesis(ref, "ARCHIVED", TRADER_ORIGIN, "trader archived thesis");
+    await this.persist();
+    return { archived: ref };
+  }
+
+  /** Attach an EXISTING saved artifact to a thesis by reference (never duplicated). */
+  async linkThesisSaved(ref: string, savedId: string) {
+    await this.refreshSaved(); // the artifact must exist durably before we reference it
+    const ws = this.ws();
+    if (ws.getThesis(ref) === undefined) throw new NotFoundError("thesis");
+    try {
+      ws.linkThesisSaved(ref, savedId, TRADER_ORIGIN);
+    } catch {
+      throw new NotFoundError("saved artifact");
+    }
+    await this.persist();
+    return this.getThesis(ref);
+  }
+
+  async unlinkThesisSaved(ref: string, savedId: string) {
+    const ws = this.ws();
+    if (ws.getThesis(ref) === undefined) throw new NotFoundError("thesis");
+    ws.unlinkThesisSaved(ref, savedId, TRADER_ORIGIN);
+    await this.persist();
+    return this.getThesis(ref);
+  }
+
+  async linkThesisResearch(ref: string, researchRef: string) {
+    const ws = this.ws();
+    if (ws.getThesis(ref) === undefined) throw new NotFoundError("thesis");
+    try {
+      ws.linkThesisResearch(ref, researchRef, TRADER_ORIGIN);
+    } catch {
+      throw new NotFoundError("research");
+    }
+    await this.persist();
+    return this.getThesis(ref);
   }
 
   /** Selection only; routed through the domain (setActiveThesis), never direct thesis mutation. */
@@ -887,6 +1140,12 @@ export class ResearchApp {
     const wantedKind = options.kind?.trim().toUpperCase();
     const needle = options.q?.trim().toLowerCase();
     let rows = artifacts.map((a) => savedArtifactToSummaryDTO(a, this.savedOrigin(a.researchRef, false)));
+    // Phase D: exact originating-run filter (server-side). Composes with kind, search, sort and
+    // the window without changing any of them; no cross-run leakage by construction.
+    const wantedRun = options.researchRef?.trim();
+    if (wantedRun !== undefined && wantedRun.length > 0) {
+      rows = rows.filter((r) => r.researchRef === wantedRun);
+    }
     if (wantedKind !== undefined && wantedKind.length > 0) {
       rows = rows.filter((r) => r.kind === wantedKind);
     }

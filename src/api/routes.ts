@@ -7,7 +7,7 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { ResearchApp, TRADER_ORIGIN, MAX_RESEARCH_LIMIT, MAX_SAVED_LIMIT, type ResearchListOptions, type SavedListOptions } from "./research-app.js";
+import { ResearchApp, TRADER_ORIGIN, MAX_RESEARCH_LIMIT, MAX_SAVED_LIMIT, type ResearchListOptions, type SavedListOptions, type ThesisListOptions, type ThesisCreateRequest, type ThesisUpdateRequest } from "./research-app.js";
 import { ApiFailure, InvalidRequestError, mapApiError } from "./errors.js";
 import { formatSseEvent, sseHeaders, type SseEvent } from "./sse.js";
 import type { ProgressEvent } from "../research/progress.js";
@@ -100,12 +100,19 @@ function readSavedListOptions(query: unknown): SavedListOptions {
   if (kind !== undefined && !(SAVED_KINDS as readonly string[]).includes(kind.toUpperCase())) {
     throw new InvalidRequestError(`"kind" must be one of ${SAVED_KINDS.join(", ")}`);
   }
+  // Phase D: filter by originating run. A MALFORMED ref is a transport error (400); a
+  // well-formed but unknown ref is a valid empty result (the app layer never invents data).
+  const researchRef = text(q.researchRef) ?? text(q.research);
+  if (researchRef !== undefined && !/^rs_[A-Za-z0-9]+$/.test(researchRef)) {
+    throw new InvalidRequestError('"researchRef" must be a research ref of the form rs_<id>');
+  }
   const search = text(q.q) ?? text(q.search) ?? text(q.query);
   return {
     ...(limit !== undefined ? { limit } : {}),
     ...(offset !== undefined ? { offset } : {}),
     ...(sort !== undefined ? { sort } : {}),
     ...(kind !== undefined ? { kind } : {}),
+    ...(researchRef !== undefined ? { researchRef } : {}),
     ...(search !== undefined ? { q: search } : {}),
   };
 }
@@ -132,6 +139,80 @@ function readSavedCreate(body: unknown): { researchRef: string; kind: string; so
     ...(sourceRef !== undefined ? { sourceRef } : {}),
     ...(tags !== undefined ? { tags: tags as string[] } : {}),
     ...(rationale !== undefined ? { rationale } : {}),
+  };
+}
+
+/** Thesis list window (?status&q). */
+function readThesisListOptions(query: unknown): ThesisListOptions {
+  const q = (typeof query === "object" && query !== null ? query : {}) as Record<string, unknown>;
+  const status = typeof q.status === "string" && q.status.trim() !== "" ? q.status.trim().toUpperCase() : undefined;
+  const search = typeof q.q === "string" && q.q.trim() !== "" ? q.q.trim() : undefined;
+  return {
+    ...(status !== undefined ? { status } : {}),
+    ...(search !== undefined ? { q: search } : {}),
+  };
+}
+
+/** Optional string[] field; rejects non-string entries loudly. */
+function readStringArray(record: Record<string, unknown>, field: string): string[] | undefined {
+  const value = record[field];
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) {
+    throw new InvalidRequestError(`"${field}" must be a string array when present`);
+  }
+  return value as string[];
+}
+
+/** Explicit thesis CREATE payload; derivation from research/saved happens in the app layer. */
+function readThesisCreate(body: unknown): ThesisCreateRequest {
+  if (typeof body !== "object" || body === null) throw new InvalidRequestError("JSON object body required");
+  const record = body as Record<string, unknown>;
+  const str = (field: string): string | undefined => {
+    const v = record[field];
+    if (v === undefined) return undefined;
+    if (typeof v !== "string") throw new InvalidRequestError(`"${field}" must be a string when present`);
+    return v;
+  };
+  const invalidationConditions = readStringArray(record, "invalidationConditions");
+  const materialConditions = readStringArray(record, "materialConditions");
+  return {
+    ...(str("title") !== undefined ? { title: str("title")! } : {}),
+    ...(str("statement") !== undefined ? { statement: str("statement")! } : {}),
+    ...(str("objective") !== undefined ? { objective: str("objective")! } : {}),
+    ...(str("asset") !== undefined ? { asset: str("asset")! } : {}),
+    ...(str("researchRef") !== undefined ? { researchRef: str("researchRef")! } : {}),
+    ...(str("savedId") !== undefined ? { savedId: str("savedId")! } : {}),
+    ...(invalidationConditions !== undefined ? { invalidationConditions } : {}),
+    ...(materialConditions !== undefined ? { materialConditions } : {}),
+  };
+}
+
+/** Explicit thesis UPDATE payload (PATCH). */
+function readThesisUpdate(body: unknown): ThesisUpdateRequest {
+  if (typeof body !== "object" || body === null) throw new InvalidRequestError("JSON object body required");
+  const record = body as Record<string, unknown>;
+  const str = (field: string): string | undefined => {
+    const v = record[field];
+    if (v === undefined) return undefined;
+    if (typeof v !== "string") throw new InvalidRequestError(`"${field}" must be a string when present`);
+    return v;
+  };
+  const confidenceRaw = record.confidence;
+  if (confidenceRaw !== undefined && confidenceRaw !== "HIGH" && confidenceRaw !== "MODERATE" && confidenceRaw !== "LOW") {
+    throw new InvalidRequestError('"confidence" must be HIGH, MODERATE or LOW when present');
+  }
+  const invalidationConditions = readStringArray(record, "invalidationConditions");
+  const materialConditions = readStringArray(record, "materialConditions");
+  const alternatives = readStringArray(record, "alternatives");
+  return {
+    ...(str("title") !== undefined ? { title: str("title")! } : {}),
+    ...(str("statement") !== undefined ? { statement: str("statement")! } : {}),
+    ...(str("objective") !== undefined ? { objective: str("objective")! } : {}),
+    ...(str("asset") !== undefined ? { asset: str("asset")! } : {}),
+    ...(invalidationConditions !== undefined ? { invalidationConditions } : {}),
+    ...(materialConditions !== undefined ? { materialConditions } : {}),
+    ...(alternatives !== undefined ? { alternatives } : {}),
+    ...(confidenceRaw !== undefined ? { confidence: confidenceRaw as "HIGH" | "MODERATE" | "LOW" } : {}),
   };
 }
 
@@ -262,17 +343,90 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
   // Thesis workspace (F0 mandate §11); selection routed through the domain boundary only
   // ------------------------------------------------------------------
 
-  app.get("/api/thesis", { handler: withErrors(async () => researchApp.listTheses()) });
+  app.get("/api/thesis", {
+    handler: withErrors(async (req) => researchApp.listTheses(readThesisListOptions(req.query))),
+  });
   // Contract alias: the frontend client historically calls the plural path; both resolve
   // to the same handler so neither side's vocabulary can 404 the theses list.
-  app.get("/api/theses", { handler: withErrors(async () => researchApp.listTheses()) });
-  app.get("/api/thesis/:ref", {
-    handler: withErrors(async (req) => researchApp.getThesis((req.params as { ref: string }).ref)),
+  app.get("/api/theses", {
+    handler: withErrors(async (req) => researchApp.listTheses(readThesisListOptions(req.query))),
+  });
+
+  // Phase D: explicit thesis actions (create/update/status/archive/link). The API caller is the
+  // trader (local single-trader MVP); every write records TRADER_ORIGIN and persists. None of
+  // these let an LLM sentence mutate the trader's belief; only explicit trader calls do.
+  app.post("/api/thesis", async (req, reply) => {
+    try {
+      const out = await researchApp.createThesis(readThesisCreate(req.body));
+      return reply.code(201).send(out);
+    } catch (err) {
+      handleError(reply, err);
+    }
   });
   app.post("/api/thesis/select", async (req, reply) => {
     try {
       const ref = requireString(req.body, "thesisRef");
       const out = await researchApp.selectThesis(ref);
+      return reply.code(200).send(out);
+    } catch (err) {
+      handleError(reply, err);
+    }
+  });
+  app.get("/api/thesis/:ref", {
+    handler: withErrors(async (req) => researchApp.getThesis((req.params as { ref: string }).ref)),
+  });
+  app.patch("/api/thesis/:ref", async (req, reply) => {
+    try {
+      const ref = (req.params as { ref: string }).ref;
+      const out = await researchApp.updateThesis(ref, readThesisUpdate(req.body));
+      return reply.code(200).send(out);
+    } catch (err) {
+      handleError(reply, err);
+    }
+  });
+  app.delete("/api/thesis/:ref", async (req, reply) => {
+    try {
+      const ref = (req.params as { ref: string }).ref;
+      const out = await researchApp.archiveThesis(ref);
+      return reply.code(200).send(out);
+    } catch (err) {
+      handleError(reply, err);
+    }
+  });
+  app.post("/api/thesis/:ref/status", async (req, reply) => {
+    try {
+      const ref = (req.params as { ref: string }).ref;
+      const status = requireString(req.body, "status");
+      const out = await researchApp.setThesisStatus(ref, status);
+      return reply.code(200).send(out);
+    } catch (err) {
+      handleError(reply, err);
+    }
+  });
+  app.post("/api/thesis/:ref/link-saved", async (req, reply) => {
+    try {
+      const ref = (req.params as { ref: string }).ref;
+      const savedId = requireString(req.body, "savedId");
+      const out = await researchApp.linkThesisSaved(ref, savedId);
+      return reply.code(200).send(out);
+    } catch (err) {
+      handleError(reply, err);
+    }
+  });
+  app.delete("/api/thesis/:ref/link-saved/:savedId", async (req, reply) => {
+    try {
+      const { ref, savedId } = req.params as { ref: string; savedId: string };
+      const out = await researchApp.unlinkThesisSaved(ref, savedId);
+      return reply.code(200).send(out);
+    } catch (err) {
+      handleError(reply, err);
+    }
+  });
+  app.post("/api/thesis/:ref/link-research", async (req, reply) => {
+    try {
+      const ref = (req.params as { ref: string }).ref;
+      const researchRef = requireString(req.body, "researchRef");
+      const out = await researchApp.linkThesisResearch(ref, researchRef);
       return reply.code(200).send(out);
     } catch (err) {
       handleError(reply, err);

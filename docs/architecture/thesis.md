@@ -1196,3 +1196,33 @@ The trader decides whether the thesis changes.
 
 ```
 ```
+
+## Phase D implementation note (2026-09-26); the Thesis workspace
+
+This note records how the thesis is implemented in the running product; the semantics above are
+unchanged.
+
+**Reused model, extended.** The existing `Thesis` object (`src/domain/thesis.ts`) is extended, not
+duplicated: `title`, `asset`, `materialConditions`, `linkedResearchRefs`, `linkedSavedIds`, and
+`userConfirmed` are added (all optional-on-load and normalized for legacy records via
+`normalizeThesis`). Supporting/counterevidence are read from the latest `ThesisAssessmentRecord`,
+so evidence is never duplicated onto the thesis.
+
+**Ownership.** The statement and authoring fields are trader-owned. `reviseThesis` rejects a
+non-trader origin; a status change to `ACTIVE`/`CONFIRMED` rejects a non-trader origin. An
+assessment (`recordThesisAssessment`) never mutates the thesis object.
+
+**Deterministic lifecycle.** `THESIS_TRANSITIONS` is the single source of truth; the domain
+rejects any transition not listed and returns idempotently when the status is unchanged.
+
+**Confirmation.** `createThesis` sets `userConfirmed` from the caller (trader origin → ACTIVE/
+confirmed; agent origin → DRAFT/unconfirmed). The LUI's natural-language thesis creation is gated
+by the same origin-confirmation rule as SAVE/MONITOR: unconfirmed requests persist nothing.
+
+**Links by reference.** `linkThesisResearch` / `linkThesisSaved` store refs only and require the
+target to exist; `unlinkThesisSaved` removes a ref without touching the thesis. Unsaving a linked
+artifact leaves the thesis intact (the API reports the link as unavailable).
+
+**Persistence.** Theses live in the existing workspace snapshot under the Phase B concurrency
+rules (union merge, no eviction, legacy compatibility); `fromSnapshot` normalizes legacy theses
+and seeds id counters.

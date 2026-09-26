@@ -459,7 +459,7 @@ describe("SAVE authorization", () => {
 // Thesis exposure; read + selection only
 // ---------------------------------------------------------------------------
 describe("thesis exposure", () => {
-  it("exposes thesis, assessment history, and latest assessment; selection persists; no mutation endpoint", async () => {
+  it("exposes thesis, assessment history, and latest assessment; selection persists; explicit trader edit only", async () => {
     const provider = new FakeModelProvider(new Map());
     let thesisId = "";
     const { app } = await makeApp({
@@ -484,9 +484,12 @@ describe("thesis exposure", () => {
     expect(sel.statusCode).toBe(200);
     expect(sel.json().selected).toBe(thesisId);
 
-    // No thesis mutation endpoint: PATCH/PUT/DELETE must not exist.
-    const patch = await app.inject({ method: "PATCH", url: `/api/thesis/${thesisId}`, payload: { statement: "rewritten" } });
-    expect([404, 405]).toContain(patch.statusCode);
+    // Phase D: an EXPLICIT trader edit (PATCH) is allowed and carries trader provenance; there is
+    // still no silent system rewrite path (PUT is not implemented).
+    const patch = await app.inject({ method: "PATCH", url: `/api/thesis/${thesisId}`, payload: { statement: "rewritten by the trader" } });
+    expect(patch.statusCode).toBe(200);
+    expect(patch.json().statement).toBe("rewritten by the trader");
+    expect(patch.json().version).toBe(2); // versioned, prior version preserved
     const put = await app.inject({ method: "PUT", url: `/api/thesis/${thesisId}`, payload: { statement: "rewritten" } });
     expect([404, 405]).toContain(put.statusCode);
     await app.close();

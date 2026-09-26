@@ -16,15 +16,15 @@ import {
   Panel, ClassBadge, EpistemicRail, FreshnessBadge, ConfidenceMeter, StatusBadge,
   ProxyNote, UnavailableNote, KV, Note, Empty, timeAgo,
 } from "../components/ui.js";
-import { evidenceFromDto, judgmentFromDto } from "../data/adapters.js";
+import { evidenceFromDto, judgmentFromDto, thesisFromDto } from "../data/adapters.js";
 import { isResearchRef, preferTurn, runOpenRef, turnIdentity } from "../data/identity.js";
 import { isExpandedTurn, railBelongsToActive, selectActiveTurnRef } from "./researchView.js";
-import { ApiError, getWorkspace, listResearch, getResearch, listSaved, createSaved, deleteSaved } from "../api/index.js";
-import { savedKey } from "../data/saved.js";
+import { ApiError, getWorkspace, listResearch, getResearch, listSaved, createSaved, deleteSaved, createThesis } from "../api/index.js";
+import { savedKey, savedKindLabel } from "../data/saved.js";
 import type { EvidenceItem, JudgmentView, ThesisView } from "../data/types.js";
 import type {
   ResearchResponseDto, ResearchDto, ContinuitySnapshotDto, HistoricalAnalysisDto,
-  ResearchRecordTierDto, QuestionResolutionDto, SavedKindDto,
+  ResearchRecordTierDto, QuestionResolutionDto, SavedKindDto, SavedItemSummaryDto,
 } from "../api/index.js";
 import { useResearchStream } from "../hooks/useResearchStream.js";
 
@@ -62,8 +62,14 @@ interface Turn {
 interface SaveContext {
   /** identity key (research + kind + source) → savedId, for SAVE vs SAVED state. */
   readonly savedIndex: ReadonlyMap<string, string>;
+  /** Bumped on every successful save/unsave; re-fetches "Saved from this research". */
+  readonly savedSectionNonce: number;
   readonly onSave: (runRef: string, kind: SavedKindDto, sourceRef?: string) => void;
   readonly onUnsave: (savedId: string) => void;
+  /** Phase D: turn this run into a trader-owned thesis (explicit action; navigates on success). */
+  readonly onThesis: (runRef: string) => void;
+  /** Phase D: open a Saved artifact (navigates to the library with it selected). */
+  readonly onOpenSaved: (savedId: string) => void;
 }
 
 /**
@@ -159,6 +165,9 @@ export function ResearchWorkspacePage() {
   const [runs, setRuns] = useState<readonly Turn[]>([]);
   const [ws, setWs] = useState<WorkspaceData>({ evidence: [], judgment: undefined, thesis: undefined, snapshot: undefined, loadError: undefined as unknown });
   const [savedIndex, setSavedIndex] = useState<Map<string, string>>(new Map());
+  // "Saved from this research" must reflect saves as they happen, not just the state at page
+  // mount: every successful save/unsave bumps this counter and the section re-fetches.
+  const [savedSectionNonce, setSavedSectionNonce] = useState(0);
   const [saveError, setSaveError] = useState<string | undefined>(undefined);
   const { state: stream, submit } = useResearchStream();
   const askedFromHome = useRef(""); // guards double-submission of a home-hero example in StrictMode
@@ -184,6 +193,7 @@ export function ResearchWorkspacePage() {
     try {
       const dto = await createSaved({ researchRef: runRef, kind, ...(sourceRef !== undefined ? { sourceRef } : {}) });
       setSavedIndex((prev) => new Map(prev).set(savedKey(runRef, kind, sourceRef), dto.savedId));
+      setSavedSectionNonce((n) => n + 1);
     } catch (err) {
       // Persistence failure never reads as "Saved": the control stays unsaved and the honest
       // typed failure is shown.
@@ -200,15 +210,29 @@ export function ResearchWorkspacePage() {
         for (const [key, id] of next) if (id === savedId) next.delete(key);
         return next;
       });
+      setSavedSectionNonce((n) => n + 1);
     } catch (err) {
       setSaveError(err instanceof ApiError ? `Not unsaved: ${err.code} · ${err.message}` : `Not unsaved: ${err instanceof Error ? err.message : String(err)}`);
     }
   }, []);
 
+  const thesisFromResearch = useCallback(async (runRef: string): Promise<void> => {
+    setSaveError(undefined);
+    try {
+      const thesis = await createThesis({ researchRef: runRef });
+      navigate(`/thesis/${encodeURIComponent(thesis.ref)}`);
+    } catch (err) {
+      setSaveError(err instanceof ApiError ? `No thesis created: ${err.code} · ${err.message}` : `No thesis created: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [navigate]);
+
   const saveContext: SaveContext = {
     savedIndex,
+    savedSectionNonce,
     onSave: (runRef, kind, sourceRef) => void saveTarget(runRef, kind, sourceRef),
     onUnsave: (savedId) => void unsaveTarget(savedId),
+    onThesis: (runRef) => void thesisFromResearch(runRef),
+    onOpenSaved: (savedId) => navigate(`/saved?open=${encodeURIComponent(savedId)}`),
   };
 
   // Every terminal stream event lands as a visible turn: success shows the backend's DTO;
@@ -317,24 +341,7 @@ export function ResearchWorkspacePage() {
       setWs({
         evidence: snapshot.recentEvidence.map(evidenceFromDto),
         judgment: snapshot.currentJudgment !== undefined ? judgmentFromDto(snapshot.currentJudgment) : undefined,
-        thesis: snapshot.activeThesis !== undefined
-          ? {
-              ref: snapshot.activeThesis.ref,
-              statement: snapshot.activeThesis.statement,
-              objective: snapshot.activeThesis.objective,
-              version: snapshot.activeThesis.version,
-              claims: snapshot.activeThesis.claims.map((c: { statement: string; importance?: string }) => ({ statement: c.statement, importance: "SUPPORTING" as const, invalidationConditions: [] })),
-              assumptions: snapshot.activeThesis.assumptions.map((a: { statement: string }) => ({ statement: a.statement, invalidationConditions: [] })),
-              invalidationConditions: [...snapshot.activeThesis.invalidationConditions],
-              assessments: [],
-              confidence: snapshot.activeThesis.confidence ?? "UNKNOWN",
-              researchQuality: "UNAVAILABLE",
-              supportingRefs: [],
-              contradictingRefs: [],
-              updatedAt: snapshot.activeThesis.updatedAt,
-              status: snapshot.activeThesis.status,
-            }
-          : undefined,
+        thesis: snapshot.activeThesis !== undefined ? thesisFromDto(snapshot.activeThesis, []) : undefined,
         snapshot,
         loadError: undefined,
       });
@@ -347,24 +354,7 @@ export function ResearchWorkspacePage() {
         setWs({
           evidence: snapshot.recentEvidence.map(evidenceFromDto),
           judgment: snapshot.currentJudgment !== undefined ? judgmentFromDto(snapshot.currentJudgment) : undefined,
-          thesis: snapshot.activeThesis !== undefined
-            ? {
-                ref: snapshot.activeThesis.ref,
-                statement: snapshot.activeThesis.statement,
-                objective: snapshot.activeThesis.objective,
-                version: snapshot.activeThesis.version,
-                claims: snapshot.activeThesis.claims.map((c: { statement: string; importance?: string }) => ({ statement: c.statement, importance: "SUPPORTING" as const, invalidationConditions: [] })),
-                assumptions: snapshot.activeThesis.assumptions.map((a: { statement: string }) => ({ statement: a.statement, invalidationConditions: [] })),
-                invalidationConditions: [...snapshot.activeThesis.invalidationConditions],
-                assessments: [],
-                confidence: snapshot.activeThesis.confidence ?? "UNKNOWN",
-                researchQuality: "UNAVAILABLE",
-                supportingRefs: [],
-                contradictingRefs: [],
-                updatedAt: snapshot.activeThesis.updatedAt,
-                status: snapshot.activeThesis.status,
-              }
-            : undefined,
+          thesis: snapshot.activeThesis !== undefined ? thesisFromDto(snapshot.activeThesis, []) : undefined,
           snapshot,
           loadError: undefined,
         });
@@ -761,6 +751,11 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
             <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
               <ConfidenceMeter confidence={run.answer.confidence} />
               {saveControl("RESEARCH", undefined, "this research")}
+              {runRef !== undefined && isResearchRef(runRef) && (
+                <button className="btn sm ghost" title="Turn this research into a trader-owned thesis" onClick={() => save.onThesis(runRef)}>
+                  turn into thesis
+                </button>
+              )}
             </span>
           </div>
           <p className="verdict">{run.answer.answer}</p>
@@ -801,6 +796,10 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
           <b>Model unavailable.</b> Lumen could not interpret this research request because its model service is temporarily unavailable ({run.modelFailure.type}). No research result was fabricated; try again shortly.
         </Note>
       )}
+
+      {/* Phase D: "what did I save from THIS research?" — SERVER-SIDE filtered by researchRef, so
+          the client never fetches the whole library to filter it, and only real saves appear. */}
+      {runRef !== undefined && isResearchRef(runRef) && <SavedFromResearch runRef={runRef} reloadKey={save.savedSectionNonce} onOpenSaved={save.onOpenSaved} />}
 
       {/* ACTIONABLE INSIGHT (engine-derived): what the evidence shows, what it does NOT
           show, what it means, and what would change the conclusion. Never trade
@@ -1144,5 +1143,49 @@ function HistoricalAnalysisView({ a }: { a: HistoricalAnalysisDto }) {
         <b>What this does not establish:</b> {a.interpretiveNote} Historical precedent describes what happened before; it does not predict and does not recommend any action.
       </Note>
     </>
+  );
+}
+
+/**
+ * "Saved from this research" (Phase D): the artifacts whose originating run is THIS run,
+ * fetched from the backend with `?researchRef=` (server-side filtering — the client never
+ * downloads the whole library to filter it). Renders nothing when there is nothing saved or
+ * when the read fails, so it can never imply a false "saved" state.
+ */
+function SavedFromResearch({ runRef, reloadKey, onOpenSaved }: { runRef: string; reloadKey: number; onOpenSaved: (savedId: string) => void }) {
+  const [rows, setRows] = useState<readonly SavedItemSummaryDto[]>([]);
+  const [error, setError] = useState<unknown>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const items = await listSaved({ researchRef: runRef, limit: 50 });
+        if (!cancelled) setRows(items);
+      } catch (err) {
+        if (!cancelled) setError(err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [runRef, reloadKey]);
+
+  if (error !== undefined || rows.length === 0) return null;
+  return (
+    <Panel kicker="saved from this research" title={`${rows.length} kept artifact${rows.length === 1 ? "" : "s"}`}>
+      <div className="row-list">
+        {rows.map((r) => (
+          <div className="row" key={r.savedId} style={{ alignItems: "center", gap: 10 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div className="row-title">{r.title}</div>
+              <div className="row-meta">
+                <span className="badge blue">{savedKindLabel(r.kind)}</span>
+                {` · saved ${timeAgo(r.createdAt)}`}
+              </div>
+            </div>
+            <button className="btn sm" onClick={() => onOpenSaved(r.savedId)}>open</button>
+          </div>
+        ))}
+      </div>
+    </Panel>
   );
 }

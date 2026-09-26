@@ -109,7 +109,8 @@ const SAVE_SCHEMA_DESC = [
 ].join("\n");
 
 const STATE_CHANGE_SCHEMA_DESC = [
-  '{"changeType": string, "description": string, "params": Record<string,string>, "rationale": string}',
+  '{"changeType": string, "description": string, "params": Record<string,string>, "rationale": string,',
+  ' "thesisAction": "CREATE"|absent, "params.statement": string}',
 ].join("\n");
 
 const FINAL_RESPONSE_SCHEMA_DESC = [
@@ -170,6 +171,8 @@ export interface LuiResult {
   saved?: SavedArtifact;
   /** Present when a MANAGE_STATE change was applied to working state. */
   stateChange?: StateChangeProposal;
+  /** Present when a confirmed thesis action created a trader-owned thesis (Phase D). */
+  thesis?: Thesis;
   /** M4: Flow 2 causal investigation result (when the research objective was causal). */
   flow2?: import("../research/flow2.js").Flow2Result;
   /** M4: Flow 6 cross-domain synthesis result. */
@@ -292,6 +295,9 @@ const STATE_CHANGE_SYSTEM = [
   "Prepare a MANAGE_STATE change proposal for ACTIVE WORKING STATE (change active target, update working research state, select framework for the session).",
   "- This is distinct from SAVE: working-state changes are not persistent memory.",
   "- Describe precisely what changes; params carry the concrete values.",
+  "- THESIS: when the trader asks to create/build/turn something into a THESIS (their own stated belief or position), set thesisAction=\"CREATE\" and put the trader's thesis STATEMENT verbatim in params.statement. Copy the trader's own words; never invent or strengthen the belief.",
+  "- THESIS CHANGE IS THE TRADER'S DECISION: creating a thesis requires the trader's explicit confirmation. You PROPOSE it; you never adopt, confirm, weaken, invalidate or archive a thesis.",
+  "- Selecting an existing thesis as active stays changeType=\"set-active-thesis\" with params.thesisRef; do not use thesisAction for that.",
   "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
@@ -902,6 +908,34 @@ export class Lui {
         preferJson: true,
       });
       const proposal = validateModelOutput<StateChangeProposal>(STATE_CHANGE_SCHEMA, res.raw).data;
+      // THESIS CREATE (Phase D): a consequential trader action. The LUI only ever PROPOSES it;
+      // nothing is persisted until the trader confirms (the same origin-confirmation gate SAVE
+      // and MONITOR use). An unconfirmed request halts with awaitingConfirmation and writes
+      // NOTHING, so a model sentence can never mint a thesis on its own.
+      if (typeof proposal.thesisAction === "string" && proposal.thesisAction.toUpperCase() === "CREATE") {
+        const statement = (proposal.params["statement"] ?? step.params["objective"] ?? proposal.description ?? "").trim();
+        if (statement === "") {
+          result.modelFailure = new ModelFailure("INVALID_OUTPUT", "a thesis needs a statement; the proposal supplied none", false);
+          return;
+        }
+        const confirmed = origin.kind === "trader" && /confirm/i.test(origin.detail ?? "");
+        if (!confirmed) {
+          result.awaitingConfirmation = { status: "REQUIRED", stepIndex: 0, reason: "creating a thesis is a consequential trader action and requires your explicit confirmation" };
+          return;
+        }
+        const anchorRef = ctx.researchRef ?? ctx.currentResearchRef;
+        result.thesis = this.options.workspace.addThesis(
+          {
+            statement,
+            objective: step.params["objective"] ?? statement,
+            ...(anchorRef !== undefined ? { linkedResearchRefs: [anchorRef] } : {}),
+          },
+          origin,
+          this.options.now?.(),
+        );
+        result.stateChange = proposal;
+        return;
+      }
       // Apply the working-state change (M3 §17: working state ≠ persistent memory).
       if (proposal.changeType === "set-active-thesis" && proposal.params["thesisRef"] !== undefined) {
         // M6 (audit D1): the selection must be APPLIED to working state, not just validated
@@ -1235,6 +1269,18 @@ export class Lui {
         keyUncertainty: "",
         implication: "Working state only; persistent memory was not changed (SAVE is a separate action).",
         citedObjectRefs: [],
+      };
+    }
+
+    if (result.thesis !== undefined) {
+      return {
+        answer: `Thesis created (${result.thesis.id}, ${result.thesis.status}): ${summarize(result.thesis.statement)}`,
+        supportingReasons: [`trader-owned; status ${result.thesis.status}; ${result.thesis.provenance.length} provenance entries`],
+        opposingReasons: [],
+        confidence: "HIGH",
+        keyUncertainty: "",
+        implication: "The thesis is yours; assessments evaluate it but never rewrite it.",
+        citedObjectRefs: [result.thesis.id],
       };
     }
 

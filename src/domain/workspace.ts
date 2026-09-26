@@ -18,7 +18,7 @@ import {
   type Analysis, type Judgment,
 } from "./objects.js";
 import {
-  createThesis, reviseThesis, createSavedArtifact, normalizeSavedArtifact, savedArtifactIdentity, isSavedKind,
+  createThesis, reviseThesis, createSavedArtifact, normalizeSavedArtifact, normalizeThesis, savedArtifactIdentity, isSavedKind, thesisTransitionAllowed,
   type Thesis, type SavedArtifact, type SavedKind, type ThesisStatus, type ThesisAssessmentRecord, type ThesisAssessmentStatus,
 } from "./thesis.js";
 import {
@@ -29,7 +29,7 @@ import {
 } from "./memory.js";
 import type { ObjectStatus } from "./lifecycle.js";
 import { appendProvenance, createProvenance, type ProvenanceOrigin } from "./provenance.js";
-import { newId, bumpIdCounterPast, idPrefixes, seedIdCountersFromIds } from "./ids.js";
+import { newId, bumpIdCounterPast, bumpIdCounterPastId, idPrefixes, seedIdCountersFromIds } from "./ids.js";
 import { currentRun } from "./run-context.js";
 
 /**
@@ -481,18 +481,94 @@ export class Workspace {
     return revised;
   }
 
+  /**
+   * Transition a thesis through the DETERMINISTIC lifecycle (Transitions not listed in
+   * THESIS_TRANSITIONS are rejected). A transition is an explicit trader action (or a
+   * documented lifecycle condition); an LLM sentence can never move a thesis. The thesis
+   * statement itself is never touched here (status is lifecycle, not belief).
+   */
   transitionThesis(id: string, to: ThesisStatus, origin: ProvenanceOrigin, note: string, at?: Date): Thesis {
     const thesis = this.mustThesis(id);
+    if (thesis.status === to) return thesis; // idempotent: no-op transition is not an error
+    if (!thesisTransitionAllowed(thesis.status, to)) {
+      throw new Error(`invalid thesis transition ${thesis.status} → ${to}; see THESIS_TRANSITIONS`);
+    }
+    // Confirming/activating a thesis is a TRADER decision: a non-trader origin may not adopt
+    // (DRAFT→ACTIVE) or confirm (→CONFIRMED) the trader's own belief.
+    if ((to === "ACTIVE" || to === "CONFIRMED") && origin.kind !== "trader") {
+      throw new Error(`thesis ${to} requires trader origin; the system must never adopt or confirm the trader's thesis`);
+    }
     // Thesis status transitions are trader decisions; whatever origin executes the
     // transition is recorded explicitly in provenance; never silently.
     const atDate = at ?? new Date();
     const updated: Thesis = Object.freeze({
       ...thesis,
       status: to,
+      // Adopting a DRAFT is the trader's confirmation; the flag records it honestly.
+      ...(to === "ACTIVE" && !thesis.userConfirmed ? { userConfirmed: true } : {}),
       provenance: appendProvenance(thesis.provenance, origin, `thesis status → ${to}: ${note}`, atDate),
       updatedAt: atDate.toISOString(),
     });
     this.theses.set(id, updated);
+    return updated;
+  }
+
+  /**
+   * Attach a research run to a thesis (ref only; research is never copied). Idempotent, and the
+   * ref must name a REAL run — no invented linkage.
+   */
+  linkThesisResearch(thesisId: string, researchRef: string, origin: ProvenanceOrigin, at?: Date): Thesis {
+    const thesis = this.mustThesis(thesisId);
+    this.mustResearch(researchRef);
+    if (thesis.linkedResearchRefs.includes(researchRef)) return thesis;
+    const atDate = at ?? new Date();
+    const updated: Thesis = Object.freeze({
+      ...thesis,
+      linkedResearchRefs: Object.freeze([...thesis.linkedResearchRefs, researchRef]),
+      provenance: appendProvenance(thesis.provenance, origin, `linked research ${researchRef}`, atDate),
+      updatedAt: atDate.toISOString(),
+    });
+    this.theses.set(thesisId, updated);
+    return updated;
+  }
+
+  /**
+   * Attach an EXISTING Saved artifact to a thesis by reference (never duplicated). Idempotent;
+   * the savedId must name a real saved artifact at link time. If the artifact is later unsaved
+   * the thesis is untouched (the DTO reports the link as unavailable).
+   */
+  linkThesisSaved(thesisId: string, savedId: string, origin: ProvenanceOrigin, at?: Date): Thesis {
+    const thesis = this.mustThesis(thesisId);
+    if (this.savedArtifacts.get(savedId) === undefined) {
+      throw new Error(`cannot link unknown saved artifact ${savedId} to thesis ${thesisId}`);
+    }
+    if (thesis.linkedSavedIds.includes(savedId)) return thesis;
+    const atDate = at ?? new Date();
+    const updated: Thesis = Object.freeze({
+      ...thesis,
+      linkedSavedIds: Object.freeze([...thesis.linkedSavedIds, savedId]),
+      provenance: appendProvenance(thesis.provenance, origin, `linked saved artifact ${savedId}`, atDate),
+      updatedAt: atDate.toISOString(),
+    });
+    this.theses.set(thesisId, updated);
+    return updated;
+  }
+
+  /**
+   * Detach a Saved artifact link. The thesis is NEVER deleted or invalidated by an unsave; this
+   * only removes the reference. Idempotent.
+   */
+  unlinkThesisSaved(thesisId: string, savedId: string, origin: ProvenanceOrigin, at?: Date): Thesis {
+    const thesis = this.mustThesis(thesisId);
+    if (!thesis.linkedSavedIds.includes(savedId)) return thesis;
+    const atDate = at ?? new Date();
+    const updated: Thesis = Object.freeze({
+      ...thesis,
+      linkedSavedIds: Object.freeze(thesis.linkedSavedIds.filter((id) => id !== savedId)),
+      provenance: appendProvenance(thesis.provenance, origin, `unlinked saved artifact ${savedId}`, atDate),
+      updatedAt: atDate.toISOString(),
+    });
+    this.theses.set(thesisId, updated);
     return updated;
   }
 
@@ -583,7 +659,17 @@ export class Workspace {
    * artifacts are never dropped by a snapshot that simply has not seen them.
    */
   absorbSavedState(snapshot: WorkspaceSnapshot): void {
-    for (const t of snapshot.savedTombstones ?? []) this.savedTombstones.set(t.id, t.at);
+    // TOMBSTONE COUNTER CONTINUITY (Phase D production bug): a deleted artifact's id survives
+    // only as a tombstone, so a counter seeded from artifact IDS alone rewinds after unsaves.
+    // The next SAVE then re-mints a tombstoned id (`sa_000001` again) and every merge/absorb
+    // pass (correctly) treats it as deleted — the artifact is written and instantly swallowed:
+    // POST /api/saved returned 201 while every later GET served `[]`, forever. Bump past the
+    // tombstoned ids so new artifacts never inherit a dead id. Tombstone semantics themselves
+    // are untouched (tombstones still win; still durable; still durable across instances).
+    for (const t of snapshot.savedTombstones ?? []) {
+      this.savedTombstones.set(t.id, t.at);
+      bumpIdCounterPastId(t.id);
+    }
     for (const a of snapshot.savedArtifacts ?? []) {
       if (this.savedTombstones.has(a.id)) continue;
       const incoming = normalizeSavedArtifact(a);
@@ -591,6 +677,37 @@ export class Workspace {
       if (existing === undefined || incoming.updatedAt > existing.updatedAt) this.savedArtifacts.set(a.id, incoming);
     }
     for (const id of this.savedTombstones.keys()) this.savedArtifacts.delete(id);
+  }
+
+  /**
+   * Merge a persisted snapshot's Thesis collection into this graph (multi-instance READ
+   * freshness; the Thesis analogue of absorbSavedState). A warm serverless instance loads
+   * the workspace ONCE; another instance's explicit thesis write (create/update/status/
+   * link/unlink) then lives only in the blob, so this graph would serve a stale thesis view
+   * forever (production: an attach returned success and the next read had lost the link).
+   * Scoped to Thesis — never a whole-graph reload — so an in-flight research run is never
+   * clobbered. Union by id; the side with MORE history entries is newer (provenance is
+   * append-only and every mutation appends); equal history keeps local (our in-flight
+   * writes win). Assessments are append-only records and merge by id. Selection is merged
+   * like the snapshot merge: keep the local choice when it still exists, else take remote's.
+   */
+  absorbThesisState(snapshot: WorkspaceSnapshot): void {
+    for (const raw of snapshot.theses ?? []) {
+      const incoming = normalizeThesis(raw);
+      const existing = this.theses.get(incoming.id);
+      if (existing === undefined || thesisIsNewer(incoming, existing)) this.theses.set(incoming.id, incoming);
+    }
+    const seen = new Set<string>();
+    for (const a of snapshot.thesisAssessments ?? []) {
+      if (seen.has(a.id)) continue;
+      seen.add(a.id);
+      if (!this.thesisAssessments.some((existing) => existing.id === a.id)) this.thesisAssessments.push(a);
+    }
+    const remoteActive = snapshot.activeThesisId;
+    if (remoteActive !== undefined && this.activeThesisId === undefined) this.activeThesisId = remoteActive;
+    else if (remoteActive === undefined && this.activeThesisId !== undefined && !this.theses.has(this.activeThesisId)) {
+      this.activeThesisId = undefined; // the remote snapshot agrees the selection is gone
+    }
   }
 
   /**
@@ -881,10 +998,17 @@ export class Workspace {
     for (const a of snap.analyses) ws.analyses.set(a.id, a);
     for (const j of snap.judgments) ws.judgments.set(j.id, j);
     for (const b of snap.branches) ws.branches.set(b.id, b);
-    for (const t of snap.theses ?? []) ws.theses.set(t.id, t);
+    // Phase D: normalize legacy theses (supply the Phase D collections/userConfirmed); no
+    // migration write, the record is preserved verbatim otherwise.
+    for (const t of snap.theses ?? []) ws.theses.set(t.id, normalizeThesis(t));
     // Phase C: normalize legacy artifacts (no kind/title/tags) on load; restore unsave tombstones.
     for (const a of snap.savedArtifacts ?? []) ws.savedArtifacts.set(a.id, normalizeSavedArtifact(a));
-    for (const t of snap.savedTombstones ?? []) ws.savedTombstones.set(t.id, t.at);
+    // TOMBSTONE COUNTER CONTINUITY (see absorbSavedState): tombstoned ids must never be
+    // re-minted after a cold start either, or the wedged create-invisible cycle restarts.
+    for (const t of snap.savedTombstones ?? []) {
+      ws.savedTombstones.set(t.id, t.at);
+      bumpIdCounterPastId(t.id);
+    }
     for (const id of ws.savedTombstones.keys()) ws.savedArtifacts.delete(id);
     for (const m of snap.memories ?? []) ws.memories.set(m.id, m);
     for (const m of snap.monitors ?? []) ws.monitors.set(m.id, m);
@@ -940,3 +1064,17 @@ export class Workspace {
 }
 
 export { createResearch, createBranch, createClaim, createEvidence, createHypothesis, createAnalysis, createJudgment, createSource, createThesis, reviseThesis, createSavedArtifact, isSavedKind };
+
+/**
+ * Recency comparison for absorbThesisState (mirrors mergeSnapshots' per-object law).
+ * Provenance is append-only and every mutation appends, so MORE provenance entries = later
+ * state; equal history keeps the existing side (in-flight local writes win). Ties broken by
+ * the independent version counter and then by updatedAt, both monotonic.
+ */
+function thesisIsNewer(candidate: Thesis, existing: Thesis): boolean {
+  if (candidate.provenance.length !== existing.provenance.length) {
+    return candidate.provenance.length > existing.provenance.length;
+  }
+  if (candidate.version !== existing.version) return candidate.version > existing.version;
+  return candidate.updatedAt > existing.updatedAt;
+}

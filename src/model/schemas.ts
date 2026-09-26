@@ -392,6 +392,12 @@ export interface StateChangeProposal {
   readonly description: string;
   readonly params: Readonly<Record<string, string>>;
   readonly rationale: string;
+  /**
+   * Phase D: an explicit THESIS action. "CREATE" drafts a trader-owned thesis proposed by the
+   * LUI; the statement travels in `params.statement`. The LUI never adopts (DRAFT→ACTIVE) or
+   * confirms a thesis; only the trader can, through an explicit confirmation/API action.
+   */
+  readonly thesisAction?: string;
 }
 
 export const STATE_CHANGE_SCHEMA: OutputSchema = {
@@ -401,7 +407,9 @@ export const STATE_CHANGE_SCHEMA: OutputSchema = {
     description: "string",
     params: "record",
     rationale: "string",
+    thesisAction: "string",
   },
+  optional: ["thesisAction"],
 };
 
 /** 14. Safety screen; runs on every plan before dispatch (M3 §14). */

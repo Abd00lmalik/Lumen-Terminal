@@ -17,6 +17,7 @@ import type { EvidenceClass } from "../domain/objects.js";
 import type { ObjectStatus } from "../domain/lifecycle.js";
 import type { MemoryEntry, MemoryStatus, MemoryCategory, Monitor, MonitorCondition } from "../domain/memory.js";
 import type { SavedArtifact, SavedKind, Thesis, ThesisAssessmentRecord, ThesisStatus } from "../domain/thesis.js";
+import { THESIS_TRANSITIONS } from "../domain/thesis.js";
 import type { Provenance, ProvenanceOrigin } from "../domain/provenance.js";
 
 // ---------------------------------------------------------------------------
@@ -330,15 +331,27 @@ export interface ThesisAssumptionDTO {
 
 export interface ThesisDTO {
   readonly ref: string;
+  readonly title?: string;
   readonly statement: string;
   readonly objective: string;
+  readonly asset?: string;
   readonly status: ThesisStatus;
   readonly version: number;
   readonly priorVersionRef?: string;
   readonly claims: readonly ThesisClaimDTO[];
   readonly assumptions: readonly ThesisAssumptionDTO[];
   readonly invalidationConditions: readonly string[];
+  /** Material conditions: observable states that must hold for the thesis to stay tenable. */
+  readonly materialConditions: readonly string[];
   readonly alternatives: readonly string[];
+  /** Referenced runs (refs only; research objects are never copied into the thesis). */
+  readonly linkedResearchRefs: readonly string[];
+  /** Attached Saved artifacts (savedId refs only; never duplicated). */
+  readonly linkedSavedIds: readonly string[];
+  /** Trader confirmation state: false for a system-drafted thesis awaiting adoption. */
+  readonly userConfirmed: boolean;
+  /** Lifecycle moves allowed from the current status (deterministic; UI offers only these). */
+  readonly allowedTransitions: readonly ThesisStatus[];
   readonly confidence?: "HIGH" | "MODERATE" | "LOW";
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -347,15 +360,22 @@ export interface ThesisDTO {
 export function thesisToDTO(t: Thesis): ThesisDTO {
   return {
     ref: t.id,
+    ...(t.title !== undefined ? { title: t.title } : {}),
     statement: t.statement,
     objective: t.objective,
+    ...(t.asset !== undefined ? { asset: t.asset } : {}),
     status: t.status,
     version: t.version,
     ...(t.priorVersionRef !== undefined ? { priorVersionRef: t.priorVersionRef } : {}),
     claims: t.claims.map((c) => ({ statement: c.statement, ...(c.importance !== undefined ? { importance: c.importance } : {}) })),
     assumptions: t.assumptions.map((a) => ({ statement: a.statement })),
     invalidationConditions: idRefs(t.invalidationConditions),
+    materialConditions: idRefs(t.materialConditions),
     alternatives: idRefs(t.alternatives),
+    linkedResearchRefs: idRefs(t.linkedResearchRefs),
+    linkedSavedIds: idRefs(t.linkedSavedIds),
+    userConfirmed: t.userConfirmed,
+    allowedTransitions: THESIS_TRANSITIONS[t.status] ?? [],
     ...(t.confidence !== undefined ? { confidence: t.confidence } : {}),
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,

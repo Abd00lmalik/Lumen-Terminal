@@ -11,7 +11,7 @@
  * write surfaces as a failure, never as a false "Saved".
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/AppShell.js";
 import { BackendDownNote } from "../components/BackendDownNote.js";
 import { Panel, Note, Empty, ConfidenceMeter, timeAgo } from "../components/ui.js";
@@ -33,6 +33,11 @@ const KIND_BADGE: Record<string, string> = {
 
 export function SavedPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Phase D: an optional originating-run filter (?researchRef=rs_…) and a deep link to one
+  // artifact (?open=sa_…). The filter is applied SERVER-SIDE (the backend does the matching).
+  const runFilter = searchParams.get("researchRef") ?? "";
+  const openParam = searchParams.get("open") ?? "";
   const [kind, setKind] = useState<"ALL" | SavedKindDto>("ALL");
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<readonly SavedItemSummaryDto[]>([]);
@@ -51,6 +56,7 @@ export function SavedPage() {
       const rows = await listSaved({
         limit: SAVED_PAGE_SIZE,
         ...(nextKind !== "ALL" ? { kind: nextKind } : {}),
+        ...(runFilter.trim() !== "" ? { researchRef: runFilter.trim() } : {}),
         ...(search.trim() !== "" ? { q: search } : {}),
       });
       if (seq !== requestSeq.current) return;
@@ -64,12 +70,12 @@ export function SavedPage() {
     } finally {
       if (seq === requestSeq.current) setLoading(false);
     }
-  }, []);
+  }, [runFilter]);
 
   useEffect(() => {
     const t = setTimeout(() => { void load(kind, query); }, query === "" ? 0 : 300);
     return () => clearTimeout(t);
-  }, [kind, query, load]);
+  }, [kind, query, runFilter, load]);
 
   const open = useCallback(async (savedId: string): Promise<void> => {
     setOpenError(undefined);
@@ -80,6 +86,21 @@ export function SavedPage() {
       setOpenError(err instanceof ApiError ? `${err.code}: ${err.message}` : err instanceof Error ? err.message : String(err));
     }
   }, []);
+
+  // Deep link (?open=sa_…): open the requested artifact once, from the real backend.
+  const openedDeepLink = useRef(false);
+  useEffect(() => {
+    if (openParam === "" || openedDeepLink.current) return;
+    openedDeepLink.current = true;
+    void open(openParam);
+  }, [openParam, open]);
+
+  const clearRunFilter = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("researchRef");
+    next.delete("open");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const unsave = useCallback(async (savedId: string): Promise<void> => {
     setActionError(undefined);
@@ -153,6 +174,13 @@ export function SavedPage() {
           ))}
         </div>
       </div>
+
+      {runFilter !== "" && (
+        <Note tone="info">
+          Showing only artifacts saved from research <b>{runFilter}</b>.{" "}
+          <button className="btn sm ghost" onClick={clearRunFilter}>clear filter</button>
+        </Note>
+      )}
 
       {actionError !== undefined && <Note tone="warn">{actionError}</Note>}
 

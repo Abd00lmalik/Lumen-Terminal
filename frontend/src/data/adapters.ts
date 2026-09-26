@@ -103,8 +103,10 @@ export function thesisFromDto(t: ThesisDto, assessments: readonly ThesisAssessme
   const latest = assessments.length > 0 ? assessments[assessments.length - 1]! : undefined;
   return {
     ref: t.ref,
+    ...(t.title !== undefined ? { title: t.title } : {}),
     statement: t.statement,
     objective: t.objective,
+    ...(t.asset !== undefined ? { asset: t.asset } : {}),
     version: t.version,
     status: t.status,
     claims: t.claims.map((c) => ({
@@ -114,6 +116,24 @@ export function thesisFromDto(t: ThesisDto, assessments: readonly ThesisAssessme
     })),
     assumptions: t.assumptions.map((a) => ({ statement: a.statement, invalidationConditions: [] })),
     invalidationConditions: [...t.invalidationConditions],
+    materialConditions: [...t.materialConditions],
+    linkedResearch: (t.linkedResearch ?? []).map((r) => ({
+      researchRef: r.researchRef,
+      ...(r.question !== undefined ? { question: r.question } : {}),
+      ...(r.status !== undefined ? { status: r.status } : {}),
+      ...(r.createdAt !== undefined ? { createdAt: r.createdAt } : {}),
+      ...(r.degraded !== undefined ? { degraded: r.degraded } : {}),
+      available: r.available,
+    })),
+    linkedSaved: (t.linkedSaved ?? []).map((s) => ({
+      savedId: s.savedId,
+      ...(s.kind !== undefined ? { kind: s.kind } : {}),
+      ...(s.title !== undefined ? { title: s.title } : {}),
+      ...(s.summary !== undefined ? { summary: s.summary } : {}),
+      available: s.available,
+    })),
+    userConfirmed: t.userConfirmed,
+    allowedTransitions: [...t.allowedTransitions],
     assessments: assessments.map(assessmentFromDto),
     confidence: latest?.confidence ?? t.confidence ?? "UNKNOWN",
     researchQuality: latest?.researchQuality ?? "UNAVAILABLE",

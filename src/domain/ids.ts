@@ -28,6 +28,19 @@ function numericSuffix(id: string): number | undefined {
   return m ? Number(m[1]) : undefined;
 }
 
+/**
+ * Advance the counter that would mint `id` past that id, whatever its prefix. Counter
+ * continuity for ids that are NOT objects in the graph (saved-artifact tombstones): a
+ * deleted artifact's id survives only as a tombstone, so seeding from object ids alone
+ * rewinds the counter and a later save re-mints a tombstoned id.
+ */
+export function bumpIdCounterPastId(id: string): void {
+  const underscore = id.lastIndexOf("_");
+  if (underscore <= 0) return; // tolerate malformed ids — continuity must never throw
+  const n = numericSuffix(id);
+  if (n !== undefined) bumpIdCounterPast(id.slice(0, underscore), n);
+}
+
 export function newId(prefix: string): string {
   const next = (COUNTERS.get(prefix) ?? 0) + 1;
   COUNTERS.set(prefix, next);

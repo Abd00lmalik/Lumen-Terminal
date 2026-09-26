@@ -198,7 +198,14 @@ export class GeminiProvider implements ModelProvider {
           );
         }
       }
-      throw new ModelFailure(category, `Gemini request failed with HTTP ${response.status} (${category})`, category !== "AUTH_FAILURE");
+      // A 413 (request body too large) is a request-size condition: never retry-stall it.
+      throw new ModelFailure(
+        category,
+        category === "PAYLOAD_TOO_LARGE"
+          ? `Gemini request failed with HTTP 413 (PAYLOAD_TOO_LARGE): the request body exceeds the provider's accepted size. This is a request-size condition, not a provider outage; retrying the identical request will not help.`
+          : `Gemini request failed with HTTP ${response.status} (${category})`,
+        category !== "AUTH_FAILURE" && category !== "PAYLOAD_TOO_LARGE" && category !== "INVALID_OUTPUT",
+      );
     }
 
     let payload: GeminiPayload;
@@ -275,6 +282,8 @@ export class GeminiProvider implements ModelProvider {
   private mapStatus(status: number): ModelFailure["type"] {
     if (status === 401 || status === 403) return "AUTH_FAILURE";
     if (status === 429) return "RATE_LIMITED";
+    // 413 = request body too large (request-size condition, NOT an outage).
+    if (status === 413) return "PAYLOAD_TOO_LARGE";
     if (status === 400 || status === 404 || status === 422) return "INVALID_OUTPUT";
     if (status >= 500) return "PROVIDER_UNAVAILABLE";
     return "UNKNOWN";

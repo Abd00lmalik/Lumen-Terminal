@@ -24,6 +24,7 @@ export type ModelFailureType =
   | "PROVIDER_UNAVAILABLE" // network/HTTP/service outage; retriable
   | "AUTH_FAILURE" // missing/invalid credentials; not retriable
   | "RATE_LIMITED" // quota/429; retriable with backoff
+  | "PAYLOAD_TOO_LARGE" // request rejected for size/context (HTTP 413); NOT an outage, not retriable
   | "INVALID_OUTPUT" // response arrived but failed schema/structural validation
   | "TIMEOUT" // request exceeded the deadline; retriable
   | "EMPTY_OUTPUT" // response arrived but contained no usable content

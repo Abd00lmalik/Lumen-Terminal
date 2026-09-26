@@ -24,6 +24,7 @@ export function AppRoutes() {
       <Route path="/research/active" element={<ActiveResearchPage />} />
       <Route path="/evidence" element={<EvidencePage />} />
       <Route path="/thesis" element={<ThesisPage />} />
+      <Route path="/thesis/:ref" element={<ThesisPage />} />
       <Route path="/challenge" element={<ChallengePage />} />
       <Route path="/memory" element={<MemoryPage />} />
       <Route path="/monitor" element={<MonitorPage />} />

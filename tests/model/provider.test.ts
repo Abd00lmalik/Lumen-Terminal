@@ -125,6 +125,16 @@ describe("GeminiProvider construction (M3 §2; no key required to run the suite)
     }
   });
 
+  it("maps HTTP 413 to PAYLOAD_TOO_LARGE (non-retriable request-size condition)", async () => {
+    const provider = new GeminiProvider({
+      env: { GEMINI_API_KEY: "k" },
+      fetchImpl: (async () => new Response("too large", { status: 413 })) as unknown as typeof fetch,
+      transientRetry: { attempts: 1, baseDelayMs: 0 },
+    });
+    await expect(provider.structured({ schemaName: "s", schemaDescription: "{}", system: "sys", prompt: "p" }))
+      .rejects.toMatchObject({ type: "PAYLOAD_TOO_LARGE", retriable: false });
+  });
+
   it("network errors become PROVIDER_UNAVAILABLE (retriable), never fabricated output", async () => {
     const provider = new GeminiProvider({
       env: { GEMINI_API_KEY: "k" },

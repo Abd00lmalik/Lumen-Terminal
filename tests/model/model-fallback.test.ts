@@ -122,6 +122,20 @@ describe("GroqProvider", () => {
     }
   });
 
+  it("maps HTTP 413 to PAYLOAD_TOO_LARGE (a request-size condition, never retried as an outage)", async () => {
+    const provider = new GroqProvider({ env: { GROQ_API_KEY: "gsk_test" }, fetchImpl: groqFetch(413, { error: { message: "request too large" } }).fetch });
+    try {
+      await provider.structured(REQUEST);
+      expect.unreachable("expected throw");
+    } catch (error) {
+      expect(error).toMatchObject({ type: "PAYLOAD_TOO_LARGE", retriable: false });
+      // The failure is diagnosable and never leaks response text/secrets.
+      expect((error as Error).message).toContain("413");
+      expect((error as Error).message).not.toContain("gsk_test");
+      expect((error as Error).message).not.toContain("request too large");
+    }
+  });
+
   it("empty content -> EMPTY_OUTPUT (permanent, key-free message)", async () => {
     const provider = new GroqProvider({ env: { GROQ_API_KEY: "gsk_test" }, fetchImpl: groqFetch(200, { choices: [{ message: { content: "" }, finish_reason: "stop" }] }).fetch });
     await expect(provider.structured(REQUEST)).rejects.toMatchObject({ type: "EMPTY_OUTPUT", retriable: false });

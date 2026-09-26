@@ -16,6 +16,8 @@ export function listSaved(query: SavedListQuery = {}): Promise<readonly SavedIte
   if (query.offset !== undefined) params.set("offset", String(query.offset));
   if (query.sort !== undefined) params.set("sort", query.sort);
   if (query.kind !== undefined && query.kind !== "") params.set("kind", query.kind);
+  // Phase D: exact originating-run filter (answered server-side; never filtered in React).
+  if (query.researchRef !== undefined && query.researchRef.trim() !== "") params.set("researchRef", query.researchRef.trim());
   if (query.q !== undefined && query.q.trim() !== "") params.set("q", query.q.trim());
   const suffix = params.toString();
   return http.get<readonly SavedItemSummaryDto[]>(`/api/saved${suffix === "" ? "" : `?${suffix}`}`);

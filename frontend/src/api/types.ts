@@ -203,22 +203,66 @@ export interface ResearchListQuery {
 // Thesis / assessments / artifacts / memory / monitors
 // ---------------------------------------------------------------------------
 
+export interface ThesisLinkedResearchDto {
+  readonly researchRef: string;
+  readonly question?: string;
+  readonly status?: string;
+  readonly createdAt?: string;
+  readonly degraded?: boolean;
+  readonly available: boolean;
+}
+
+/** An attached saved artifact: a summary row plus whether the artifact is still present. */
+export type ThesisLinkedSavedDto = SavedItemSummaryDto & { readonly savedId: string; readonly available: boolean };
+
 export interface ThesisDto {
   readonly ref: string;
+  readonly title?: string;
   readonly statement: string;
   readonly objective: string;
+  readonly asset?: string;
   readonly status: string;
   readonly version: number;
   readonly priorVersionRef?: string;
   readonly claims: readonly { readonly statement: string; readonly importance?: string }[];
   readonly assumptions: readonly { readonly statement: string }[];
   readonly invalidationConditions: readonly string[];
+  readonly materialConditions: readonly string[];
   readonly alternatives: readonly string[];
+  readonly linkedResearchRefs: readonly string[];
+  readonly linkedSavedIds: readonly string[];
+  readonly userConfirmed: boolean;
+  readonly allowedTransitions: readonly string[];
   readonly confidence?: ConfidenceDto;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly isActive?: boolean; // list/detail endpoints only
   readonly assessments?: readonly ThesisAssessmentDto[]; // detail endpoint only
+  readonly linkedResearch?: readonly ThesisLinkedResearchDto[]; // detail endpoint only
+  readonly linkedSaved?: readonly ThesisLinkedSavedDto[]; // detail endpoint only
+}
+
+/** Explicit thesis actions (Phase D). */
+export interface ThesisCreateRequest {
+  readonly title?: string;
+  readonly statement?: string;
+  readonly objective?: string;
+  readonly asset?: string;
+  readonly researchRef?: string;
+  readonly savedId?: string;
+  readonly invalidationConditions?: readonly string[];
+  readonly materialConditions?: readonly string[];
+}
+
+export interface ThesisUpdateRequest {
+  readonly title?: string;
+  readonly statement?: string;
+  readonly objective?: string;
+  readonly asset?: string;
+  readonly invalidationConditions?: readonly string[];
+  readonly materialConditions?: readonly string[];
+  readonly alternatives?: readonly string[];
+  readonly confidence?: "HIGH" | "MODERATE" | "LOW";
 }
 
 export type AssessmentStatusDto =
@@ -571,6 +615,8 @@ export interface SavedListQuery {
   readonly offset?: number;
   readonly sort?: "recent" | "oldest";
   readonly kind?: SavedKindDto | "";
+  /** Phase D: exact originating-run filter (answered server-side). */
+  readonly researchRef?: string;
   readonly q?: string;
 }
 

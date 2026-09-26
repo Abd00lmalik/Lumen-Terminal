@@ -81,14 +81,39 @@ export interface ThesisAssessmentView {
   readonly unresolved: readonly string[];
 }
 
+export interface ThesisLinkedResearchView {
+  readonly researchRef: string;
+  readonly question?: string;
+  readonly status?: string;
+  readonly createdAt?: string;
+  readonly degraded?: boolean;
+  readonly available: boolean;
+}
+
+export interface ThesisLinkedSavedView {
+  readonly savedId: string;
+  readonly kind?: SavedKind;
+  readonly title?: string;
+  readonly summary?: string;
+  /** False when the artifact was unsaved after being attached; the thesis itself stays intact. */
+  readonly available: boolean;
+}
+
 export interface ThesisView {
   readonly ref: string;
+  readonly title?: string;
   readonly statement: string;
   readonly objective: string;
+  readonly asset?: string;
   readonly version: number;
   readonly claims: readonly ThesisClaimView[];
   readonly assumptions: readonly { statement: string; invalidationConditions: readonly string[] }[];
   readonly invalidationConditions: readonly string[];
+  readonly materialConditions: readonly string[];
+  readonly linkedResearch: readonly ThesisLinkedResearchView[];
+  readonly linkedSaved: readonly ThesisLinkedSavedView[];
+  readonly userConfirmed: boolean;
+  readonly allowedTransitions: readonly string[];
   readonly assessments: readonly ThesisAssessmentView[];
   readonly confidence: Confidence;
   readonly researchQuality: "STRONG" | "MIXED" | "WEAK" | "UNAVAILABLE";

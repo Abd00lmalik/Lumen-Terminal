@@ -165,7 +165,10 @@ export class GroqProvider implements ModelProvider {
       // Body text is sanitized: only the status + fixed category, never response text
       // (4xx bodies can echo request metadata; error bodies are never surfaced raw).
       const category = this.mapStatus(response.status);
-      throw new ModelFailure(category, `Groq request failed with HTTP ${response.status} (${category})`, category === "RATE_LIMITED" || category === "PROVIDER_UNAVAILABLE");
+      const detail = category === "PAYLOAD_TOO_LARGE"
+        ? `Groq request failed with HTTP 413 (PAYLOAD_TOO_LARGE): the request body exceeds the provider's accepted size. This is a request-size condition, not a provider outage; retrying the identical request will not help.`
+        : `Groq request failed with HTTP ${response.status} (${category})`;
+      throw new ModelFailure(category, detail, category === "RATE_LIMITED" || category === "PROVIDER_UNAVAILABLE");
     }
 
     let payload: ChatPayload;
@@ -217,6 +220,10 @@ export class GroqProvider implements ModelProvider {
   private mapStatus(status: number): ModelFailure["type"] {
     if (status === 401 || status === 403) return "AUTH_FAILURE";
     if (status === 429) return "RATE_LIMITED";
+    // HTTP 413 (Request Entity Too Large) is a REQUEST-SIZE condition, not an outage: the
+    // request body (system + research context) exceeded the provider's accepted size. It is
+    // typed distinctly so the failure is diagnosable and never retried as a transient error.
+    if (status === 413) return "PAYLOAD_TOO_LARGE";
     if (status === 400 || status === 404 || status === 422) return "INVALID_OUTPUT";
     if (status >= 500) return "PROVIDER_UNAVAILABLE";
     return "UNKNOWN";

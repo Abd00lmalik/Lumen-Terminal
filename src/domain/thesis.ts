@@ -23,15 +23,45 @@ import type { ISO } from "./objects.js";
 // THESIS; the trader's own position; system NEVER mutates it (thesis.md §1)
 // ---------------------------------------------------------------------------
 
-/** Thesis lifecycle states (object-lifecycle-state-machine.md THESIS LIFECYCLE). */
+/**
+ * Thesis lifecycle states (object-lifecycle-state-machine.md THESIS LIFECYCLE + Phase D).
+ *
+ * Phase D adds INVALIDATED (material falsifiers satisfied) and PAUSED (deliberately set aside);
+ * the pre-existing DRAFT/ACTIVE/CONFIRMED/WEAKENED/REJECTED/SUPERSEDED/ARCHIVED states are
+ * preserved so existing records and flows keep their exact meaning. No state is ever chosen
+ * from an LLM sentence; transitions are deterministic (see THESIS_TRANSITIONS).
+ */
 export type ThesisStatus =
   | "DRAFT"
   | "ACTIVE"
   | "CONFIRMED"
   | "WEAKENED"
   | "REJECTED"
+  | "INVALIDATED"
+  | "PAUSED"
   | "SUPERSEDED"
   | "ARCHIVED";
+
+/**
+ * Deterministic lifecycle transitions. A transition not listed here is REJECTED by the domain;
+ * an LLM/assessment can never move a thesis, only an explicit trader action (or an explicit,
+ * documented lifecycle condition) can. See docs/product/thesis.md.
+ */
+export const THESIS_TRANSITIONS: Readonly<Record<ThesisStatus, readonly ThesisStatus[]>> = Object.freeze({
+  DRAFT: ["ACTIVE", "ARCHIVED"],
+  ACTIVE: ["CONFIRMED", "WEAKENED", "INVALIDATED", "PAUSED", "SUPERSEDED", "ARCHIVED"],
+  CONFIRMED: ["WEAKENED", "INVALIDATED", "PAUSED", "SUPERSEDED", "ARCHIVED"],
+  WEAKENED: ["ACTIVE", "CONFIRMED", "INVALIDATED", "PAUSED", "SUPERSEDED", "ARCHIVED"],
+  REJECTED: ["ACTIVE", "ARCHIVED"],
+  INVALIDATED: ["ACTIVE", "ARCHIVED"],
+  PAUSED: ["ACTIVE", "ARCHIVED"],
+  SUPERSEDED: ["ARCHIVED"],
+  ARCHIVED: [],
+});
+
+export function thesisTransitionAllowed(from: ThesisStatus, to: ThesisStatus): boolean {
+  return (THESIS_TRANSITIONS[from] ?? []).includes(to);
+}
 
 export interface ThesisScope {
   readonly entities: readonly string[];
@@ -87,13 +117,29 @@ export interface ThesisAssessmentRecord {
 
 export interface Thesis {
   readonly id: string;
+  /** Short trader-facing label (Phase D). Optional so pre-Phase-D records load unchanged. */
+  readonly title?: string;
   readonly statement: string;
   readonly objective: string;
+  /** Primary asset/topic the thesis is about (Phase D); derived placement of scope.entities. */
+  readonly asset?: string;
   readonly scope: ThesisScope;
   readonly claims: readonly ThesisClaim[];
   readonly assumptions: readonly ThesisAssumption[];
   readonly invalidationConditions: readonly string[];
   readonly alternatives: readonly string[];
+  /**
+   * MATERIAL CONDITIONS (Phase D): observable states that must hold for the thesis to remain
+   * tenable. Distinct from invalidationConditions (what proves it wrong) and from assumptions
+   * (what it rests on). Refs/observations only; never invented by the system.
+   */
+  readonly materialConditions: readonly string[];
+  /** Referenced runs this thesis draws on (refs only; research is never copied into a thesis). */
+  readonly linkedResearchRefs: readonly string[];
+  /** Referenced Saved artifacts attached to this thesis (savedId refs; never duplicated). */
+  readonly linkedSavedIds: readonly string[];
+  /** Trader confirmation state: false until the trader explicitly adopts the thesis. */
+  readonly userConfirmed: boolean;
   readonly confidence?: "HIGH" | "MODERATE" | "LOW";
   readonly status: ThesisStatus;
   /** Thesis versions are independently restorable; history records how/why it changed. */
@@ -104,27 +150,69 @@ export interface Thesis {
   readonly updatedAt: ISO;
 }
 
+/**
+ * Normalize a persisted (possibly pre-Phase-D) thesis: supply the Phase D collections that a
+ * legacy record does not carry. Nothing is invented; missing collections become empty and
+ * `userConfirmed` follows the record's own origin/status (an ACTIVE trader thesis is confirmed).
+ */
+export function normalizeThesis(t: Thesis): Thesis {
+  const raw = t as Partial<Thesis>;
+  const linked = Array.isArray(raw.linkedResearchRefs) ? raw.linkedResearchRefs : [];
+  const linkedSaved = Array.isArray(raw.linkedSavedIds) ? raw.linkedSavedIds : [];
+  const material = Array.isArray(raw.materialConditions) ? raw.materialConditions : [];
+  const userConfirmed = typeof raw.userConfirmed === "boolean"
+    ? raw.userConfirmed
+    : raw.status !== "DRAFT";
+  const asset = typeof raw.asset === "string" && raw.asset !== ""
+    ? raw.asset
+    : raw.scope?.entities?.[0];
+  return Object.freeze({
+    ...t,
+    ...(asset !== undefined ? { asset } : {}),
+    materialConditions: Object.freeze([...material]),
+    linkedResearchRefs: Object.freeze([...linked]),
+    linkedSavedIds: Object.freeze([...linkedSaved]),
+    userConfirmed,
+  });
+}
+
 export function createThesis(
   input: {
+    title?: string;
     statement: string;
     objective: string;
+    asset?: string;
     scope?: ThesisScope;
     claims?: readonly ThesisClaim[];
     assumptions?: readonly ThesisAssumption[];
     invalidationConditions?: readonly string[];
+    materialConditions?: readonly string[];
+    linkedResearchRefs?: readonly string[];
+    linkedSavedIds?: readonly string[];
     alternatives?: readonly string[];
     confidence?: "HIGH" | "MODERATE" | "LOW";
+    /**
+     * Trader confirmation state. A thesis created BY the trader is confirmed and ACTIVE; one
+     * proposed by the system (an agent origin) starts a DRAFT until the trader adopts it.
+     * NEVER inferred from an LLM sentence — the caller states it, the domain records it.
+     */
+    userConfirmed?: boolean;
   },
   /** Thesis creation is a TRADER action (or trader-approved import); provenance records it. */
   origin: ProvenanceOrigin,
   at: Date = new Date(),
 ): Thesis {
+  const userConfirmed = input.userConfirmed ?? origin.kind === "trader";
+  const scopeEntities = [...(input.scope?.entities ?? [])];
+  const asset = input.asset !== undefined && input.asset.trim() !== "" ? input.asset.trim() : scopeEntities[0];
   return Object.freeze({
     id: newId(idPrefixes.thesis),
+    ...(input.title !== undefined && input.title.trim() !== "" ? { title: input.title.trim() } : {}),
     statement: input.statement,
     objective: input.objective,
+    ...(asset !== undefined ? { asset } : {}),
     scope: Object.freeze({
-      entities: Object.freeze([...(input.scope?.entities ?? [])]),
+      entities: Object.freeze(scopeEntities),
       ...(input.scope?.timeframe !== undefined ? { timeframe: input.scope.timeframe } : {}),
       ...(input.scope?.marketContext !== undefined ? { marketContext: input.scope.marketContext } : {}),
       ...(input.scope?.conditions !== undefined ? { conditions: Object.freeze([...input.scope.conditions]) } : {}),
@@ -132,11 +220,15 @@ export function createThesis(
     claims: Object.freeze([...(input.claims ?? [])].map((c) => Object.freeze({ ...c }))),
     assumptions: Object.freeze([...(input.assumptions ?? [])].map((a) => Object.freeze({ ...a }))),
     invalidationConditions: Object.freeze([...(input.invalidationConditions ?? [])]),
+    materialConditions: Object.freeze([...(input.materialConditions ?? [])]),
+    linkedResearchRefs: Object.freeze([...new Set(input.linkedResearchRefs ?? [])]),
+    linkedSavedIds: Object.freeze([...new Set(input.linkedSavedIds ?? [])]),
     alternatives: Object.freeze([...(input.alternatives ?? [])]),
     ...(input.confidence !== undefined ? { confidence: input.confidence } : {}),
-    status: "ACTIVE",
+    userConfirmed,
+    status: userConfirmed ? "ACTIVE" : "DRAFT",
     version: 1,
-    provenance: createProvenance(origin, "thesis created (trader-owned)", at),
+    provenance: createProvenance(origin, userConfirmed ? "thesis created (trader-owned)" : "thesis drafted (awaiting trader adoption)", at),
     createdAt: at.toISOString(),
     updatedAt: at.toISOString(),
   });
@@ -148,7 +240,7 @@ export function createThesis(
  */
 export function reviseThesis(
   prior: Thesis,
-  changes: Partial<Pick<Thesis, "statement" | "objective" | "scope" | "claims" | "assumptions" | "invalidationConditions" | "alternatives" | "confidence">>,
+  changes: Partial<Pick<Thesis, "title" | "statement" | "objective" | "asset" | "scope" | "claims" | "assumptions" | "invalidationConditions" | "materialConditions" | "linkedResearchRefs" | "linkedSavedIds" | "alternatives" | "confidence">>,
   origin: ProvenanceOrigin,
   note: string,
   at: Date = new Date(),
@@ -158,12 +250,17 @@ export function reviseThesis(
   }
   return Object.freeze({
     ...prior,
+    ...(changes.title !== undefined ? { title: changes.title } : {}),
     ...(changes.statement !== undefined ? { statement: changes.statement } : {}),
     ...(changes.objective !== undefined ? { objective: changes.objective } : {}),
+    ...(changes.asset !== undefined ? { asset: changes.asset } : {}),
     ...(changes.scope !== undefined ? { scope: changes.scope } : {}),
     ...(changes.claims !== undefined ? { claims: changes.claims } : {}),
     ...(changes.assumptions !== undefined ? { assumptions: changes.assumptions } : {}),
     ...(changes.invalidationConditions !== undefined ? { invalidationConditions: changes.invalidationConditions } : {}),
+    ...(changes.materialConditions !== undefined ? { materialConditions: changes.materialConditions } : {}),
+    ...(changes.linkedResearchRefs !== undefined ? { linkedResearchRefs: changes.linkedResearchRefs } : {}),
+    ...(changes.linkedSavedIds !== undefined ? { linkedSavedIds: changes.linkedSavedIds } : {}),
     ...(changes.alternatives !== undefined ? { alternatives: changes.alternatives } : {}),
     ...(changes.confidence !== undefined ? { confidence: changes.confidence } : {}),
     version: prior.version + 1,

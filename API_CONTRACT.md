@@ -7,7 +7,7 @@
 **Hard rules baked into the surface:**
 - The client sends **natural language only**; never a flow name or action. Flow classification is internal LUI routing (the locked six actions remain the action model).
 - Gemini and Bitget are reachable **only inside the API process**. No key appears in any response or event.
-- The only endpoints that mutate persistent state directly are the **explicit SAVE/UNSAVE of a saved artifact** (`POST /api/saved`, `DELETE /api/saved/:savedId`): a trader's deliberate action, resolved against the real graph and confirmed only after the write succeeds. Everything else goes through a boundary: natural-language SAVE and memory promotion run through the LUI authorization boundary; thesis selection goes through the domain (`setActiveThesis`); monitor activation goes through the domain's trader-confirmation boundary.
+- The only endpoints that mutate persistent state directly are the **explicit SAVE/UNSAVE of a saved artifact** (`POST /api/saved`, `DELETE /api/saved/:savedId`) and the **explicit Thesis actions** (`POST/PATCH/DELETE /api/thesis*`): deliberate trader actions, resolved against the real graph and confirmed only after the write succeeds. Everything else goes through a boundary: natural-language SAVE, thesis creation and memory promotion run through the LUI authorization/confirmation boundary; thesis selection goes through the domain (`setActiveThesis`); monitor activation goes through the domain's trader-confirmation boundary.
 
 ## Saved workspace (Phase C)
 
@@ -21,6 +21,17 @@ HISTORY is everything Lumen researched; SAVED is exactly what the trader chose t
 - **Read freshness:** `GET /api/saved` and `GET /api/saved/:savedId` refresh the Saved collection from the durable store before answering (a warm serverless instance can otherwise serve a library that omits another instance's SAVE/UNSAVE). Idempotency therefore also holds across instances: the same identity SAVEd on two instances converges on one `savedId`. The refresh is scoped to Saved; a transient store read failure degrades to local state rather than failing the read.
 - There is **no trading/execution endpoint**; the workbench is research-only.
 - **No background monitoring exists.** Monitor state is persistent handoff representation only.
+- **Filter by origin (Phase D):** `GET /api/saved?researchRef=rs_…` returns only artifacts whose originating run is that ref, applied SERVER-SIDE and composing with `kind`, `q`, `sort` and pagination. A malformed ref is a typed 400; a well-formed but unknown ref is a valid empty list (never fabricated), and never leaks across runs.
+
+## Thesis workspace (Phase D)
+
+The trader's structured belief. The statement is trader-owned: Lumen assesses and challenges it but never silently rewrites it. Every write below is an EXPLICIT trader action through the domain boundary (`TRADER_ORIGIN`), and is persisted only after it succeeds.
+
+- **Ownership:** `statement`, `title`, `claims`, `assumptions`, `invalidationConditions`, `materialConditions`, `alternatives` are trader-owned. An assessment is a research RESULT about the thesis and never mutates it.
+- **Lifecycle:** deterministic transitions only (`THESIS_TRANSITIONS`): `DRAFT → ACTIVE → CONFIRMED / WEAKENED / INVALIDATED / PAUSED / SUPERSEDED → ARCHIVED`. `DRAFT → ACTIVE` and `→ CONFIRMED` require a trader origin; an invalid transition is a typed 400. A status is never chosen from an LLM sentence.
+- **Creation sources:** a statement (natural language), a `researchRef` (statement derived VERBATIM from the run's answer/question), or a `savedId` (derived from the artifact's content). The derived statement is never an LLM paraphrase.
+- **Links:** `linkedResearchRefs` (refs only; research is never copied) and `linkedSavedIds` (savedId refs; never duplicated). Unsaving a linked artifact does NOT corrupt the thesis: the DTO reports the link as `available: false`.
+- **DTOs:** `GET /api/thesis/:ref` returns the thesis plus `assessments[]`, `linkedResearch[]` (compact run rows with `available`), and `linkedSaved[]` (summary rows with `available`). Internal workspace structures are never leaked.
 
 ---
 
@@ -38,13 +49,20 @@ HISTORY is everything Lumen researched; SAVED is exactly what the trader chose t
 | GET | `/api/claims` | Claims. | 404 if no session |
 | GET | `/api/hypotheses` | Hypotheses with ranking/status. | 404 if no session |
 | GET | `/api/judgments` | Judgments with confidence/uncertainty/implications. | 404 if no session |
-| GET | `/api/thesis` | All theses with `isActive`. | 404 if no session |
-| GET | `/api/thesis/:ref` | Thesis + full assessment history. | 404 |
+| GET | `/api/thesis` | All theses with `isActive`; `?status&q` filters. | 404 if no session |
+| GET | `/api/thesis/:ref` | Thesis + assessment history + linked research + linked saved artifacts. | 404 |
+| POST | `/api/thesis` | Create a thesis. Body `{statement?, title?, objective?, asset?, researchRef?, savedId?, invalidationConditions?, materialConditions?}` (one of statement/researchRef/savedId required). | 400 / 404 |
+| PATCH | `/api/thesis/:ref` | Explicit trader update (authoring fields only; versioned, prior version preserved). | 400 / 404 |
+| DELETE | `/api/thesis/:ref` | Archive (soft delete; the record and history remain). | 404 |
+| POST | `/api/thesis/:ref/status` | Deterministic lifecycle transition. Body `{"status": string}`. | 400 invalid transition / 404 |
+| POST | `/api/thesis/:ref/link-saved` | Attach an existing Saved artifact by reference. Body `{"savedId": string}`. | 404 |
+| DELETE | `/api/thesis/:ref/link-saved/:savedId` | Detach a Saved artifact (thesis untouched). | 404 |
+| POST | `/api/thesis/:ref/link-research` | Attach an existing research run by reference. Body `{"researchRef": string}`. | 404 |
 | POST | `/api/thesis/select` | Set the active thesis (working state via the domain; persisted). Body: `{"thesisRef": string}`. | 400 / 404 |
 | GET | `/api/assessments?thesisRef=` | Assessment history (optionally per thesis). | 404 if no session |
 | GET | `/api/memory` | Memory entries with explicit `status` (CURRENT/STALE/HISTORICAL). | 404 if no session |
 | GET | `/api/artifacts` | Saved artifacts (SAVE products; legacy continuity surface). | 404 if no session |
-| GET | `/api/saved` | Saved library: ONE row per kept artifact, newest first, windowed/filterable (`?limit&offset&sort=recent|oldest&kind&q`). | 400 bad window/kind / 404 if no session |
+| GET | `/api/saved` | Saved library: ONE row per kept artifact, newest first, windowed/filterable (`?limit&offset&sort=recent|oldest&kind&researchRef&q`). | 400 bad window/kind/researchRef / 404 if no session |
 | GET | `/api/saved/:savedId` | One saved artifact + its provenance/origin context. | 404 |
 | POST | `/api/saved` | Explicit SAVE. Body `{researchRef, kind, sourceRef?, tags?, rationale?}`. Idempotent per originating artifact. | 400 / 404 / 500 PERSISTENCE_FAILURE |
 | DELETE | `/api/saved/:savedId` | Explicit UNSAVE. Removes only the saved artifact; the original research is untouched. | 404 / 500 PERSISTENCE_FAILURE |
