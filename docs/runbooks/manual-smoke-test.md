@@ -5,6 +5,11 @@ human-executable checklist; the CDP companion (`scripts/cdp-phase-e-smoke.mjs`)
 performs the identical 39 checks against the real UI + real API and records
 screenshots in `.data/phase-e-smoke/` (CDP never replaces the human pass).
 
+> **PHASE F NOTE:** after Firebase env vars are set on the deployment, this suite runs in
+> authenticated mode: the CDP script must sign in first (a separate Phase F two-account
+> suite covers isolation; see `handoff.md` §Phase F). Until then production stays in
+> pre-F form. The suite below documents the Phase E baseline it guarantees.
+
 **Final result: 39/39 checks passed** (CDP-assisted pass, 2026-09-27, after the
 incident fixes below). Pass history: 34/39 → 35/39 → 37/39 → 37/39 → 39/39.
 Two failing checks were diagnosed and corrected (not waived): B asserted a raw
