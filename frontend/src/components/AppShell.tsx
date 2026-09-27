@@ -4,6 +4,7 @@
  */
 import { useState, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
+import { useAuth, logout } from "../auth.js";
 
 const NAV = [
   { to: "/home", label: "Home", glyph: "⌂" },
@@ -23,6 +24,7 @@ export function AppShell({ title, children, contextRail }: {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   return (
     <div className="app-shell">
@@ -72,6 +74,20 @@ export function AppShell({ title, children, contextRail }: {
           <div className="topbar-right">
             <span className="badge gray" title="Connection status">F0 API</span>
             <button className="btn sm" onClick={() => navigate("/research")}>New research</button>
+            {user !== null && (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <span className="badge gray" title={user.email ?? user.uid} aria-label="Account identity indicator">
+                  {user.label}
+                </span>
+                <button
+                  className="btn ghost sm"
+                  onClick={() => { void logout().then(() => navigate("/")); }}
+                  aria-label="Logout"
+                >
+                  Sign out
+                </button>
+              </span>
+            )}
           </div>
         </header>
 

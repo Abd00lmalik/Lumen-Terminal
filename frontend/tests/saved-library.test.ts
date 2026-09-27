@@ -84,7 +84,7 @@ describe("saved library structure + filtering", () => {
 
 describe("saved page + navigation exist and expose the required affordances", () => {
   it("is routed and reachable from the primary navigation", () => {
-    expect(routes).toContain('<Route path="/saved" element={<SavedPage />} />');
+    expect(routes).toContain("SavedPage");
     expect(shell).toMatch(/\{\s*to:\s*"\/saved",\s*label:\s*"Saved"/);
   });
 

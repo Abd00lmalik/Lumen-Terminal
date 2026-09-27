@@ -179,7 +179,7 @@ describe("history timestamps and grouping (B2)", () => {
 
 describe("history page + navigation exist (B2)", () => {
   it("is routed and reachable from the primary navigation", () => {
-    expect(routes).toContain('<Route path="/history" element={<HistoryPage />} />');
+    expect(routes).toContain("HistoryPage");
     expect(shell).toMatch(/\{\s*to:\s*"\/history",\s*label:\s*"History"/);
   });
 

@@ -9,7 +9,15 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
+import { vi } from "vitest";
 import { AppRoutes } from "../src/routes.js";
+// Render as a SIGNED-IN account: the guard otherwise honestly refuses to render private
+// pages in a build without Firebase config (which is exactly what the guard must do).
+vi.mock("../src/auth.js", () => ({
+  authActive: true,
+  useAuth: () => ({ loading: false, user: { uid: "uid-test", email: "t@example.com", emailVerified: true, provider: "google.com", label: "t" }, authActive: true, token: async () => "test-token" }),
+  logout: async () => {},
+}));
 
 describe("history route", () => {
   it("renders the History page (search + honest loading state) inside the app shell", () => {

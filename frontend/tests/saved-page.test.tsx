@@ -8,7 +8,13 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
+import { vi } from "vitest";
 import { AppRoutes } from "../src/routes.js";
+vi.mock("../src/auth.js", () => ({
+  authActive: true,
+  useAuth: () => ({ loading: false, user: { uid: "uid-test", email: "t@example.com", emailVerified: true, provider: "google.com", label: "t" }, authActive: true, token: async () => "test-token" }),
+  logout: async () => {},
+}));
 
 describe("saved route", () => {
   it("renders the Saved library (kind tabs + honest loading state) inside the app shell", () => {

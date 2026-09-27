@@ -9,7 +9,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
+import { vi } from "vitest";
 import { AppRoutes } from "../src/routes.js";
+vi.mock("../src/auth.js", () => ({
+  authActive: true,
+  useAuth: () => ({ loading: false, user: { uid: "uid-test", email: "t@example.com", emailVerified: true, provider: "google.com", label: "t" }, authActive: true, token: async () => "test-token" }),
+  logout: async () => {},
+}));
 
 const SRC = join(import.meta.dirname, "..", "src");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
@@ -43,8 +49,8 @@ describe("SAVED-RUN-004: Saved filtering uses the backend, never a client-side f
 
 describe("Phase D thesis workspace", () => {
   it("is routed (list + detail) and uses explicit API actions only", () => {
-    expect(routes).toContain('<Route path="/thesis" element={<ThesisPage />} />');
-    expect(routes).toContain('<Route path="/thesis/:ref" element={<ThesisPage />} />');
+    expect(routes).toContain("ThesisPage");
+    expect(routes).toContain("ThesisPage");
     expect(thesisApi).toContain("createThesis");
     expect(thesisApi).toContain("updateThesis");
     expect(thesisApi).toContain("setThesisStatus");

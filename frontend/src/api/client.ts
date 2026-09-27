@@ -12,6 +12,19 @@
  */
 
 import type { ApiErrorDto } from "./types.js";
+import { authActive } from "../auth.js";
+
+/**
+ * Phase F: the current account's ID token, injected by main.tsx once <AuthProvider> has
+ * mounted. Keeping it as a settable hook (rather than importing the auth module's Firebase
+ * internals here) preserves this file's single-fetch-boundary law without a circular import.
+ */
+let tokenProvider: () => Promise<string | null> = async () => null;
+export function setApiTokenProvider(fn: () => Promise<string | null>): void {
+  tokenProvider = fn;
+}
+
+/** Typed 401 propagation: components see UNAUTHORIZED and can route to sign-in. */
 
 /**
  * API base URL resolution:
@@ -90,19 +103,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // and platform-level responses whose body is not our typed envelope can produce a single
   // failed workspace/history read; a confirmed double failure surfaces honestly.
   const attempt = async (): Promise<Response> => {
+    // PHASE F: attach the account's fresh ID token on EVERY request when auth is active.
+    const headers: Record<string, string> = {
+      // Content-Type ONLY when a body is actually sent: some platforms reject a
+      // bodyless request that declares a JSON content type (observed as an opaque,
+      // bodyless HTTP 400 from the hosting runtime that no typed handler can catch),
+      // which silently broke every state read in real browsers while curl-style
+      // probes (no CT header) succeeded. GET/HEAD carry no body.
+      ...(init?.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...((init?.headers ?? {}) as Record<string, string>),
+    };
+    if (authActive) {
+      const token = await tokenProvider();
+      if (token !== null) headers.Authorization = `Bearer ${token}`;
+    }
     try {
-      return await fetch(`${BASE_URL}${path}`, {
-        ...init,
-        headers: {
-          // Content-Type ONLY when a body is actually sent: some platforms reject a
-          // bodyless request that declares a JSON content type (observed as an opaque,
-          // bodyless HTTP 400 from the hosting runtime that no typed handler can catch),
-          // which silently broke every state read in real browsers while curl-style
-          // probes (no CT header) succeeded. GET/HEAD carry no body.
-          ...(init?.body !== undefined ? { "Content-Type": "application/json" } : {}),
-          ...(init?.headers ?? {}),
-        },
-      });
+      return await fetch(`${BASE_URL}${path}`, { ...init, headers });
     } catch (cause) {
       throw new NetworkError(cause);
     }
@@ -183,11 +199,16 @@ export async function streamResearch(
   options: { confirmed?: boolean; signal?: AbortSignal },
   handlers: StreamHandlers,
 ): Promise<void> {
+  const streamHeaders: Record<string, string> = { "Content-Type": "application/json", Accept: "text/event-stream" };
+  if (authActive) {
+    const token = await tokenProvider();
+    if (token !== null) streamHeaders.Authorization = `Bearer ${token}`;
+  }
   let res: Response;
   try {
     res = await fetch(`${BASE_URL}/api/research?stream=1`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      headers: streamHeaders,
       body: JSON.stringify({ message, ...(options.confirmed ? { confirmed: true } : {}) }),
       signal: options.signal,
     });
