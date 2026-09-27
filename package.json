@@ -26,6 +26,7 @@
   "dependencies": {
     "@fastify/cors": "^10.1.0",
     "@vercel/blob": "^2.8.0",
+    "aws4fetch": "^1.0.20",
     "fastify": "^5.12.4",
     "jose": "^6.2.12"
   }

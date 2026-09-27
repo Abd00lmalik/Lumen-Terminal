@@ -6,14 +6,24 @@
   "cleanUrls": true,
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/research" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    { "source": "/((?!api/|api/cron).*)", "destination": "/index.html" }
   ],
   "functions": {
     "api/research.ts": {
       "maxDuration": 300,
       "memory": 1769
+    },
+    "api/cron.ts": {
+      "maxDuration": 300,
+      "memory": 1769
     }
   },
+  "crons": [
+    {
+      "path": "/api/cron",
+      "schedule": "0 3 * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/api/(.*)",

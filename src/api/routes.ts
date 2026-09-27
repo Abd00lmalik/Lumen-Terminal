@@ -14,6 +14,7 @@ import type { ProgressEvent } from "../research/progress.js";
 import { SAVED_KINDS } from "../domain/thesis.js";
 import { diagnoseBlobTransport } from "../persistence/vercel-edge.js";
 import { storageWatchdogReport } from "../ops/storage-watchdog-endpoint.js";
+import { runOffsiteBackup, readBackupStatus, runRestoreDrill } from "../ops/backup-job.js";
 import type { ApiErrorDTO } from "./dto.js";
 
 function isString(v: unknown): v is string {
@@ -287,6 +288,17 @@ export function registerRoutes(app: FastifyInstance, context: RouteContext): voi
   // PHASE F storage watchdog: READ-ONLY classification of storage health (never mutates
   // workspace state; bookkeeping samples go to a separate ops/ object). Admin-gated.
   app.get("/api/storage/health", { handler: withErrors(async (req) => { requireAdmin(req); return storageWatchdogReport(await appForRequest(req)); }) });
+  // PHASE F offsite backup trigger + status (admin-gated; server-side credentials only).
+  app.post("/api/storage/backup", { handler: withErrors(async (req) => { requireAdmin(req); return runOffsiteBackup(); }) });
+  app.get("/api/storage/backup-status", { handler: withErrors(async (req) => { requireAdmin(req); return readBackupStatus(); }) });
+  // PHASE F non-destructive restore drill: restores a chosen backup into an ISOLATED
+  // verification path, validates it, reports — and never touches production state.
+  app.post("/api/storage/restore-drill", { handler: withErrors(async (req) => {
+    requireAdmin(req);
+    const body = (req.body ?? {}) as { backupKey?: unknown };
+    if (typeof body.backupKey !== "string" || body.backupKey === "") throw new InvalidRequestError('"backupKey" is required');
+    return runRestoreDrill(body.backupKey);
+  }) });
   app.get("/api/storage/sessions", { handler: withErrors(async (req) => { requireAdmin(req); return { liveSessions: sessions.size }; }) });
 
 
