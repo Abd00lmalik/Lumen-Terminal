@@ -1,19 +1,20 @@
 /**
- * Phase E hardening (production incident rs_000244): the store's old "read hiccup degrades
- * to an unconditional write" path ERASED a completed run in production — a read that THROWS
- * means we do not know what the blob holds, so an unmerged write is a lost-update with the
- * failure hidden. The fix aborts the save honestly (BlobReadUnavailableError) instead of
- * writing over unreadable content, and a read error before our FIRST write is no longer
- * swallowed into an empty-workspace save.
+ * Phase E hardening (production incidents rs_000244 + rs_000249): the store's old "read
+ * hiccup degrades to an unconditional write" path ERASED completed runs in production, in
+ * two distinct ways — a read that THROWS (rs_000244) and a read that returns a TRUNCATED
+ * body, which parses exactly like corruption (rs_000249). Both mean "we do not know what
+ * the blob holds", so an unmerged write is a lost-update with the failure hidden. The fix
+ * aborts the save honestly (BlobReadUnavailableError) instead of writing over unreadable
+ * content, and a read error before our FIRST write is no longer swallowed into an
+ * empty-workspace save.
  *
- * Also proves the recovery-write path stays available: content that READS fine but does not
- * PARSE (corruption) is still replaced by a valid snapshot, and a transient read failure
- * that clears on retry still merges.
+ * Also proves the honest-abort leaves the remote bytes intact, and that a transient read
+ * failure that clears on retry still merges.
  */
 import { describe, expect, it } from "vitest";
 import { VercelBlobStore, BlobReadUnavailableError } from "../../src/persistence/vercel-edge.js";
 import { FakeBlob } from "./fake-blob.js";
-import { Workspace, type WorkspaceSnapshot } from "../../src/domain/workspace.js";
+import type { WorkspaceSnapshot } from "../../src/domain/workspace.js";
 
 function emptySnapshot(): WorkspaceSnapshot {
   return {
@@ -23,18 +24,17 @@ function emptySnapshot(): WorkspaceSnapshot {
   };
 }
 
-describe("Phase E: a failed origin read never enables an unmerged overwrite", () => {
+describe("Phase E: a failed or unreadable origin read never enables an unmerged overwrite", () => {
   it("aborts the save when the origin read throws (no blind write over unknown content)", async () => {
     const blob = new FakeBlob();
     const store = new VercelBlobStore(blob.client());
-    const existing = { ...emptySnapshot(), researches: [] };
-    await store.save(existing); // blob now exists with our first write
+    await store.save({ ...emptySnapshot(), researches: [] }); // blob now exists with our first write
 
     // Another instance completed a run we have not seen.
-    const other = Workspace.fromSnapshot(existing);
-    void other;
-    const remote = { ...emptySnapshot(), researches: [] };
-    blob.put(JSON.stringify({ ...remote, researches: [], researchResponses: [{ researchId: "rs_000001", response: { answer: { answer: "other instance run" } } }] }));
+    blob.put(JSON.stringify({
+      ...emptySnapshot(),
+      researchResponses: [{ researchId: "rs_000001", response: { answer: { answer: "other instance run" } } }],
+    }));
 
     // Our reads now fail at the transport level; writes would still "work" — that is the trap.
     blob.failReads = new Error("read timeout");
@@ -64,11 +64,30 @@ describe("Phase E: a failed origin read never enables an unmerged overwrite", ()
     expect((after.researchResponses ?? []).some((r) => r.researchId === "rs_000009")).toBe(true);
   });
 
-  it("corrupt (unparseable but readable) content is still replaced by a valid snapshot", async () => {
+  it("corrupt (unparseable but readable) content aborts the save instead of being overwritten (rs_000249)", async () => {
     const blob = new FakeBlob();
     const store = new VercelBlobStore(blob.client());
     blob.put("not json at all");
-    await expect(store.save({ ...emptySnapshot(), researches: [] })).resolves.toBeUndefined();
-    expect(JSON.parse(blob.body()!)).toBeDefined();
+    // An unparseable body is indistinguishable from a truncated read: the save aborts
+    // honestly rather than replacing content we could not actually read.
+    await expect(store.save({ ...emptySnapshot(), researches: [] })).rejects.toBeInstanceOf(BlobReadUnavailableError);
+    expect(blob.body()).toBe("not json at all"); // the unreadable bytes were NOT overwritten
+  });
+
+  it("a TRUNCATED read (valid JSON prefix, short body) aborts the save the same way (rs_000249)", async () => {
+    const blob = new FakeBlob();
+    const store = new VercelBlobStore(blob.client());
+    await store.save({ ...emptySnapshot(), researches: [] });
+
+    // Another instance's snapshot, cut off mid-transfer: no throw, no abort — just a short body.
+    const other = JSON.stringify({
+      ...emptySnapshot(),
+      researchResponses: [{ researchId: "rs_000249", response: { answer: { answer: "erased in production" } } }],
+    });
+    const truncated = other.slice(0, Math.floor(other.length / 3));
+    blob.put(truncated);
+
+    await expect(store.save({ ...emptySnapshot(), researches: [] })).rejects.toBeInstanceOf(BlobReadUnavailableError);
+    expect(blob.body()).toBe(truncated); // the truncated bytes were NOT overwritten
   });
 });

@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   BLOB_IO_TIMEOUT_MS,
   BlobIoTimeoutError,
+  BlobReadUnavailableError,
   SNAPSHOT_CACHE_CONTROL_MAX_AGE_SECONDS,
   VercelBlobStore,
   snapshotReadOptions,
@@ -151,11 +152,12 @@ describe("VercelBlobStore (production persistence, tested with an in-memory blob
     corrupt.put("{ this is not json");
     expect(await new VercelBlobStore(corrupt.client()).load()).toBeUndefined();
 
-    // A corrupt remote also must not discard OUR in-memory state during save.
+    // PHASE E (rs_000249): a corrupt remote on the WRITE path is no longer replaced — an
+    // unparseable body is indistinguishable from a truncated read, so the save aborts
+    // honestly instead of writing over unreadable content.
     const store = new VercelBlobStore(corrupt.client());
-    await store.save(workspaceWithRuns(1, "A").toSnapshot());
-    const after = JSON.parse(corrupt.body()!) as { researches: readonly unknown[] };
-    expect(after.researches.length).toBe(1);
+    await expect(store.save(workspaceWithRuns(1, "A").toSnapshot())).rejects.toBeInstanceOf(BlobReadUnavailableError);
+    expect(corrupt.body()).toBe("{ this is not json"); // nothing was written over it
   });
 
   it("hydrates every retained run and its record after a cold start (no eviction, no loss)", async () => {

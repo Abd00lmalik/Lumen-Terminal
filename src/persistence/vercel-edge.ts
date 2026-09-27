@@ -38,9 +38,10 @@
  *
  * Failure semantics: a failed save must never claim persistence succeeded (the caller's
  * save path surfaces the error); a missing/unreadable blob is "no workspace yet", not a
- * crash; one failed save must not poison the queue for subsequent saves; a read hiccup
- * degrades to an unconditional write so our own state is never lost. The dependency is
- * imported lazily so local dev without the package still works.
+ * crash; one failed save must not poison the queue for subsequent saves. A read that
+ * fails — or returns a body that does not parse — ABORTS the save (BlobReadUnavailableError):
+ * an unmerged write over unreadable content is erasure, not recovery (rs_000244, rs_000249).
+ * The dependency is imported lazily so local dev without the package still works.
  */
 import type { WorkspaceStore } from "./index.js";
 import { Workspace, type WorkspaceSnapshot } from "../domain/workspace.js";
@@ -221,10 +222,12 @@ export class BlobIoTimeoutError extends Error {
 }
 
 /**
- * The origin read failed after bounded retries while the blob may exist, so the save was
- * ABORTED instead of writing an unmerged snapshot over unknown content (Phase E incident
- * rs_000244: that "degraded" write erased a completed run in production). Honest failure —
- * the caller reports that persistence did not happen — beats silent erasure of history.
+ * The origin read failed after bounded retries — or returned a body that does not parse —
+ * while the blob may exist, so the save was ABORTED instead of writing an unmerged snapshot
+ * over unknown content. Two production incidents drove this (Phase E): rs_000244 (a thrown
+ * read "degraded" to an unconditional write) and rs_000249 (a truncated read parsed like
+ * corruption and hit the same unmerged write). Honest failure — the caller reports that
+ * persistence did not happen — beats silent erasure of history.
  */
 export class BlobReadUnavailableError extends Error {
   constructor(pathname: string) {
@@ -302,15 +305,13 @@ export class VercelBlobStore implements WorkspaceStore {
         // must never erase runs another instance completed while it was idle.
         //
         // PHASE E (production incident rs_000244): a failed read used to "degrade" to an
-        // unconditional write. That conflates two different failures. A read that SUCCEEDS
-        // but parses badly is corruption we can recover from (the bytes are garbage; our
-        // valid state replaces them). A read that THROWS is a transport failure: we have NO
-        // idea what the blob holds, and writing our unmerged snapshot over it erases every
-        // run the missing read would have contained (observed live: a completed run was
-        // wiped from production while a concurrent save's read timed out). The blob now has
-        // to be actually read (bounded retry, then once more) before any write that would
-        // replace existing content; otherwise the save fails HONESTLY and the caller reports
-        // that persistence did not happen — the same law as a failed write.
+        // unconditional write. A read that THROWS is a transport failure: we have NO idea
+        // what the blob holds, and writing our unmerged snapshot over it erases every run
+        // the missing read would have contained (observed live: a completed run was wiped
+        // from production while a concurrent save's read timed out). The blob now has to be
+        // actually read (bounded retry, then once more) before any write that would replace
+        // existing content; otherwise the save fails HONESTLY and the caller reports that
+        // persistence did not happen — the same law as a failed write.
         let remote: { body: string; etag: string } | undefined;
         let readFailed = false;
         for (let readAttempt = 0; readAttempt < 3 && remote === undefined; readAttempt += 1) {
@@ -331,7 +332,15 @@ export class VercelBlobStore implements WorkspaceStore {
           try {
             merged = mergeSnapshots(snapshot, JSON.parse(remote.body) as WorkspaceSnapshot);
           } catch {
-            merged = snapshot; // unparseable remote: recovery write (see incident note above)
+            // PHASE E (second production incident, rs_000249): an UNPARSEABLE body is NOT
+            // provable at-rest corruption — a TRUNCATED read (connection closed mid-transfer:
+            // no abort, no throw, just a short body) parses exactly like corruption. Writing
+            // our snapshot over it erases every run the missing tail contained (observed
+            // live: a completed run vanished seconds after persisting). At-rest corruption
+            // of an immutable blob object is not a realistic event; an unparseable body on
+            // the WRITE path therefore means "unreadable" — abort honestly. Manual recovery
+            // from a verified recovery point is documented in docs/runbooks/blob-storage.md.
+            throw new BlobReadUnavailableError(BLOB_PATH);
           }
         }
         // CONDITIONAL-WRITE VALIDATOR (Phase C production finding): use the STRONG etag from
