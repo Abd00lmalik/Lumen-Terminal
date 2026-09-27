@@ -224,10 +224,12 @@ export class BlobIoTimeoutError extends Error {
 /**
  * The origin read failed after bounded retries — or returned a body that does not parse —
  * while the blob may exist, so the save was ABORTED instead of writing an unmerged snapshot
- * over unknown content. Two production incidents drove this (Phase E): rs_000244 (a thrown
- * read "degraded" to an unconditional write) and rs_000249 (a truncated read parsed like
- * corruption and hit the same unmerged write). Honest failure — the caller reports that
- * persistence did not happen — beats silent erasure of history.
+ * over unknown content. Three production incidents drove this (Phase E): rs_000244 (a thrown
+ * read "degraded" to an unconditional write), rs_000249 (a truncated read parsed like
+ * corruption and hit the same unmerged write), and th_000011 (a present blob read answered
+ * BLANK, which counted as "absent" and let a local-only conditional write skip the merge
+ * law entirely). Honest failure — the caller reports that persistence did not happen —
+ * beats silent erasure of history.
  */
 export class BlobReadUnavailableError extends Error {
   constructor(pathname: string) {
@@ -433,7 +435,17 @@ export class VercelBlobStore implements WorkspaceStore {
   private async readRawWithEtag(): Promise<{ body: string; etag: string } | undefined> {
     const read = async (access: BlobAccess): Promise<{ body: string; etag: string } | undefined> => {
       const found = await this.bounded("read", (signal) => this.client.read(BLOB_PATH, access, snapshotReadOptions(signal)));
-      if (found === undefined || found.body.trim() === "") return undefined;
+      // ABSENT vs BLANK are different facts. A 404/absent blob is "no workspace yet"
+      // (undefined). But a PRESENT blob with a BLANK body (Phase E incident 3, th_000011:
+      // an origin read answered 200 with zero bytes) is an UNRELIABLE read — this store
+      // never writes empty snapshots, so blank content for a present blob cannot be real
+      // state. Counting it as "absent" made save() skip the merge law entirely (nothing to
+      // merge with) and write local-only content under a valid ifMatch guard — a legal
+      // conditional write that still ERASED everything the unreadable blob held. Blank is
+      // therefore a read failure: the save path retries it and aborts honestly; the load
+      // path falls back to the last cached snapshot.
+      if (found === undefined) return undefined;
+      if (found.body.trim() === "") throw new Error("Blob read returned an empty body for a present blob");
       return found;
     };
     if (this.access !== undefined) return await read(this.access);

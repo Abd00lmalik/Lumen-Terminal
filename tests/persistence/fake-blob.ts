@@ -27,6 +27,8 @@ export class FakeBlob {
   failReads?: Error;
   /** Auto-clears after each failing read when true (default: stays set for every read). */
   failReadsOnce = false;
+  /** When true, reads of a PRESENT blob answer with a BLANK body (Phase E incident 3). */
+  blankReads = false;
   /** When set, writes never settle (proves a hung transport cannot stall the store forever). */
   hangWrites = false;
   /** Access mode this fake accepts; a mismatch mimics the store-level misconfiguration. */
@@ -43,6 +45,7 @@ export class FakeBlob {
           if (this.failReadsOnce) this.failReads = undefined;
           throw error;
         }
+        if (this.blankReads && this.value !== undefined) return { body: "", etag: this.value.etag };
         return this.value === undefined ? undefined : { ...this.value };
       },
       head: async (_pathname, access, signal) => {
