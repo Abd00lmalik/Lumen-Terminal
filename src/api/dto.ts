@@ -918,6 +918,7 @@ export type ApiErrorCode =
   | "AWAITING_CONFIRMATION"
   | "MODEL_FAILURE"
   | "PERSISTENCE_FAILURE"
+  | "UNAUTHORIZED"
   | "INTERNAL_ERROR";
 
 export interface ApiErrorDTO {

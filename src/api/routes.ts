@@ -234,35 +234,65 @@ function withErrors(handler: (req: FastifyRequest, reply: FastifyReply) => unkno
   };
 }
 
-export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): void {
+export interface RouteContext {
+  /** Phase F: resolve the workspace-bearing ResearchApp for THIS request (auth-aware). */
+  readonly appForRequest: (req: FastifyRequest) => Promise<ResearchApp>;
+  /** Phase F diagnostics: live per-workspace session count on this warm instance. */
+  readonly sessions: { readonly size: number };
+  /** True when authentication is enforced (production); false in explicit OPEN mode. */
+  readonly authOn: boolean;
+}
+export function registerRoutes(app: FastifyInstance, context: RouteContext): void {
+  const { appForRequest, sessions, authOn } = context;
+  // OPEN-mode compatibility: handlers written against a single shared app now resolve the
+  // PER-REQUEST app (open mode always resolves to the same openApp; auth mode to the
+  // caller's own workspace session) — behavior is identical to pre-Phase-F in open mode.
+  /** Phase F admin gate: storage/compaction tooling is never public surface. Identity
+   *  comes from the verified session; the allowlist is the operator's email allowlist. */
+  const requireAdmin = (req: FastifyRequest): void => {
+    if (!authOn) return; // open mode (tests/dev): no gate
+    const user = (req as unknown as { user?: { uid: string; email?: string } }).user;
+    const allowlist = (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter((e) => e !== "");
+    const email = user?.email?.toLowerCase();
+    if (email === undefined || !allowlist.includes(email)) {
+      throw new ApiFailure(404, "NOT_FOUND", "Route not found."); // existence-hiding: indistinguishable from an unknown route
+    }
+  };
   // ------------------------------------------------------------------
   // Session / workspace / continuity (F0 mandate §9)
   // ------------------------------------------------------------------
 
-  app.post("/api/session", async (_req, reply) => {
-    const snapshot = researchApp.sessionSnapshot();
+  app.post("/api/session", async (req, reply) => {
+    const snapshot = await appForRequest(req);
     return reply.code(201).send({
       workspaceRef: "local", // single-workspace MVP; identity stub per FRONTEND_ARCHITECTURE.md §18
       createdAt: new Date().toISOString(),
-      continuity: snapshot.continuity,
+      continuity: snapshot.sessionSnapshot().continuity,
     });
   });
 
-  app.get("/api/workspace", { handler: withErrors(async () => researchApp.continuity()) });
+  app.get("/api/workspace", { handler: withErrors(async (req) => (await appForRequest(req)).continuity()) });
   // READ-ONLY storage audit (Phase E): byte-level breakdown of the persisted snapshot for the
   // storage runbook and compaction decisions. Mutates nothing; see docs/runbooks/blob-storage.md.
-  app.get("/api/storage/audit", { handler: withErrors(async () => researchApp.storageAudit()) });
+  app.get("/api/storage/audit", { handler: withErrors(async (req) => { requireAdmin(req); return (await appForRequest(req)).storageAudit(); }) });
   // READ-ONLY blob transport diagnosis (Phase E incident tooling): which credentials the
   // runtime sees (presence only) and what a bare origin HEAD/GET returns, with the SDK's
   // own error text. No writes, no secret values, no blob content. See the runbook.
-  app.get("/api/storage/diagnose", { handler: withErrors(async () => diagnoseBlobTransport()) });
+  // Phase E incident tooling, now ADMIN-ONLY (identity from the verified session; allowlist
+  // from ADMIN_EMAILS). Public exposure of transport internals was a Phase F audit finding.
+  // Phase E incident tooling, now ADMIN-ONLY (identity from the verified session; allowlist
+  // from ADMIN_EMAILS). Public exposure of transport internals was a Phase F audit finding.
+  app.get("/api/storage/diagnose", { handler: withErrors(async (req) => { requireAdmin(req); return diagnoseBlobTransport(); }) });
+  app.get("/api/storage/sessions", { handler: withErrors(async (req) => { requireAdmin(req); return { liveSessions: sessions.size }; }) });
+
 
   // One-shot snapshot COMPACTION (Phase E): normalizes legacy v1 run records to the v2 slim
   // shape — reference-based, never deletion. Guarded rehydration keeps semantic equivalence;
   // see ResearchApp.compactStorage and docs/runbooks/blob-storage.md.
   app.post("/api/storage/compact", { handler: withErrors(async (req) => {
+    requireAdmin(req);
     const body = (req.body ?? {}) as { dryRun?: unknown };
-    return researchApp.compactStorage({ dryRun: body.dryRun === true });
+    return (await appForRequest(req)).compactStorage({ dryRun: body.dryRun === true });
   }) });
 
   // ------------------------------------------------------------------
@@ -284,7 +314,7 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
 
     if (!wantsStream) {
       try {
-        const dto = await researchApp.submitResearchRequest(message, undefined, confirmed);
+        const dto = await (await appForRequest(req)).submitResearchRequest(message, undefined, confirmed);
         return reply.code(200).send(dto);
       } catch (err) {
         handleError(reply, err);
@@ -310,7 +340,7 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
     const onProgress = (e: ProgressEvent) => send({ event: "progress", data: e });
 
     try {
-      const dto = await researchApp.submitResearchRequest(message, onProgress, confirmed);
+      const dto = await (await appForRequest(req)).submitResearchRequest(message, onProgress, confirmed);
       // The terminal event is written, then a padded tail flush follows so no intermediary
       // buffer can sit on the last bytes; the client parses events, never the padding.
       raw.write(formatSseEvent({ event: "final", data: dto }));
@@ -331,10 +361,10 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
   // ------------------------------------------------------------------
 
   app.get("/api/research", {
-    handler: withErrors(async (req) => researchApp.listResearch(readResearchListOptions(req.query))),
+    handler: withErrors(async (req) => (await appForRequest(req)).listResearch(readResearchListOptions(req.query))),
   });
   app.get("/api/research/:ref", {
-    handler: withErrors(async (req) => researchApp.getResearch((req.params as { ref: string }).ref)),
+    handler: withErrors(async (req) => (await appForRequest(req)).getResearch((req.params as { ref: string }).ref)),
   });
   app.get("/api/evidence", {
     handler: withErrors(async (req) => {
@@ -345,27 +375,27 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
       const rawLimit = (req.query as { limit?: string } | undefined)?.limit;
       const parsed = rawLimit === undefined ? Number.NaN : Number(rawLimit);
       const limit = Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, 2000) : 300;
-      return researchApp.listEvidence().slice(-limit).reverse(); // newest first
+      return (await appForRequest(req)).listEvidence().slice(-limit).reverse(); // newest first
     }),
   });
   app.get("/api/evidence/:ref", {
-    handler: withErrors(async (req) => researchApp.getEvidence((req.params as { ref: string }).ref)),
+    handler: withErrors(async (req) => (await appForRequest(req)).getEvidence((req.params as { ref: string }).ref)),
   });
-  app.get("/api/claims", { handler: withErrors(async () => researchApp.listClaims()) });
-  app.get("/api/hypotheses", { handler: withErrors(async () => researchApp.listHypotheses()) });
-  app.get("/api/judgments", { handler: withErrors(async () => researchApp.listJudgments()) });
+  app.get("/api/claims", { handler: withErrors(async (req) => (await appForRequest(req)).listClaims()) });
+  app.get("/api/hypotheses", { handler: withErrors(async (req) => (await appForRequest(req)).listHypotheses()) });
+  app.get("/api/judgments", { handler: withErrors(async (req) => (await appForRequest(req)).listJudgments()) });
 
   // ------------------------------------------------------------------
   // Thesis workspace (F0 mandate §11); selection routed through the domain boundary only
   // ------------------------------------------------------------------
 
   app.get("/api/thesis", {
-    handler: withErrors(async (req) => researchApp.listTheses(readThesisListOptions(req.query))),
+    handler: withErrors(async (req) => (await appForRequest(req)).listTheses(readThesisListOptions(req.query))),
   });
   // Contract alias: the frontend client historically calls the plural path; both resolve
   // to the same handler so neither side's vocabulary can 404 the theses list.
   app.get("/api/theses", {
-    handler: withErrors(async (req) => researchApp.listTheses(readThesisListOptions(req.query))),
+    handler: withErrors(async (req) => (await appForRequest(req)).listTheses(readThesisListOptions(req.query))),
   });
 
   // Phase D: explicit thesis actions (create/update/status/archive/link). The API caller is the
@@ -373,7 +403,7 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
   // these let an LLM sentence mutate the trader's belief; only explicit trader calls do.
   app.post("/api/thesis", async (req, reply) => {
     try {
-      const out = await researchApp.createThesis(readThesisCreate(req.body));
+      const out = await (await appForRequest(req)).createThesis(readThesisCreate(req.body));
       return reply.code(201).send(out);
     } catch (err) {
       handleError(reply, err);
@@ -382,19 +412,19 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
   app.post("/api/thesis/select", async (req, reply) => {
     try {
       const ref = requireString(req.body, "thesisRef");
-      const out = await researchApp.selectThesis(ref);
+      const out = await (await appForRequest(req)).selectThesis(ref);
       return reply.code(200).send(out);
     } catch (err) {
       handleError(reply, err);
     }
   });
   app.get("/api/thesis/:ref", {
-    handler: withErrors(async (req) => researchApp.getThesis((req.params as { ref: string }).ref)),
+    handler: withErrors(async (req) => (await appForRequest(req)).getThesis((req.params as { ref: string }).ref)),
   });
   app.patch("/api/thesis/:ref", async (req, reply) => {
     try {
       const ref = (req.params as { ref: string }).ref;
-      const out = await researchApp.updateThesis(ref, readThesisUpdate(req.body));
+      const out = await (await appForRequest(req)).updateThesis(ref, readThesisUpdate(req.body));
       return reply.code(200).send(out);
     } catch (err) {
       handleError(reply, err);
@@ -403,7 +433,7 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
   app.delete("/api/thesis/:ref", async (req, reply) => {
     try {
       const ref = (req.params as { ref: string }).ref;
-      const out = await researchApp.archiveThesis(ref);
+      const out = await (await appForRequest(req)).archiveThesis(ref);
       return reply.code(200).send(out);
     } catch (err) {
       handleError(reply, err);
@@ -413,7 +443,7 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
     try {
       const ref = (req.params as { ref: string }).ref;
       const status = requireString(req.body, "status");
-      const out = await researchApp.setThesisStatus(ref, status);
+      const out = await (await appForRequest(req)).setThesisStatus(ref, status);
       return reply.code(200).send(out);
     } catch (err) {
       handleError(reply, err);
@@ -423,7 +453,7 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
     try {
       const ref = (req.params as { ref: string }).ref;
       const savedId = requireString(req.body, "savedId");
-      const out = await researchApp.linkThesisSaved(ref, savedId);
+      const out = await (await appForRequest(req)).linkThesisSaved(ref, savedId);
       return reply.code(200).send(out);
     } catch (err) {
       handleError(reply, err);
@@ -432,7 +462,7 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
   app.delete("/api/thesis/:ref/link-saved/:savedId", async (req, reply) => {
     try {
       const { ref, savedId } = req.params as { ref: string; savedId: string };
-      const out = await researchApp.unlinkThesisSaved(ref, savedId);
+      const out = await (await appForRequest(req)).unlinkThesisSaved(ref, savedId);
       return reply.code(200).send(out);
     } catch (err) {
       handleError(reply, err);
@@ -442,7 +472,7 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
     try {
       const ref = (req.params as { ref: string }).ref;
       const researchRef = requireString(req.body, "researchRef");
-      const out = await researchApp.linkThesisResearch(ref, researchRef);
+      const out = await (await appForRequest(req)).linkThesisResearch(ref, researchRef);
       return reply.code(200).send(out);
     } catch (err) {
       handleError(reply, err);
@@ -452,7 +482,7 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
     handler: withErrors(async (req) => {
       const q = req.query as Record<string, unknown> | undefined;
       const thesisRef = q !== undefined && isString(q.thesisRef) ? q.thesisRef : undefined;
-      return researchApp.listAssessments(thesisRef);
+      return (await appForRequest(req)).listAssessments(thesisRef);
     }),
   });
 
@@ -462,8 +492,8 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
   // HTTP shortcut. No persistMemory route exists; by construction.
   // ------------------------------------------------------------------
 
-  app.get("/api/memory", { handler: withErrors(async () => researchApp.listMemories()) });
-  app.get("/api/artifacts", { handler: withErrors(async () => researchApp.listSavedArtifacts()) });
+  app.get("/api/memory", { handler: withErrors(async (req) => (await appForRequest(req)).listMemories()) });
+  app.get("/api/artifacts", { handler: withErrors(async (req) => (await appForRequest(req)).listSavedArtifacts()) });
 
   // ------------------------------------------------------------------
   // Saved workspace (Phase C): explicit SAVE/UNSAVE by the trader. POST/DELETE are the typed
@@ -472,22 +502,22 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
   // ------------------------------------------------------------------
 
   app.get("/api/saved", {
-    handler: withErrors(async (req) => researchApp.listSaved(readSavedListOptions(req.query))),
+    handler: withErrors(async (req) => (await appForRequest(req)).listSaved(readSavedListOptions(req.query))),
   });
   app.get("/api/saved/:savedId", {
-    handler: withErrors(async (req) => researchApp.getSaved((req.params as { savedId: string }).savedId)),
+    handler: withErrors(async (req) => (await appForRequest(req)).getSaved((req.params as { savedId: string }).savedId)),
   });
   app.post("/api/saved", async (req, reply) => {
     try {
       const payload = readSavedCreate(req.body);
-      const dto = await researchApp.createSaved(payload);
+      const dto = await (await appForRequest(req)).createSaved(payload);
       return reply.code(201).send(dto);
     } catch (err) {
       handleError(reply, err);
     }
   });
   app.delete("/api/saved/:savedId", {
-    handler: withErrors(async (req) => researchApp.deleteSaved((req.params as { savedId: string }).savedId)),
+    handler: withErrors(async (req) => (await appForRequest(req)).deleteSaved((req.params as { savedId: string }).savedId)),
   });
 
   // ------------------------------------------------------------------
@@ -495,11 +525,11 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
   // implied. Activation goes through the domain's trader-confirmation boundary.
   // ------------------------------------------------------------------
 
-  app.get("/api/monitors", { handler: withErrors(async () => researchApp.listMonitors()) });
+  app.get("/api/monitors", { handler: withErrors(async (req) => (await appForRequest(req)).listMonitors()) });
   app.post("/api/monitors/:ref/activate", {
     handler: withErrors(async (req) => {
       const ref = (req.params as { ref: string }).ref;
-      return researchApp.activateMonitor(ref);
+      return (await appForRequest(req)).activateMonitor(ref);
     }),
   });
 
