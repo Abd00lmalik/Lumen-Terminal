@@ -13,6 +13,7 @@ import { formatSseEvent, sseHeaders, type SseEvent } from "./sse.js";
 import type { ProgressEvent } from "../research/progress.js";
 import { SAVED_KINDS } from "../domain/thesis.js";
 import { diagnoseBlobTransport } from "../persistence/vercel-edge.js";
+import { storageWatchdogReport } from "../ops/storage-watchdog-endpoint.js";
 import type { ApiErrorDTO } from "./dto.js";
 
 function isString(v: unknown): v is string {
@@ -283,6 +284,9 @@ export function registerRoutes(app: FastifyInstance, context: RouteContext): voi
   // Phase E incident tooling, now ADMIN-ONLY (identity from the verified session; allowlist
   // from ADMIN_EMAILS). Public exposure of transport internals was a Phase F audit finding.
   app.get("/api/storage/diagnose", { handler: withErrors(async (req) => { requireAdmin(req); return diagnoseBlobTransport(); }) });
+  // PHASE F storage watchdog: READ-ONLY classification of storage health (never mutates
+  // workspace state; bookkeeping samples go to a separate ops/ object). Admin-gated.
+  app.get("/api/storage/health", { handler: withErrors(async (req) => { requireAdmin(req); return storageWatchdogReport(await appForRequest(req)); }) });
   app.get("/api/storage/sessions", { handler: withErrors(async (req) => { requireAdmin(req); return { liveSessions: sessions.size }; }) });
 
 
