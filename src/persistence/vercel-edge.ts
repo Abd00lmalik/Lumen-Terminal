@@ -220,6 +220,19 @@ export class BlobIoTimeoutError extends Error {
   }
 }
 
+/**
+ * The origin read failed after bounded retries while the blob may exist, so the save was
+ * ABORTED instead of writing an unmerged snapshot over unknown content (Phase E incident
+ * rs_000244: that "degraded" write erased a completed run in production). Honest failure —
+ * the caller reports that persistence did not happen — beats silent erasure of history.
+ */
+export class BlobReadUnavailableError extends Error {
+  constructor(pathname: string) {
+    super(`Blob ${pathname} could not be read from origin storage; save aborted rather than overwrite unreadable content`);
+    this.name = "BlobReadUnavailableError";
+  }
+}
+
 export interface VercelBlobStoreOptions {
   /** Per-operation ceiling; overridable so tests can exercise the timeout without waiting. */
   readonly ioTimeoutMs?: number;
@@ -286,21 +299,39 @@ export class VercelBlobStore implements WorkspaceStore {
       for (;;) {
         // MERGE-BEFORE-WRITE (multi-instance law): re-read the blob's CURRENT state (from
         // origin storage, never a CDN copy) and union it with ours. A stale warm instance
-        // must never erase runs another instance completed while it was idle. A failed
-        // re-read (transient) degrades to an unconditional write: our own state is never
-        // lost to a read hiccup.
+        // must never erase runs another instance completed while it was idle.
+        //
+        // PHASE E (production incident rs_000244): a failed read used to "degrade" to an
+        // unconditional write. That conflates two different failures. A read that SUCCEEDS
+        // but parses badly is corruption we can recover from (the bytes are garbage; our
+        // valid state replaces them). A read that THROWS is a transport failure: we have NO
+        // idea what the blob holds, and writing our unmerged snapshot over it erases every
+        // run the missing read would have contained (observed live: a completed run was
+        // wiped from production while a concurrent save's read timed out). The blob now has
+        // to be actually read (bounded retry, then once more) before any write that would
+        // replace existing content; otherwise the save fails HONESTLY and the caller reports
+        // that persistence did not happen — the same law as a failed write.
         let remote: { body: string; etag: string } | undefined;
-        try {
-          remote = await this.readRawWithEtag();
-        } catch {
-          remote = undefined;
+        let readFailed = false;
+        for (let readAttempt = 0; readAttempt < 3 && remote === undefined; readAttempt += 1) {
+          try {
+            remote = await this.readRawWithEtag();
+          } catch {
+            readFailed = true; // transport failure (absent blob returns undefined without throwing)
+            if (readAttempt < 2) await new Promise((r) => setTimeout(r, 500));
+          }
+        }
+        if (readFailed && remote === undefined) {
+          // The blob may exist but be unreadable to us right now. Refuse to write blind:
+          // an unmerged write here is exactly the erasure the merge law exists to prevent.
+          throw new BlobReadUnavailableError(BLOB_PATH);
         }
         let merged = snapshot;
         if (remote !== undefined) {
           try {
             merged = mergeSnapshots(snapshot, JSON.parse(remote.body) as WorkspaceSnapshot);
           } catch {
-            merged = snapshot; // unparseable remote: our state wins (never lose our own runs)
+            merged = snapshot; // unparseable remote: recovery write (see incident note above)
           }
         }
         // CONDITIONAL-WRITE VALIDATOR (Phase C production finding): use the STRONG etag from

@@ -23,6 +23,10 @@ export class FakeBlob {
   beforeWrite?: (writeIndex: number) => void;
   /** When set, writes reject with this error (proves failures surface, not swallowed). */
   failNextWrite?: Error;
+  /** When set, READS throw this error (transport failure, distinct from absent blob). */
+  failReads?: Error;
+  /** Auto-clears after each failing read when true (default: stays set for every read). */
+  failReadsOnce = false;
   /** When set, writes never settle (proves a hung transport cannot stall the store forever). */
   hangWrites = false;
   /** Access mode this fake accepts; a mismatch mimics the store-level misconfiguration. */
@@ -34,6 +38,11 @@ export class FakeBlob {
         this.assertAccess(access);
         this.reads.push({ access, options });
         if (options.signal?.aborted === true) throw new Error("aborted");
+        if (this.failReads !== undefined) {
+          const error = this.failReads;
+          if (this.failReadsOnce) this.failReads = undefined;
+          throw error;
+        }
         return this.value === undefined ? undefined : { ...this.value };
       },
       head: async (_pathname, access, signal) => {
