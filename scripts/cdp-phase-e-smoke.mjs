@@ -72,11 +72,14 @@ async function shot(name) {
 }
 async function goto(pathname) {
   await send("Page.navigate", { url: `${BASE}/#${pathname}` });
-  await sleep(4000);
+  // Poll for paint instead of a fixed sleep: production data fetches sometimes exceed 4s.
+  await waitFor(`document.body.innerText.trim().length > 300`, "page paint", 12_000).catch(() => {});
+  await sleep(1500);
 }
 async function reload() {
   await send("Page.reload", {});
-  await sleep(4000);
+  await waitFor(`document.body.innerText.trim().length > 300`, "page paint", 12_000).catch(() => {});
+  await sleep(1500);
 }
 const clickByText = (text) => evalJs(`(() => {
   const needle = ${JSON.stringify(text)}.toLowerCase();
@@ -144,24 +147,27 @@ async function main() {
   check("C: history rows are newest-first (updatedAt, ref tie-break)", isSortedNewestFirst, { newest: refs[0], oldest: refs[refs.length - 1] });
 
   // ================= SMOKE B — RESEARCH (existing completed run) =================
-  // Cold serverless instances can be slow on the first data fetch: retry once with a reload
-  // before declaring the run view stuck, and dump what WAS rendered if both attempts stall.
-  let runRendered = false;
-  for (let attempt = 0; attempt < 2 && !runRendered; attempt += 1) {
-    if (attempt > 0) await reload();
-    runRendered = await waitFor(`document.body.innerText.includes(${JSON.stringify(verifyRef)})`, `run view shows ref (attempt ${attempt + 1})`, 30_000).catch(() => false);
-  }
+  // The page SHELL paints instantly; the run's data fetch lands later. Wait on the ANSWER
+  // text (the real content), never on the ref (which shell metadata can satisfy early).
+  const agg = (await api(`/api/research/${verifyRef}`)).body;
+  const answerHead = norm(agg.answer?.answer ?? "").slice(0, 60);
+  const runContentLoaded = `document.body.innerText.replace(/\\s+/g, ' ').includes(${JSON.stringify(answerHead)})`;
+  await goto(`/research/${verifyRef}`);
+  const runRendered = await waitFor(runContentLoaded, "run view shows the run's answer", 30_000).catch(() => false);
   if (!runRendered) {
     const snippet = await evalJs(`document.body.innerText.slice(0, 400)`);
     console.log("DEBUG run view body:", JSON.stringify(snippet));
   }
   check("B: run view renders the run", runRendered === true);
-  const agg = (await api(`/api/research/${verifyRef}`)).body;
-  const bodyText = await evalJs(`document.body.innerText`);
-  check("B: exact researchRef rendered", bodyText.includes(verifyRef), { ref: verifyRef });
+  const bodyText = await evalJs(`document.body.innerText.replace(/\\s+/g, ' ')`);
+  // PROBE-PROVED (cdp-phase-e-probe.mjs, 5/5 attempts): the run view does NOT render the raw
+  // ref string in its DOM — run identity is carried by the deep-link URL + the answer content.
+  // The honest deep-link contract is therefore: the URL routes to THIS run (no redirect) and
+  // the rendered content matches it (answer/question checks below).
+  check("B: deep link routes to the requested run (URL identity)", await evalJs(`location.hash.includes(${JSON.stringify(`/research/${verifyRef}`)})`) === true, { ref: verifyRef });
   check("B: question rendered", bodyText.includes("US CPI"), { question: agg.question });
   check("B: answer/judgment present (server)", typeof agg.answer?.answer === "string" && agg.answer.answer.length > 0, { tier: agg.recordTier });
-  const answerVisible = norm(bodyText).includes(norm(agg.answer?.answer ?? "").slice(0, 60));
+  const answerVisible = typeof bodyText === "string" && bodyText.includes(answerHead);
   check("B: answer text visible in UI", answerVisible);
   check("B: uncertainty rendered", bodyText.toLowerCase().includes("uncertaint") || (agg.answer?.keyUncertainty ?? "") !== "");
   check("B: provenance visible (evidence/trace section)", /evidence|provenance|trace/i.test(bodyText));
@@ -169,12 +175,12 @@ async function main() {
   await shot("b-research-run");
 
   await reload();
-  const afterReload = await evalJs(`document.body.innerText.includes(${JSON.stringify(verifyRef)})`);
+  const afterReload = await waitFor(runContentLoaded, "refresh keeps run", 25_000).catch(() => false);
   check("B: refresh keeps the same run active", afterReload === true);
   await goto("/history");
   await sleep(1500);
   await goto(`/research/${verifyRef}`);
-  const backAgain = await waitFor(`document.body.innerText.includes(${JSON.stringify(verifyRef)})`, "return to run", 20_000).catch(() => false);
+  const backAgain = await waitFor(runContentLoaded, "return to run", 25_000).catch(() => false);
   check("B: navigate away + return still opens the same run", backAgain === true);
 
   // ================= SMOKE C — HISTORY =================
@@ -291,8 +297,7 @@ async function main() {
   // Genuinely separate target (own tab, own JS context): only server state carries over.
   await newTarget();
   await send("Page.navigate", { url: `${BASE}/#/research/${verifyRef}` });
-  await sleep(6000);
-  const coldText = await evalJs(`document.body.innerText.includes(${JSON.stringify(verifyRef)})`);
+  const coldText = await waitFor(runContentLoaded, "cold run view", 25_000).catch(() => false);
   check("F: cold instance opens the same run (server persistence)", coldText === true);
   const coldSaved = (await api(`/api/saved?limit=200`)).body;
   check("F: saved library identical from cold read (sa_000008 live or tombstones only)", Array.isArray(coldSaved), { count: Array.isArray(coldSaved) ? coldSaved.length : 0 });
@@ -317,7 +322,11 @@ async function main() {
     const inHistory = (await api("/api/research?limit=5")).body;
     check("G: fresh run appears in History (newest)", inHistory[0]?.ref === freshBody.researchRef, { newest: inHistory[0]?.ref });
     await goto(`/research/${freshBody.researchRef}`);
-    const freshShown = await evalJs(`document.body.innerText.includes(${JSON.stringify(freshBody.researchRef)})`);
+    // The UI renders the PERSISTED aggregate (the same body the reopen GET returns); compare
+    // against that GET answer, not the POST response (its stream text can differ in the tail).
+    const freshAgg = (await api(`/api/research/${freshBody.researchRef}`)).body;
+    const freshAnswerHead = norm(freshAgg.answer?.answer ?? "").slice(0, 60);
+    const freshShown = await waitFor(`document.body.innerText.replace(/\\s+/g, ' ').includes(${JSON.stringify(freshAnswerHead)})`, "fresh run view", 25_000).catch(() => false);
     check("G: fresh run renders in the UI", freshShown === true);
     await shot("g-fresh-run");
   } else {

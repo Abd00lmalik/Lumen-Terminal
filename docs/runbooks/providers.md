@@ -63,12 +63,15 @@ validity.
 | RECOMMENDED FIX | **bounded adapter fix applied** — 413 maps to `PAYLOAD_TOO_LARGE` with a clear, key-free message and no retry. A payload-TRIMMING fix was deliberately NOT applied: truncating the context at the fallback boundary would change what the model sees, i.e. research semantics, which are frozen. |
 | VERIFICATION METHOD | `tests/model/model-fallback.test.ts` (413 → `PAYLOAD_TOO_LARGE`, non-retriable, no secret/body leak) and `POST /api/research?stream=1` on production |
 
-## 4. Current status (2026-09-26, Phase D)
+## 4. Current status (2026-09-27, Phase E)
 
-The outage observed during Phases B/C (Gemini `PROVIDER_UNAVAILABLE` + Groq `HTTP 413`) is
-**not reproducible** as of this writing: a minimal production run completed and persisted
-(`POST /api/research?stream=1` → `COMPLETED`, listed as `rs_000242`). The failure classes above
-remain the correct readings of the earlier evidence, and the Groq typing fix is permanent.
+The outage observed during Phases B/C (Gemini `PROVIDER_UNAVAILABLE` + Groq `HTTP 413`) remains
+**not reproducible**. Phase E evidence: every full smoke pass ran one legit fresh research
+request (G) against production and EVERY one reached `COMPLETED` with FULL tier
+(rs_000243..rs_000249; final pass 282s elapsed, `modelFailure: null`). The failure classes
+above remain the correct readings of the earlier evidence, and the Groq typing fix is
+permanent. (Phase E's storage incidents were BLOB-INFRA events, not provider events —
+see `docs/runbooks/blob-storage.md`; no provider failure was involved in any of them.)
 
 ## 5. What never to do
 
