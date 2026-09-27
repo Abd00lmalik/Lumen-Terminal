@@ -193,10 +193,23 @@ export function vercelBlobClient(): BlobClient {
   };
 }
 
-/** The SDK's store-level access-mismatch error; the only signal we auto-flip on. */
+/** The SDK's store-level access-mismatch error; the primary detection signal we auto-flip on. */
 function isAccessMismatch(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /public access on a private store|private access on a public store/i.test(message);
+}
+
+/**
+ * A REMOTE access mismatch during first-time detection: some stores reject a wrong-access
+ * GET with a bare transport 400 instead of the SDK's local store-level message above
+ * (observed live when the project's Blob store was recreated in Phase E — the old store
+ * answered private GETs, the new one rejects them with "Failed to fetch blob: 400 Bad
+ * Request"). During DETECTION ONLY this is worth one flip attempt; after access is known,
+ * a 400 is an honest error and must surface.
+ */
+function isAccessProbeFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /failed to fetch blob|400 bad request/i.test(message);
 }
 
 /**
@@ -243,6 +256,64 @@ export interface VercelBlobStoreOptions {
   readonly ioTimeoutMs?: number;
 }
 
+/** Which blob credentials the runtime can see (PRESENCE only — never values). */
+export interface BlobCredentialsReport {
+  readonly readWriteToken: boolean;
+  readonly storeId: boolean;
+  readonly oidcToken: boolean;
+}
+
+/** Read-only transport diagnosis: what a bare origin HEAD/GET actually returns, with the
+ *  SDK's own error text. Operational tooling for incidents like a project whose Blob store
+ *  binding went stale platform-side (Phase E): it distinguishes "wrong store", "store
+ *  unreachable", "blob absent" and "blob present" WITHOUT shell access to the deployment.
+ *  Never writes, never echoes secret values, never returns blob CONTENT (byte counts only). */
+export interface BlobTransportDiagnosis {
+  readonly credentials: BlobCredentialsReport;
+  readonly head: string;
+  readonly read: string;
+}
+
+export async function diagnoseBlobTransport(pathname: string = BLOB_PATH): Promise<BlobTransportDiagnosis> {
+  const present = (name: string) => process.env[name] !== undefined && process.env[name] !== "";
+  const credentials: BlobCredentialsReport = {
+    readWriteToken: present("BLOB_READ_WRITE_TOKEN"),
+    storeId: present("BLOB_STORE_ID"),
+    oidcToken: present("VERCEL_OIDC_TOKEN"),
+  };
+  const report = { credentials, head: "skipped", read: "skipped" }; // mutable locally, readonly in the interface
+  const fail = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 160);
+  try {
+    const { head, get } = await import("@vercel/blob");
+    try {
+      const meta = await head(pathname, {});
+      report.head = meta?.etag !== undefined && meta.etag !== "" ? "ok (blob present)" : "absent (no error)";
+    } catch (e) {
+      report.head = `error: ${fail(e)}`;
+    }
+    try {
+      const blob = await get(pathname, { access: "public", useCache: false });
+      if (blob === null || blob.stream === null) {
+        report.read = "absent (null)";
+      } else {
+        const reader = blob.stream.getReader();
+        let total = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          total += value.byteLength;
+        }
+        report.read = `ok bytes=${total}`;
+      }
+    } catch (e) {
+      report.read = `error: ${fail(e)}`;
+    }
+  } catch (e) {
+    report.head = `import error: ${fail(e)}`;
+  }
+  return report;
+}
+
 export class VercelBlobStore implements WorkspaceStore {
   private cache?: WorkspaceSnapshot;
   /** When the cache was written (load or save); older than LOAD_TTL_MS = re-fetch. */
@@ -282,14 +353,17 @@ export class VercelBlobStore implements WorkspaceStore {
     }
   }
 
-  /** Run a blob operation with the detected (or detected-then-flipped) access mode. */
+  /** Run a blob operation with the detected (or detected-then-flipped) access mode. The
+   *  flip is a FIRST-DETECTION repair only: once this.access is known, failures surface
+   *  honestly instead of being retried against the other (wrong) access mode. */
   private async withDetectedAccess(operate: (access: BlobAccess) => Promise<void>): Promise<void> {
+    const undetected = this.access === undefined;
     const first = this.access ?? "private";
     try {
       await operate(first);
       this.access = first;
     } catch (error) {
-      if (!isAccessMismatch(error)) throw error;
+      if (!undetected || (!isAccessMismatch(error) && !isAccessProbeFailure(error))) throw error;
       const second: BlobAccess = first === "private" ? "public" : "private";
       await operate(second);
       this.access = second;

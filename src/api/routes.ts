@@ -12,6 +12,7 @@ import { ApiFailure, InvalidRequestError, mapApiError } from "./errors.js";
 import { formatSseEvent, sseHeaders, type SseEvent } from "./sse.js";
 import type { ProgressEvent } from "../research/progress.js";
 import { SAVED_KINDS } from "../domain/thesis.js";
+import { diagnoseBlobTransport } from "../persistence/vercel-edge.js";
 import type { ApiErrorDTO } from "./dto.js";
 
 function isString(v: unknown): v is string {
@@ -251,6 +252,10 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
   // READ-ONLY storage audit (Phase E): byte-level breakdown of the persisted snapshot for the
   // storage runbook and compaction decisions. Mutates nothing; see docs/runbooks/blob-storage.md.
   app.get("/api/storage/audit", { handler: withErrors(async () => researchApp.storageAudit()) });
+  // READ-ONLY blob transport diagnosis (Phase E incident tooling): which credentials the
+  // runtime sees (presence only) and what a bare origin HEAD/GET returns, with the SDK's
+  // own error text. No writes, no secret values, no blob content. See the runbook.
+  app.get("/api/storage/diagnose", { handler: withErrors(async () => diagnoseBlobTransport()) });
 
   // One-shot snapshot COMPACTION (Phase E): normalizes legacy v1 run records to the v2 slim
   // shape — reference-based, never deletion. Guarded rehydration keeps semantic equivalence;

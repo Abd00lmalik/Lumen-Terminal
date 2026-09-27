@@ -33,6 +33,9 @@ export class FakeBlob {
   hangWrites = false;
   /** Access mode this fake accepts; a mismatch mimics the store-level misconfiguration. */
   acceptAccess?: "public" | "private";
+  /** When true, an access mismatch surfaces as a REMOTE 400 (observed on a recreated
+   *  store) instead of the SDK's local store-level message. */
+  remoteStyleMismatch = false;
 
   client(): BlobClient {
     return {
@@ -74,6 +77,7 @@ export class FakeBlob {
 
   private assertAccess(access: string): void {
     if (this.acceptAccess !== undefined && this.acceptAccess !== access) {
+      if (this.remoteStyleMismatch) throw new Error("Vercel Blob: Failed to fetch blob: 400 Bad Request");
       throw new Error(`Cannot use ${access} access on a ${this.acceptAccess} store`);
     }
   }

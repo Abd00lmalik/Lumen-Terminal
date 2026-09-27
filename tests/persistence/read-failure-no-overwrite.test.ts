@@ -133,4 +133,26 @@ describe("Phase E: a failed or unreadable origin read never enables an unmerged 
     await expect(store.save({ ...emptySnapshot(), researches: [] })).resolves.toBeUndefined();
     expect(JSON.parse(blob.body()!)).toBeDefined();
   });
+
+  it("a RECREATED store that rejects wrong-access GETs with a remote 400 is detected, not fatal (recovery)", async () => {
+    const blob = new FakeBlob();
+    blob.acceptAccess = "public"; // the recreated store answers PUBLIC, our first probe is private
+    blob.remoteStyleMismatch = true; // …and says so with a bare transport 400, not the SDK message
+    const store = new VercelBlobStore(blob.client());
+    // Detection flips to public during the first read; the save then proceeds normally.
+    await expect(store.save({ ...emptySnapshot(), researches: [{ id: "rs_000001", objective: "a", question: "a", flow: "WHAT_HAPPENED", provenance: [] }] })).resolves.toBeUndefined();
+    expect(blob.writes.every((w) => w.access === "public")).toBe(true);
+    const after = JSON.parse(blob.body()!) as WorkspaceSnapshot;
+    expect(after.researches.map((r) => r.id)).toContain("rs_000001");
+  });
+
+  it("after detection, a remote 400 is an honest failure — never retried against the other access mode", async () => {
+    const blob = new FakeBlob();
+    const store = new VercelBlobStore(blob.client());
+    await store.save({ ...emptySnapshot(), researches: [] }); // access now detected (private here)
+    blob.failReads = new Error("Vercel Blob: Failed to fetch blob: 400 Bad Request");
+    await expect(store.save({ ...emptySnapshot(), researches: [] })).rejects.toBeInstanceOf(BlobReadUnavailableError);
+    blob.failReads = undefined;
+    expect(blob.body()).toBeDefined(); // nothing was written while the transport was failing
+  });
 });
