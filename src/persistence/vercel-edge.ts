@@ -254,6 +254,35 @@ export class BlobReadUnavailableError extends Error {
 export interface VercelBlobStoreOptions {
   /** Per-operation ceiling; overridable so tests can exercise the timeout without waiting. */
   readonly ioTimeoutMs?: number;
+  /**
+   * Blob pathname for THIS store instance (Phase F: workspace-per-user). One store instance
+   * serves exactly ONE workspace object; multi-user routing derives one instance per verified
+   * workspace identity and never accepts the pathname from client input. Default keeps the
+   * Phase E single-workspace path (which becomes the LEGACY quarantine object under the
+   * approved migration policy — untouched, never written by user-facing code).
+   */
+  readonly pathname?: string;
+  /**
+   * When true, save() refuses to write ANY content to this path (Phase F quarantine guard).
+   * Set for the legacy workspace object so its history can never be modified or erased by
+   * user-facing traffic — reads stay allowed (explicit tooling only), writes are an error.
+   */
+  readonly writeProtected?: boolean;
+}
+
+/** The legacy single-workspace blob (Phase F: quarantine in place — READ the runbook before
+ *  ever pointing user traffic here; user-facing stores must use a per-workspace pathname). */
+export const LEGACY_BLOB_PATH = BLOB_PATH;
+
+/** Per-workspace blob path for a verified workspace id (Phase F). The id MUST come from a
+ *  validated server session (a Firebase uid), never from client input: this function is the
+ *  only place a user-visible workspace path is constructed, so storage-key manipulation
+ *  cannot begin in transport code. */
+export function workspaceBlobPath(workspaceId: string): string {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(workspaceId)) {
+    throw new Error(`Invalid workspace id (must match [A-Za-z0-9_-]{1,128}): ${JSON.stringify(workspaceId.slice(0, 8))}…`);
+  }
+  return `workspaces/${workspaceId}/snapshot.json`;
 }
 
 /** Which blob credentials the runtime can see (PRESENCE only — never values). */
@@ -323,10 +352,18 @@ export class VercelBlobStore implements WorkspaceStore {
   /** Access mode of the connected store; auto-detected on first use (private preferred). */
   private access?: BlobAccess;
 
+  /** Resolved blob pathname for this store instance (one instance = one workspace object). */
+  private readonly pathname: string;
+  /** Phase F quarantine guard: when true, save() refuses every write to this object. */
+  private readonly writeProtected: boolean;
+
   constructor(
     private readonly client: BlobClient = vercelBlobClient(),
     private readonly options: VercelBlobStoreOptions = {},
-  ) {}
+  ) {
+    this.pathname = options.pathname ?? BLOB_PATH;
+    this.writeProtected = options.writeProtected === true;
+  }
 
   private get ioTimeoutMs(): number {
     return this.options.ioTimeoutMs ?? BLOB_IO_TIMEOUT_MS;
@@ -401,7 +438,13 @@ export class VercelBlobStore implements WorkspaceStore {
         if (readFailed && remote === undefined) {
           // The blob may exist but be unreadable to us right now. Refuse to write blind:
           // an unmerged write here is exactly the erasure the merge law exists to prevent.
-          throw new BlobReadUnavailableError(BLOB_PATH);
+          throw new BlobReadUnavailableError(this.pathname);
+        }
+        // PHASE F quarantine guard: the legacy workspace object is read-only by construction.
+        // Every write path — including a merge against a successful read — refuses before any
+        // transport call, so no traffic, bug, or compaction run can modify historical state.
+        if (this.writeProtected) {
+          throw new Error(`Blob ${this.pathname} is write-protected (legacy quarantine); writes are refused by configuration`);
         }
         let merged = snapshot;
         if (remote !== undefined) {
@@ -416,7 +459,7 @@ export class VercelBlobStore implements WorkspaceStore {
             // of an immutable blob object is not a realistic event; an unparseable body on
             // the WRITE path therefore means "unreadable" — abort honestly. Manual recovery
             // from a verified recovery point is documented in docs/runbooks/blob-storage.md.
-            throw new BlobReadUnavailableError(BLOB_PATH);
+            throw new BlobReadUnavailableError(this.pathname);
           }
         }
         // CONDITIONAL-WRITE VALIDATOR (Phase C production finding): use the STRONG etag from
@@ -431,7 +474,7 @@ export class VercelBlobStore implements WorkspaceStore {
         try {
           await this.withDetectedAccess(async (access) => {
             await this.bounded("write", (signal) =>
-              this.client.write(BLOB_PATH, body, access, guard, snapshotWriteOptions(signal)),
+              this.client.write(this.pathname, body, access, guard, snapshotWriteOptions(signal)),
             );
           });
           this.cache = merged;
@@ -493,7 +536,7 @@ export class VercelBlobStore implements WorkspaceStore {
     if (head === undefined) return undefined;
     try {
       const access = this.access ?? "private";
-      const meta = await this.bounded("head", (signal) => head(BLOB_PATH, access, signal));
+      const meta = await this.bounded("head", (signal) => head(this.pathname, access, signal));
       return meta?.etag !== undefined && meta.etag !== "" ? meta.etag : undefined;
     } catch {
       return undefined;
@@ -508,7 +551,7 @@ export class VercelBlobStore implements WorkspaceStore {
    */
   private async readRawWithEtag(): Promise<{ body: string; etag: string } | undefined> {
     const read = async (access: BlobAccess): Promise<{ body: string; etag: string } | undefined> => {
-      const found = await this.bounded("read", (signal) => this.client.read(BLOB_PATH, access, snapshotReadOptions(signal)));
+      const found = await this.bounded("read", (signal) => this.client.read(this.pathname, access, snapshotReadOptions(signal)));
       // ABSENT vs BLANK are different facts. A 404/absent blob is "no workspace yet"
       // (undefined). But a PRESENT blob with a BLANK body (Phase E incident 3, th_000011:
       // an origin read answered 200 with zero bytes) is an UNRELIABLE read — this store
