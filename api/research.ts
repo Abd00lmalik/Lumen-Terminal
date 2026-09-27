@@ -38,7 +38,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import type { AddressInfo } from "node:net";
 import http from "node:http";
-import { buildApi } from "../src/api/server.js";
+import { buildApi, requestWorkspaceStorage } from "../src/api/server.js";
 import { GeminiProvider } from "../src/model/gemini.js";
 import { GroqProvider } from "../src/model/groq.js";
 import { ModelFallbackProvider } from "../src/model/fallback.js";
@@ -132,7 +132,13 @@ function startLoopbackServer(): Promise<http.Server> {
     await app.ready();
     const server = http.createServer((rawReq, rawRes) => {
       try {
-        app.routing(rawReq, rawRes);
+        // PHASE F: open a per-request AsyncLocalStorage scope so the adapter accessor
+        // resolves THIS request's workspace (multi-user isolation; see server.ts). The
+        // onRequest/appForRequest chain fills the scope; routing itself needs only an
+        // empty one so `getStore()` is defined on the request's async chain.
+        requestWorkspaceStorage.run({}, () => {
+          app.routing(rawReq, rawRes);
+        });
       } catch (err) {
         // Fastify internals can throw synchronously for malformed input before its async
         // error pipeline engages (e.g. a JSON body parse error). Classify it: known
@@ -420,6 +426,9 @@ async function respondViaInject(req: VercelRequest, res: VercelResponse): Promis
   }
   const requestBody = parsedBody.body;
 
+  // PHASE F: per-request ALS scope (mirrors the socket transport path above).
+  await requestWorkspaceStorage.run({}, async () => {
+
   // noUncheckedIndexedAccess: split() array access is `string | undefined`, and app.inject()
   // requires a concrete `url: string` (exactOptionalPropertyTypes). Normalize once, here.
   const [rawPath, rawQuery] = (req.url ?? "/").split("?");
@@ -451,6 +460,7 @@ async function respondViaInject(req: VercelRequest, res: VercelResponse): Promis
   writeViaVercelResponse(res, response.statusCode, safeOutgoingHeaders(response.headers as Record<string, unknown>));
   if (req.method !== "HEAD") res.end(response.body);
   else res.end();
+  }); // end per-request ALS scope
 }
 
 // ---------------------------------------------------------------------------
