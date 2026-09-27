@@ -33,6 +33,13 @@ import { newId, bumpIdCounterPast, bumpIdCounterPastId, idPrefixes, seedIdCounte
 import { currentRun } from "./run-context.js";
 
 /**
+ * The current snapshot schema version stamped by toSnapshot (Phase F). Bump on any
+ * persisted-shape change; fromSnapshot remains accepting (versions are for observability
+ * and guarded migration, not for reader rejection).
+ */
+export const SNAPSHOT_SCHEMA_VERSION = 2;
+
+/**
  * Persisted run presentation records (researchResponses entries).
  *
  * RETENTION POLICY (Phase B): history must preserve the research record itself, so there is
@@ -49,6 +56,14 @@ export interface ResearchResponseRecord {
 }
 
 export interface WorkspaceSnapshot {
+  /**
+   * PHASE F schema version of this snapshot (undefined = pre-versioning legacy, treated as
+   * version 1 on read). Additive and forward-only: fromSnapshot accepts every KNOWN version
+   * and the writer stamps the current one; an unknown FUTURE version still loads (readers
+   * never reject data they may simply not understand field-wise) but the watchdog reports
+   * SCHEMA_UNEXPECTED. Version 2 = Phase F (per-workspace objects, this marker).
+   */
+  readonly schemaVersion?: number;
   readonly researches: readonly Research[];
   readonly sources: readonly Source[];
   readonly evidence: readonly Evidence[];
@@ -972,6 +987,7 @@ export class Workspace {
       claims: this.listClaims(),
       hypotheses: this.listHypotheses(),
       analyses: this.listAnalyses(),
+      schemaVersion: SNAPSHOT_SCHEMA_VERSION,
       judgments: this.listJudgments(),
       branches: this.listBranches(),
       theses: this.listTheses(),

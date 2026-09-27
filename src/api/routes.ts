@@ -15,6 +15,7 @@ import { SAVED_KINDS } from "../domain/thesis.js";
 import { diagnoseBlobTransport } from "../persistence/vercel-edge.js";
 import { storageWatchdogReport } from "../ops/storage-watchdog-endpoint.js";
 import { runOffsiteBackup, readBackupStatus, runRestoreDrill } from "../ops/backup-job.js";
+import { inventoryLegacyWorkspace, assignLegacyWorkspace } from "../ops/workspace-migration.js";
 import type { ApiErrorDTO } from "./dto.js";
 
 function isString(v: unknown): v is string {
@@ -298,6 +299,16 @@ export function registerRoutes(app: FastifyInstance, context: RouteContext): voi
     const body = (req.body ?? {}) as { backupKey?: unknown };
     if (typeof body.backupKey !== "string" || body.backupKey === "") throw new InvalidRequestError('"backupKey" is required');
     return runRestoreDrill(body.backupKey);
+  }) });
+  // PHASE F legacy-workspace migration ops (admin-gated): inventory is read-only and always
+  // safe; assignment is the APPROVED, one-time, token-gated whole-copy act (never a filter).
+  app.get("/api/storage/legacy-inventory", { handler: withErrors(async (req) => { requireAdmin(req); return inventoryLegacyWorkspace(); }) });
+  app.post("/api/storage/legacy-assign", { handler: withErrors(async (req) => {
+    requireAdmin(req);
+    const body = (req.body ?? {}) as { approvalToken?: unknown; targetUid?: unknown };
+    if (typeof body.approvalToken !== "string" || body.approvalToken === "") throw new InvalidRequestError('"approvalToken" is required');
+    if (typeof body.targetUid !== "string" || body.targetUid === "") throw new InvalidRequestError('"targetUid" is required');
+    return assignLegacyWorkspace({ approvalToken: body.approvalToken, targetUid: body.targetUid });
   }) });
   app.get("/api/storage/sessions", { handler: withErrors(async (req) => { requireAdmin(req); return { liveSessions: sessions.size }; }) });
 
