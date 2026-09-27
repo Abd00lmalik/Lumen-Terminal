@@ -1174,6 +1174,159 @@ export class ResearchApp {
   }
 
   /**
+   * READ-ONLY storage audit (Phase E): a byte-level breakdown of the CURRENT persisted
+   * snapshot. Reads through the store (origin semantics), serializes once, and reports per-
+   * collection byte sizes and record counts plus the largest individual records — the raw
+   * material for compaction decisions. Never mutates anything.
+   */
+  async storageAudit() {
+    const loaded = await (this.options.store.loadFresh !== undefined
+      ? this.options.store.loadFresh()
+      : this.options.store.load());
+    if (loaded === undefined) throw new NotFoundError("workspace snapshot (nothing persisted yet)");
+    // loadFresh returns the Workspace aggregate; audit its PERSISTED shape (the snapshot),
+    // not the class instance (whose Map fields serialize as "{}" and lie).
+    const snapshot = loaded.toSnapshot();
+    const collections: Record<string, { readonly count: number; readonly bytes: number }> = {};
+    let largest: { readonly id: string; readonly bytes: number } | undefined;
+    for (const [key, value] of Object.entries(snapshot)) {
+      if (!Array.isArray(value)) {
+        collections[key] = { count: 1, bytes: Buffer.byteLength(JSON.stringify(value) ?? "null") };
+        continue;
+      }
+      let bytes = 0;
+      for (const item of value as readonly unknown[]) {
+        const itemBytes = Buffer.byteLength(JSON.stringify(item) ?? "null");
+        bytes += itemBytes;
+        const raw = item as { id?: unknown; researchId?: unknown } | null;
+        const id = typeof raw?.id === "string" ? raw.id : typeof raw?.researchId === "string" ? raw.researchId : undefined;
+        if (id !== undefined && (largest === undefined || itemBytes > largest.bytes)) largest = { id, bytes: itemBytes };
+      }
+      collections[key] = { count: (value as readonly unknown[]).length, bytes };
+    }
+    // Growth-source distributions (Phase E): oversized evidence observations and the byte
+    // split of run records (answer vs diagnostics), so compaction targets are measured,
+    // never guessed.
+    const evidenceObs = (snapshot.evidence as readonly { id: string; observation?: unknown }[])
+      .map((e) => ({ id: e.id, bytes: Buffer.byteLength(typeof e.observation === "string" ? e.observation : "") }))
+      .sort((a, b) => b.bytes - a.bytes);
+    const over = (n: number) => evidenceObs.filter((e) => e.bytes > n).length;
+    const runRecords = (snapshot.researchResponses ?? []).map((r) => {
+      const response = (r.response ?? {}) as Record<string, unknown>;
+      const answerBytes = Buffer.byteLength(JSON.stringify(response.answer ?? null));
+      const diagnosticsBytes = Buffer.byteLength(JSON.stringify(response.researchDiagnostics ?? null));
+      const evidenceBytes = Buffer.byteLength(JSON.stringify(response.evidence ?? null));
+      const restBytes = Buffer.byteLength(JSON.stringify(response)) - answerBytes - diagnosticsBytes - evidenceBytes;
+      return { researchId: r.researchId, total: Buffer.byteLength(JSON.stringify(r)), answerBytes, diagnosticsBytes, evidenceBytes, restBytes };
+    }).sort((a, b) => b.total - a.total);
+    return {
+      note: "read-only byte audit of the persisted snapshot; never mutated anything",
+      totalBytes: Buffer.byteLength(JSON.stringify(snapshot)),
+      collections,
+      largestRecord: largest,
+      evidenceObservations: {
+        totalBytes: evidenceObs.reduce((sum, e) => sum + e.bytes, 0),
+        over4kb: over(4 * 1024),
+        over32kb: over(32 * 1024),
+        over128kb: over(128 * 1024),
+        top10: evidenceObs.slice(0, 10),
+      },
+      runRecords: {
+        count: runRecords.length,
+        totalBytes: runRecords.reduce((sum, r) => sum + r.total, 0),
+        top10: runRecords.slice(0, 10),
+      },
+    };
+  }
+
+  /**
+   * One-shot snapshot COMPACTION (Phase E) — normalization, never deletion.
+   *
+   * The only compactable bloat measured in production is LEGACY (v1) run records: records
+   * written before `RUN_RECORD_VERSION` 2 stored the complete response verbatim, including
+   * the evidence[]/judgments[] object arrays the workspace graph already holds by ref
+   * (production: ~3.2MB of duplicated presentation objects). Compaction rewrites each v1
+   * record to the v2 slim shape via the SAME `toRunRecord` the write path uses, so the
+   * record is exactly what a v2-era write would have produced.
+   *
+   * Equivalence guarantee (not best-effort): each candidate is compacted ONLY if
+   * `hydrateRunResponse` over the slimmed payload rebuilds the same evidence/judgment arrays
+   * the record already carries (same order, same refs). When rehydration is not exact —
+   * the graph no longer holds a referenced object — the record is LEFT AS v1 so the read
+   * path keeps serving the persisted arrays verbatim. Nothing else in the snapshot is
+   * touched: no record eviction, no tier changes, no observation trimming (evidence
+   * observations are engine-frozen content), tombstones/counters/theses untouched.
+   *
+   * Concurrency: the compacted snapshot is written through `store.save()`, which performs
+   * merge-before-write against an origin read with a strong-ETag conditional write — the
+   * same guarantees as every other save (no READ→COMPACT→WRITE from a stale cache).
+   *
+   * Idempotent by construction: v2 records are skipped, so compact(compact(s)) === compact(s).
+   */
+  async compactStorage(options?: { readonly dryRun?: boolean }) {
+    const dryRun = options?.dryRun === true;
+    const loaded = await (this.options.store.loadFresh !== undefined
+      ? this.options.store.loadFresh()
+      : this.options.store.load());
+    if (loaded === undefined) throw new NotFoundError("workspace snapshot (nothing persisted yet)");
+    const beforeSnapshot = loaded.toSnapshot();
+
+    const allResearch = beforeSnapshot.researches;
+    const membersById = new Map<string, readonly Research[]>();
+    for (const r of allResearch) membersById.set(r.id, runMembers(allResearch, r));
+
+    const recordBytes = (record: unknown) => Buffer.byteLength(JSON.stringify(record) ?? "null");
+    const beforeBytes = (beforeSnapshot.researchResponses ?? []).reduce((sum, r) => sum + recordBytes(r), 0);
+
+    // Rewrite legacy v1 records to the v2 slim shape — only when rehydration from the graph
+    // provably reproduces the stored arrays (see the method contract above).
+    const compactedResponses = (beforeSnapshot.researchResponses ?? []).map((entry) => {
+      const raw = entry.response;
+      if (typeof raw !== "object" || raw === null) return entry;
+      const candidate = raw as Record<string, unknown>;
+      // Explicit version migration: v2 records are already slim (idempotence); anything that
+      // is neither v2 nor a WELL-FORMED v1 verbatim response is left untouched (never
+      // guessed, never crashed on — another instance may hold records this graph cannot
+      // fully interpret, and compaction must never fail because of them).
+      if (
+        candidate.recordVersion !== undefined
+        || !("answer" in candidate)
+        || !Array.isArray(candidate.evidenceRefs)
+        || !(candidate.evidence === undefined || Array.isArray(candidate.evidence))
+        || !(candidate.judgments === undefined || Array.isArray(candidate.judgments))
+      ) return entry;
+
+      const response = raw as ResearchResponseDTO;
+      const researchId = entry.researchId;
+      const memberIds = (membersById.get(researchId) ?? []).map((m) => m.id);
+      const slimmed = toRunRecord(response);
+      const hydrated = hydrateRunResponse(loaded, slimmed.response, memberIds);
+      const sameArray = (a: readonly unknown[] | undefined, b: readonly unknown[] | undefined) =>
+        a !== undefined && b !== undefined && a.length === b.length &&
+        a.every((item, i) => JSON.stringify(item) === JSON.stringify(b[i]));
+      if (!sameArray(response.evidence, hydrated.evidence) || !sameArray(response.judgments, hydrated.judgments)) {
+        return entry; // rehydration would differ: keep the legacy record verbatim
+      }
+      return { researchId, response: slimmed as unknown };
+    });
+    const afterBytes = compactedResponses.reduce((sum, r) => sum + recordBytes(r), 0);
+    const changed = compactedResponses.filter((r, i) =>
+      JSON.stringify(r) !== JSON.stringify((beforeSnapshot.researchResponses ?? [])[i]));
+
+    // Persist through the store's normal save path (merge-before-write, strong-ETag guard).
+    if (!dryRun && changed.length > 0) {
+      await this.options.store.save({ ...beforeSnapshot, researchResponses: compactedResponses });
+    }
+    return {
+      note: "compaction = legacy v1 run-record normalization (reference-based); no deletion, no eviction, no semantic change",
+      dryRun,
+      runRecords: { before: (beforeSnapshot.researchResponses ?? []).length, after: compactedResponses.length },
+      normalizedRecords: changed.length,
+      recordBytes: { before: beforeBytes, after: afterBytes, saved: beforeBytes - afterBytes },
+    };
+  }
+
+  /**
    * Execute an EXPLICIT trader SAVE: resolve the target against the real graph, snapshot the
    * actual persisted content, upsert (idempotent), persist, and only then confirm. The LLM is
    * never involved and is never proof of persistence; a failed write surfaces honestly.

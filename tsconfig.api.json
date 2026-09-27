@@ -1,0 +1,29 @@
+{
+  /**
+   * Typecheck for the Vercel serverless entry (api/). The root tsconfig covers src/ only
+   * (rootDir: src), which left api/research.ts outside every typecheck — its errors only
+   * surfaced in Vercel's build log. This config compiles api/ under the SAME strict flags
+   * (strict, exactOptionalPropertyTypes, noUncheckedIndexedAccess) so the bridge is checked
+   * like every other module. Wired into `npm run typecheck`.
+   */
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["api/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -248,6 +248,17 @@ export function registerRoutes(app: FastifyInstance, researchApp: ResearchApp): 
   });
 
   app.get("/api/workspace", { handler: withErrors(async () => researchApp.continuity()) });
+  // READ-ONLY storage audit (Phase E): byte-level breakdown of the persisted snapshot for the
+  // storage runbook and compaction decisions. Mutates nothing; see docs/runbooks/blob-storage.md.
+  app.get("/api/storage/audit", { handler: withErrors(async () => researchApp.storageAudit()) });
+
+  // One-shot snapshot COMPACTION (Phase E): normalizes legacy v1 run records to the v2 slim
+  // shape — reference-based, never deletion. Guarded rehydration keeps semantic equivalence;
+  // see ResearchApp.compactStorage and docs/runbooks/blob-storage.md.
+  app.post("/api/storage/compact", { handler: withErrors(async (req) => {
+    const body = (req.body ?? {}) as { dryRun?: unknown };
+    return researchApp.compactStorage({ dryRun: body.dryRun === true });
+  }) });
 
   // ------------------------------------------------------------------
   // Research request (F0 mandate §5); natural language only; NO flow in the API contract.

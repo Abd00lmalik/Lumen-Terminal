@@ -420,7 +420,11 @@ async function respondViaInject(req: VercelRequest, res: VercelResponse): Promis
   }
   const requestBody = parsedBody.body;
 
-  const [path, queryPart] = (req.url ?? "/").split("?");
+  // noUncheckedIndexedAccess: split() array access is `string | undefined`, and app.inject()
+  // requires a concrete `url: string` (exactOptionalPropertyTypes). Normalize once, here.
+  const [rawPath, rawQuery] = (req.url ?? "/").split("?");
+  const path = rawPath !== undefined && rawPath !== "" ? rawPath : "/";
+  const queryPart = rawQuery;
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(req.headers)) {
     const lower = key.toLowerCase();
