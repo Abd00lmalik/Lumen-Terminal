@@ -4,7 +4,7 @@
  * buttons, no simulated identity, no sample data on private pages.
  */
 import { useEffect, useState } from "react";
-import { startGoogleSignIn, startEmailSignIn, useAuth } from "../../auth.js";
+import { startGoogleSignIn, startEmailSignIn, describeAuthError, useAuth } from "../../auth.js";
 
 export function SignInView({ notice }: { notice?: string }) {
   const { user, loading, authActive } = useAuth();
@@ -24,7 +24,7 @@ export function SignInView({ notice }: { notice?: string }) {
       await startEmailSignIn(email);
       setLinkSent(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send the sign-in link.");
+      setError(describeAuthError(err, "Could not send the sign-in link."));
     } finally {
       setBusy(false);
     }
@@ -36,7 +36,7 @@ export function SignInView({ notice }: { notice?: string }) {
     try {
       await startGoogleSignIn();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Google sign-in failed.");
+      setError(describeAuthError(err, "Google sign-in failed."));
     } finally {
       setBusy(false);
     }

@@ -85,6 +85,11 @@ not reach already-running functions.
 - Known limitation: Firebase **daily email-quota protection** blocks further sign-in-link
   sends per project/day (rendered as `auth/quota-exceeded` in the UI). Wait for the quota
   window or use Google sign-in.
+- Quota-exceeded surfaced to users (F.1 mitigation): the sign-in UI maps Firebase auth
+  errors to human-readable text (`describeAuthError` in `frontend/src/auth.tsx`) —
+  quota-exceeded explains the project-level limit and the Google alternative; unknown
+  errors still surface verbatim. Operator levers: wait for the daily window, use Google
+  sign-in, or raise the quota in Google Cloud IAM → Firebase Auth quota (paid tier).
 
 ## 5. Legacy workspace assignment (explicit operator act)
 

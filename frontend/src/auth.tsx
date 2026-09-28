@@ -58,6 +58,23 @@ function identityOf(user: User): AccountIdentity {
 
 const EMAIL_KEY = "lumen.email-for-signin";
 
+/**
+ * Human-readable, honest mapping of Firebase auth errors (F.1 mitigation): the raw SDK
+ * strings (e.g. "Firebase: Exceeded daily quota for email sign-in. (auth/quota-exceeded).")
+ * name internal codes but never the operator-fix. Unknown codes still surface verbatim —
+ * errors are re-typed, never swallowed or softened.
+ */
+export function describeAuthError(err: unknown, fallback: string): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  if (raw.includes("auth/quota-exceeded")) {
+    return "Firebase's daily email-quota protection is active for this project, so no sign-in links can be sent right now. Try Google sign-in, or ask the operator to raise the quota / wait for the daily window to reset.";
+  }
+  if (raw.includes("auth/invalid-email")) return "That email address is not valid.";
+  if (raw.includes("auth/unauthorized-domain")) return "This domain is not authorized for sign-in (Firebase console → Authorized domains).";
+  if (raw.includes("auth/popup-closed-by-user")) return "Google sign-in was cancelled before it completed.";
+  return raw === "" ? fallback : raw;
+}
+
 export async function startGoogleSignIn(): Promise<void> {
   if (auth === undefined) throw new Error("Authentication is not configured in this build.");
   const provider = new GoogleAuthProvider();
@@ -125,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(u !== null ? identityOf(u) : null);
       setLoading(false);
     }, (err) => {
-      setAuthError(err.message);
+      setAuthError(describeAuthError(err, "Authentication state error."));
       setLoading(false);
     });
     // Complete an email-link sign-in if the URL is one (runs once; safe on every load).
@@ -133,7 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     completeEmailSignIn().catch((err) => {
       // Honest, visible failure (consumed/expired/foreign link): the user must know the
       // link did NOT sign them in, instead of a silent return to the sign-in view.
-      setAuthError(err instanceof Error ? err.message : "Sign-in link could not be completed.");
+      setAuthError(describeAuthError(err, "Sign-in link could not be completed."));
     });
     return unsub;
   }, []);
