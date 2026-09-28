@@ -63,6 +63,7 @@ export const idPrefixes = {
   artifact: "sa",
   memory: "mem", // M5 research memory
   monitor: "mon", // M5 monitoring handoff
+  challenge: "ch", // Phase G falsification challenge records (Flow 7 derived)
 } as const;
 
 /**

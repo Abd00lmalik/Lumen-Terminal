@@ -514,6 +514,30 @@ export function registerRoutes(app: FastifyInstance, context: RouteContext): voi
   });
 
   // ------------------------------------------------------------------
+  // Phase G: Challenge. GET is a read of the workspace's persisted falsification records;
+  // POST runs the falsification methodology (Flow 7) against the workspace's thesis and
+  // returns the freshly derived generation. Both are per-request-workspace scoped (isolation
+  // by construction): a user can only ever see/mutate their own challenge state. There is NO
+  // direct thesis-mutation route: challenges are research results about the thesis, never
+  // edits (the thesis PATCH route remains the only mutation path, trader-explicit).
+  // ------------------------------------------------------------------
+
+  app.get("/api/challenges", {
+    handler: withErrors(async (req) => {
+      const q = req.query as Record<string, unknown> | undefined;
+      const thesisRef = q !== undefined && isString(q.thesisRef) ? q.thesisRef : undefined;
+      return (await appForRequest(req)).listChallenges(thesisRef);
+    }),
+  });
+  app.post("/api/challenge", {
+    handler: withErrors(async (req) => {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const thesisRef = isString(body.thesisRef) ? body.thesisRef : undefined;
+      return await (await appForRequest(req)).runChallenge(thesisRef);
+    }),
+  });
+
+  // ------------------------------------------------------------------
   // Memory / saved artifacts (F0 mandate §12); READ-ONLY; SAVE stays behind the LUI
   // authorization boundary (a natural-language SAVE through /api/research), never a direct
   // HTTP shortcut. No persistMemory route exists; by construction.

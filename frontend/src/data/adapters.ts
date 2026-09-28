@@ -278,6 +278,19 @@ export function homeDataFromSnapshot(s: ContinuitySnapshotDto, allResearch: read
 // Challenge (Flow 7); derived from real hypotheses/evidence, never a script
 // ---------------------------------------------------------------------------
 
+/**
+ * Phase G: the persistent Challenge page reads /api/challenges; this helper supplies only the
+ * headline (the active thesis + its owner tag) for the page header. The old derived-view
+ * challenge is intentionally gone: challenge records live in the workspace now, not in a
+ * per-load recomputation over hypotheses.
+ */
+export function challengeHeadlineFromSnapshot(s: ContinuitySnapshotDto): { belief: string; owner: string } {
+  return {
+    belief: s.activeThesis?.statement ?? "No active thesis; select or create one in the thesis workspace.",
+    owner: s.activeThesis !== undefined ? `${s.activeThesis.ref} v${s.activeThesis.version}` : "",
+  };
+}
+
 export function challengeFromSnapshot(s: ContinuitySnapshotDto): ChallengeView {
   const hypotheses = [...s.currentHypotheses].sort((a, b) => a.ranking - b.ranking);
   const evidenceById = new Map(s.recentEvidence.map((e) => [e.ref, e]));

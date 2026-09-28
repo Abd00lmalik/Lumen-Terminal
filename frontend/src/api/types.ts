@@ -272,6 +272,47 @@ export type AssessmentStatusDto =
   | "UNSUPPORTED"
   | "INDETERMINATE";
 
+// ---------------------------------------------------------------------------
+// Challenge (Phase G): persistent falsification records derived from Flow 7
+// ---------------------------------------------------------------------------
+
+export type ChallengeStatusDto = "ACTIVE" | "RESOLVED" | "STALE" | "INFORMATION_GAP" | "CONTRADICTION";
+
+export interface ChallengeFalsifierDto {
+  readonly condition: string;
+  readonly attacksClaim: string;
+  readonly origin: "DERIVED_FROM_BELIEF" | "PROPOSED";
+  readonly materiality: "MINOR" | "MEANINGFUL_WARNING" | "MATERIAL_CONTRADICTION" | "INVALIDATING";
+}
+
+export interface ChallengeDto {
+  readonly ref: string;
+  readonly thesisRef: string;
+  readonly thesisVersion: number;
+  readonly claim: string;
+  readonly falsifier: ChallengeFalsifierDto;
+  readonly status: ChallengeStatusDto;
+  readonly materialityRationale: string;
+  readonly supportingEvidenceRefs: readonly string[];
+  readonly counterEvidenceRefs: readonly string[];
+  readonly informationGaps: readonly string[];
+  readonly conditionObserved: boolean;
+  readonly researchRef: string;
+  readonly assessment: AssessmentStatusDto;
+  readonly provenance: readonly ProvenanceEntryDto[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ChallengeRunDto {
+  readonly answer: string;
+  readonly assessment?: AssessmentStatusDto;
+  readonly confidence?: ConfidenceDto;
+  readonly researchRef?: string;
+  readonly modelFailure?: { readonly type: string; readonly message: string };
+  readonly challenges: readonly ChallengeDto[];
+}
+
 export interface ThesisAssessmentDto {
   readonly ref: string;
   readonly thesisRef: string;

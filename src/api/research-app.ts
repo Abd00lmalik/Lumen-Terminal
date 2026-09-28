@@ -29,9 +29,10 @@ import {
   evidenceToDTO, evidenceSummaryDTO, judgmentToDTO, researchToDTO, continuitySnapshotToDTO,
   thesisToDTO, thesisAssessmentToDTO, artifactToDTO, memoryToDTO, monitorToDTO,
   provenanceToDTO, toHistoricalAnalysisDTO, uiText, savedArtifactToDTO, savedArtifactToSummaryDTO,
+  challengeToDTO,
   type ResearchResponseDTO, type ResearchDiagnosticsDTO, type RequirementDiagnosticDTO, type AnswerDTO, type EvidenceDTO, type JudgmentDTO,
   type ResearchRunSummaryDTO, type ResearchRunAggregateDTO, type ResearchRecordTierDTO,
-  type SavedItemDTO, type SavedItemSummaryDTO, type SavedOriginDTO,
+  type SavedItemDTO, type SavedItemSummaryDTO, type SavedOriginDTO, type ChallengeRunDTO,
 } from "./dto.js";
 import { InvalidRequestError, ModelFailureError, PersistenceFailureError, NotFoundError } from "./errors.js";
 import { renderConfidence, type ConfidenceComponents } from "../research/confidence.js";
@@ -966,9 +967,18 @@ export class ResearchApp {
       const runRef = this.listResearch({}).find((r) => r.ref === input.researchRef || (r.internalRefs ?? []).includes(input.researchRef!))?.ref ?? research.id;
       linkedResearchRefs.push(runRef);
       if (statement === "") {
-        const record = this.findRunRecord(runMembers(ws.listResearch(), research).map((m) => m.id));
-        const derived = record?.answer?.answer ?? (research.question !== "" ? research.question : research.objective);
-        statement = preview(derived);
+        const members = runMembers(ws.listResearch(), research);
+        const record = this.findRunRecord(members.map((m) => m.id));
+        // The belief derives from TRADER MATERIAL: the run's answer when the run actually
+        // produced findings, else the trader's own question verbatim. A run that ended
+        // WITHOUT evidence (budget stop, provider outage) retains only process text; making
+        // that the trader's belief puts nonsense in the thesis (Phase G, live: the notice
+        // "Request understood (RESEARCH) but produced no research outcome" became a thesis
+        // statement and was then faithfully falsified). The question is verbatim trader
+        // material by construction; nothing is paraphrased either way.
+        const fallback = research.question !== "" ? research.question : research.objective;
+        const evidenceCount = members.reduce((n, m) => n + m.evidenceRefs.length, 0);
+        statement = preview(evidenceCount > 0 ? (record?.answer?.answer ?? fallback) : fallback);
       }
     }
 
@@ -1099,6 +1109,92 @@ export class ResearchApp {
 
   listAssessments(thesisRef?: string) {
     return this.ws().listThesisAssessments(thesisRef).map(thesisAssessmentToDTO);
+  }
+
+  // ------------------------------------------------------------------
+  // Phase G: Challenge (persistent falsification records over Flow 7)
+  // ------------------------------------------------------------------
+
+  /** List the workspace's persisted challenges (optionally per thesis); read-only. */
+  async listChallenges(thesisRef?: string) {
+    // Read freshness (Phase F law): a warm instance must absorb another instance's writes
+    // before serving; the thesis/challenge absorb is scoped and never clobbers in-flight runs.
+    await this.refreshTheses();
+    return this.ws().listChallenges(thesisRef).map(challengeToDTO);
+  }
+
+  /**
+   * Run the falsification methodology (Flow 7) against the workspace's thesis and return the
+   * freshly derived challenge generation. DETERMINISTIC resolution (mirrors the LUI's): the
+   * explicit thesisRef, else the trader-selected thesis, else the single active thesis, else a
+   * typed clarification error; NEVER a random asset. The run goes through the SAME engine as a
+   * natural-language challenge (one convergence point), so LLM output can only PROPOSE —
+   * challenges become records only through the domain's materiality/idempotency gates, and the
+   * thesis object itself is never mutated. Model failures surface typed and persist nothing.
+   */
+  async runChallenge(thesisRef?: string): Promise<ChallengeRunDTO> {
+    // Read freshness (Phase F law): resolve the target against the DURABLE state, not a warm
+    // instance's stale graph (live: a session created before the thesis existed answered 400
+    // "no active thesis" while the workspace held one). refreshTheses absorbs theses,
+    // assessments, and challenges from the durable store; failures degrade to local state.
+    await this.refreshTheses();
+    const workspace = this.ws();
+    let targetId = thesisRef;
+    if (targetId === undefined) {
+      // Deterministic resolution (mirrors the LUI's): the EXPLICIT selection first, else the
+      // single current thesis. Several candidates + no selection is genuinely ambiguous.
+      const explicitId = workspace.explicitActiveThesisId();
+      if (explicitId !== undefined) targetId = explicitId;
+      else {
+        const active = workspace.activeTheses();
+        if (active.length === 1) targetId = active[0]!.id;
+      }
+    }
+    if (targetId === undefined) {
+      const count = workspace.activeTheses().length;
+      throw new InvalidRequestError(
+        count === 0
+          ? "no active thesis to challenge. Create or select a thesis first."
+          : "several theses are active and none is selected; pass thesisRef or select a thesis.",
+      );
+    }
+    const thesis = workspace.getThesis(targetId);
+    if (thesis === undefined) throw new NotFoundError("thesis not found in this workspace");
+
+    // Same convergence point as natural language: Flow 7 (which derives + persists the
+    // challenge generation through the domain gates).
+    const objective = `What could prove this thesis wrong: ${thesis.statement}`;
+    beginRun({ runId: `${newId(idPrefixes.run)}-${crypto.randomUUID().slice(0, 8)}`, userQuestion: objective });
+    let flow7;
+    try {
+      const { runFlow7 } = await import("../research/flow7.js");
+      flow7 = await runFlow7(objective, {
+        provider: this.options.provider,
+        registry: this.options.registry,
+        workspace,
+        store: this.options.store,
+        thesisRef: thesis.id,
+        deadlineMs: Date.now() + 210_000,
+      });
+    } catch (cause) {
+      throw new ModelFailureError({ type: "PROVIDER_UNAVAILABLE", message: cause instanceof Error ? cause.message : String(cause) });
+    } finally {
+      endRun();
+    }
+
+    // Persist (same law as submitResearchRequest: the engine does not; the app layer does).
+    await this.persist();
+
+    const challenges = this.ws().listChallenges(thesis.id).map(challengeToDTO);
+    return {
+      answer: flow7.response,
+      ...(flow7.assessment !== undefined ? { assessment: flow7.assessment.currentAssessment, confidence: flow7.assessment.confidence } : {}),
+      ...(flow7.assessment !== undefined ? { researchRef: flow7.outcome.researchId } : {}),
+      ...(flow7.modelFailure !== undefined
+        ? { modelFailure: { type: flow7.modelFailure.type, message: flow7.modelFailure.message } }
+        : {}),
+      challenges,
+    };
   }
 
   // Memory / saved artifacts -------------------------------------------

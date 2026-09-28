@@ -93,7 +93,8 @@ export function mergeSnapshots(local: WorkspaceSnapshot, remote: WorkspaceSnapsh
       : {}),
     memories: mergeById(local.memories, remote.memories),
     monitors: mergeById(local.monitors, remote.monitors),
-    thesisAssessments: [...(remote.thesisAssessments ?? []), ...(local.thesisAssessments ?? [])],
+    thesisAssessments: mergeById(local.thesisAssessments, remote.thesisAssessments),
+    challenges: mergeById(local.challenges ?? [], remote.challenges ?? []),
     ...(activeThesisId !== undefined ? { activeThesisId } : {}),
     ...(mergedResponses.size > 0
       ? { researchResponses: [...mergedResponses.entries()].map(([researchId, response]) => ({ researchId, response })) }

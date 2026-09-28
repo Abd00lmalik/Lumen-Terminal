@@ -18,6 +18,7 @@ import type { ObjectStatus } from "../domain/lifecycle.js";
 import type { MemoryEntry, MemoryStatus, MemoryCategory, Monitor, MonitorCondition } from "../domain/memory.js";
 import type { SavedArtifact, SavedKind, Thesis, ThesisAssessmentRecord, ThesisStatus } from "../domain/thesis.js";
 import { THESIS_TRANSITIONS } from "../domain/thesis.js";
+import type { Challenge } from "../domain/challenge.js";
 import type { Provenance, ProvenanceOrigin } from "../domain/provenance.js";
 
 // ---------------------------------------------------------------------------
@@ -380,6 +381,69 @@ export function thesisToDTO(t: Thesis): ThesisDTO {
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Challenge (Phase G): persistent falsification records derived from Flow 7
+// ---------------------------------------------------------------------------
+
+export interface ChallengeFalsifierDTO {
+  readonly condition: string;
+  readonly attacksClaim: string;
+  readonly origin: "DERIVED_FROM_BELIEF" | "PROPOSED";
+  readonly materiality: "MINOR" | "MEANINGFUL_WARNING" | "MATERIAL_CONTRADICTION" | "INVALIDATING";
+}
+
+export interface ChallengeDTO {
+  readonly ref: string;
+  readonly thesisRef: string;
+  readonly thesisVersion: number;
+  /** What part of the thesis this challenges, and why it could matter. */
+  readonly claim: string;
+  readonly falsifier: ChallengeFalsifierDTO;
+  readonly status: "ACTIVE" | "RESOLVED" | "STALE" | "INFORMATION_GAP" | "CONTRADICTION";
+  readonly materialityRationale: string;
+  readonly supportingEvidenceRefs: readonly string[];
+  readonly counterEvidenceRefs: readonly string[];
+  readonly informationGaps: readonly string[];
+  readonly conditionObserved: boolean;
+  readonly researchRef: string;
+  readonly assessment: ThesisAssessmentDTO["assessment"];
+  readonly provenance: readonly ProvenanceEntryDTO[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export function challengeToDTO(c: Challenge): ChallengeDTO {
+  return {
+    ref: c.id,
+    thesisRef: c.thesisId,
+    thesisVersion: c.thesisVersion,
+    claim: c.claim,
+    falsifier: c.falsifier,
+    status: c.status,
+    materialityRationale: c.materialityRationale,
+    supportingEvidenceRefs: idRefs(c.supportingEvidenceRefs),
+    counterEvidenceRefs: idRefs(c.counterEvidenceRefs),
+    informationGaps: [...c.informationGaps],
+    conditionObserved: c.conditionObserved,
+    researchRef: c.researchRef,
+    assessment: c.assessment,
+    provenance: provenanceToDTO(c.provenance),
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+  };
+}
+
+/** Result of POST /api/challenge: the Flow 7 verdict + the persisted challenge generation. */
+export interface ChallengeRunDTO {
+  readonly answer: string;
+  readonly assessment?: "SUPPORTED" | "WEAKENED" | "MATERIALLY_CHALLENGED" | "UNSUPPORTED" | "INDETERMINATE";
+  readonly confidence?: "HIGH" | "MODERATE" | "LOW";
+  readonly researchRef?: string;
+  /** Typed failure: no challenges assert anything when the methodology could not run. */
+  readonly modelFailure?: { readonly type: string; readonly message: string };
+  readonly challenges: readonly ChallengeDTO[];
 }
 
 /** Assessment status uses the first-class ThesisAssessmentStatus vocabulary (M6 audit D4). */

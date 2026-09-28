@@ -207,6 +207,7 @@ const INTERPRETER_SYSTEM = [
   "- Compound requests list their sub-actions IN ORDER in compoundActions (primary first).",
   "- RESEARCH is the default for any question about markets, assets, prices, events, news, macro, or risk ('why did BTC move', 'what is affecting X', 'what are the risks'). These ask about the WORLD, not about stored objects.",
   "- ANALYZE is ONLY when the trader explicitly references existing results in this workspace ('analyze what you found', 'what does our research say', 'interpret the last run'). A market question is never ANALYZE just because research history exists.",
+  "- CHALLENGE utterances about the trader's OWN current view/thesis ('challenge my thesis', 'what could prove this thesis wrong', 'what evidence contradicts my current view', 'what assumptions am I relying on', 'has anything changed that weakens this thesis') are primaryAction CHALLENGE; do not reclassify them as RESEARCH or ANALYZE.",
   "- isExplanationOnly=true when the trader only asks why/how/what-did-you-find about existing research.",
   "- disclosureLevel: 0 answer, 1 why, 2 evidence, 3 research structure, 4 source trail, 5 full history.",
   "- Copy the trader's objective verbatim; never paraphrase it into something stronger or weaker.",
@@ -313,6 +314,52 @@ const RESPONSE_SYSTEM = [
   "- The system researches; it does not tell the trader to trade. Implications are decision-support, not orders.",
   "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
+
+// ---------------------------------------------------------------------------
+// Phase G: thesis-facing challenge routing (deterministic target resolution)
+// ---------------------------------------------------------------------------
+
+/**
+ * Does the utterance reference the trader's OWN thesis/current view (vs a quoted statement
+ * or a hypothesis object)? Deterministic keyword law: the model still classifies the ACTION;
+ * this only decides whether the CHALLENGE target is the workspace's thesis. Kept narrow so
+ * quoted statements and hypothesis objects still take the generic falsifier path.
+ */
+export function referencesTradersThesis(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes("my thesis") ||
+    m.includes("this thesis") ||
+    m.includes("the thesis") ||
+    m.includes("my current view") ||
+    m.includes("my current investment view") ||
+    m.includes("current view") ||
+    m.includes("what assumptions am i relying on") ||
+    m.includes("what assumptions am i making") ||
+    (m.includes("prove this wrong") && !m.includes("statement")) ||
+    (m.includes("prove it wrong") && !m.includes("statement"))
+  );
+}
+
+export type ChallengeThesisResolution =
+  | { readonly type: "resolved"; readonly thesisId: string }
+  | { readonly type: "clarify"; readonly reason: string };
+
+/**
+ * Resolve WHICH thesis to challenge from authenticated workspace state, deterministically:
+ * the trader's explicit selection first, else the single active thesis, else clarify. Never
+ * invents a target; >1 unselected candidates is genuinely ambiguous (M3 §13).
+ */
+export function resolveChallengeThesis(workspace: Workspace): ChallengeThesisResolution {
+  const explicitId = workspace.explicitActiveThesisId();
+  if (explicitId !== undefined) return { type: "resolved", thesisId: explicitId };
+  const active = workspace.activeTheses();
+  if (active.length === 1) return { type: "resolved", thesisId: active[0]!.id };
+  if (active.length === 0) {
+    return { type: "clarify", reason: "this workspace has no active thesis to challenge. Create or select one in the thesis workspace, or name the statement to falsify." };
+  }
+  return { type: "clarify", reason: `this workspace has ${active.length} active theses and none is selected as current. Which one should I challenge?` };
+}
 
 export class Lui {
   private currentMessage: string | undefined;
@@ -538,6 +585,36 @@ export class Lui {
           // the research METHODOLOGY. The action and the flow remain distinct.
           if (target.flow === "WHAT_COULD_PROVE_ME_WRONG" || step.params["flow"] === "WHAT_COULD_PROVE_ME_WRONG" || step.params["mode"] === "falsification") {
             await this.dispatchFlow7(step, result, origin, progress, deadlineMs);
+            break;
+          }
+          // Phase G: thesis-facing challenge utterances ("challenge my thesis", "what could
+          // prove this thesis wrong", "what contradicts my view") run the falsification
+          // METHODOLOGY against the workspace's thesis with DETERMINISTIC resolution: no
+          // unambiguous thesis → clarify (never research a random asset); exactly one (or the
+          // trader-selected active thesis) → Flow 7 with that thesisRef. The generic falsifier
+          // stays for non-thesis targets (a statement/hypothesis the trader quoted).
+          // In a single-step plan the whole utterance describes this step; in a compound plan
+          // only the step's own description scopes what THIS challenge targets.
+          if (referencesTradersThesis(step.description) || (plan.steps.length === 1 && referencesTradersThesis(userMessage))) {
+            const resolution = resolveChallengeThesis(this.options.workspace);
+            if (resolution.type === "clarify") {
+              // Terminal clarification: returned directly (the ambiguity-path precedent) so
+              // the final-response builder cannot overwrite it with a generic no-outcome text.
+              result.response = {
+                answer: `Before I can challenge anything: ${resolution.reason}`,
+                supportingReasons: [],
+                opposingReasons: [],
+                confidence: "UNKNOWN",
+                keyUncertainty: "which thesis the request targets",
+                implication: "Create or select a thesis, or name which one to challenge, and I will run falsification research on it.",
+                citedObjectRefs: [],
+              };
+              return result;
+            }
+            await this.dispatchFlow7(
+              { ...step, params: { ...step.params, thesisRef: resolution.thesisId, mode: "falsification" } },
+              result, origin, progress, deadlineMs,
+            );
             break;
           }
           await this.dispatchChallenge(step, result);

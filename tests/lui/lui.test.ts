@@ -412,7 +412,7 @@ describe("six LUI actions (locked set)", () => {
     expect(result.research).toBeUndefined();
   });
 
-  it("CHALLENGE runs falsification-oriented analysis (not generic criticism)", async () => {
+  it("CHALLENGE of 'my thesis' with NO active thesis asks for clarification; never researches a random asset (Phase G)", async () => {
     const provider = new FakeModelProvider(new Map([
       ["analysis.challenge", JSON.stringify({
         targetedStatement: "BTC will recover",
@@ -425,13 +425,39 @@ describe("six LUI actions (locked set)", () => {
         citedObjectRefs: [],
       })],
     ]));
-    scriptDefaults(provider, [{ action: "CHALLENGE", description: "try to disprove the thesis", capabilities: [], params: {} }]);
+    scriptDefaults(provider, [{ action: "CHALLENGE", description: "try to disprove the thesis", capabilities: [], params: {} }], { request: { primaryAction: "CHALLENGE" } });
     const { lui } = buildLui(provider);
     const result = await lui.handle("Try to disprove my thesis");
 
-    expect(result.challenge).toBeDefined();
-    expect(result.challenge?.falsificationVerdict).toBe("INCONCLUSIVE");
-    expect(result.response?.answer).toContain("falsification verdict");
+    // Deterministic resolution: no unambiguous thesis → clarify; the generic falsifier must
+    // NOT run on an invented target.
+    expect(result.challenge).toBeUndefined();
+    expect(result.flow7).toBeUndefined();
+    expect(result.response?.answer).toContain("Before I can challenge anything");
+  });
+
+  it("CHALLENGE with a single active thesis routes to Flow 7 falsification on THAT thesis (Phase G)", async () => {
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", responses.researchPlan()],
+      ["research.adaptive_decision", responses.adaptiveDecision("COMPLETE")],
+      ["flow7.falsification", JSON.stringify({
+        targetBelief: "BTC trends up this quarter",
+        claims: [], assumptions: [], vulnerableAssumptions: [],
+        falsificationTargets: [], contradictionsFound: [],
+        noCredibleContradictionFound: true,
+        currentAssessment: "SUPPORTED",
+        invalidationConditions: [], earlyWarnings: [],
+        confidence: "MODERATE", rationale: "nothing credible found", citedObjectRefs: [],
+      })],
+    ]));
+    scriptDefaults(provider, [{ action: "CHALLENGE", description: "challenge my thesis", capabilities: [], params: {} }], { request: { primaryAction: "CHALLENGE" } });
+    const { lui, workspace } = buildLui(provider);
+    workspace.addThesis({ statement: "BTC trends up this quarter", objective: "test" }, trader);
+    const result = await lui.handle("What could prove my thesis wrong?");
+
+    expect(result.flow7).toBeDefined();
+    expect(result.flow7?.outcome.flow).toBe("WHAT_COULD_PROVE_ME_WRONG");
+    expect(result.challenge).toBeUndefined(); // the generic falsifier did not run
   });
 
   it("MANAGE_STATE validates working-state changes without persisting memory", async () => {

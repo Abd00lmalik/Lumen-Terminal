@@ -239,6 +239,23 @@ export async function runFlow7(objective: string, options: Flow7Options): Promis
   );
 
   const response = buildFlow7Response(assessment, flowOutcome, beliefStatement);
+
+  // Phase G: PERSISTENT CHALLENGE derivation (thin domain layer over this flow; never a second
+  // engine). Deterministic mapping of the assessment's own targets/contradictions; idempotent
+  // by fingerprint; materiality-gated; the thesis object is NEVER touched. Derivation happens
+  // only after the assessment passed validation, so a failed run asserts no challenges.
+  if (thesis !== undefined) {
+    const { recordChallengesFromFlow7 } = await import("./challenge-derive.js");
+    recordChallengesFromFlow7(
+      { outcome: { ...flowOutcome, analysisId: analysis.id, judgmentId: judgment.id }, assessment, response },
+      workspace,
+      thesis.id,
+      thesis.version,
+      systemOrigin,
+      at(),
+    );
+  }
+
   // SHARED CONTRACT BOUNDARY: same validation law as the adaptive loop (no per-flow validator).
   return validateFlowOutcome(
     {

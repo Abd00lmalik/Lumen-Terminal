@@ -22,6 +22,10 @@ import {
   type Thesis, type SavedArtifact, type SavedKind, type ThesisStatus, type ThesisAssessmentRecord, type ThesisAssessmentStatus,
 } from "./thesis.js";
 import {
+  createChallenge, normalizeChallenge,
+  type Challenge,
+} from "./challenge.js";
+import {
   createMemoryEntry, decayMemory, revalidateMemory, proposeMonitor, transitionMonitor,
   recordMonitorSourceState, flagMonitorForReview,
   type MemoryEntry, type MemoryCategory, type MemoryStatus, type Monitor,
@@ -79,6 +83,8 @@ export interface WorkspaceSnapshot {
   readonly memories: readonly MemoryEntry[];
   readonly monitors: readonly Monitor[];
   readonly thesisAssessments: readonly ThesisAssessmentRecord[];
+  /** Phase G: persistent falsification challenges (Flow 7 derived; never thesis mutations). */
+  readonly challenges?: readonly Challenge[];
   /** M6 (audit D1): the trader's explicit active-thesis selection (working state). */
   readonly activeThesisId?: string;
   /**
@@ -112,6 +118,8 @@ export class Workspace {
   private readonly memories = new Map<string, MemoryEntry>();
   private readonly monitors = new Map<string, Monitor>();
   private readonly thesisAssessments: ThesisAssessmentRecord[] = [];
+  /** Phase G: falsification challenges keyed by id (see domain/challenge.ts). */
+  private readonly challenges = new Map<string, Challenge>();
   /** M6 (audit D1): the trader's EXPLICIT active-thesis selection (MANAGE_STATE set-active-thesis).
    *  Without it, "active thesis" was inferred from updatedAt ordering; an inference, not state.
    *  Trader-owned working state must be recorded, never guessed. */
@@ -466,6 +474,16 @@ export class Workspace {
     return this.activeTheses()[0];
   }
 
+  /**
+   * The EXPLICIT selection only (no compat fallback). Phase G challenge resolution needs the
+   * distinction: with several current theses and no explicit choice, "my thesis" is genuinely
+   * ambiguous and must clarify (M3 §13), never silently pick the newest.
+   */
+  explicitActiveThesisId(): string | undefined {
+    if (this.activeThesisId !== undefined && this.theses.has(this.activeThesisId)) return this.activeThesisId;
+    return undefined;
+  }
+
   /** Current (non-superseded, non-archived) theses, newest first. */
   activeTheses(): readonly Thesis[] {
     return [...this.theses.values()]
@@ -723,6 +741,12 @@ export class Workspace {
     else if (remoteActive === undefined && this.activeThesisId !== undefined && !this.theses.has(this.activeThesisId)) {
       this.activeThesisId = undefined; // the remote snapshot agrees the selection is gone
     }
+    // Phase G: challenge read freshness (same union-by-id law; updatedAt breaks ties).
+    for (const raw of snapshot.challenges ?? []) {
+      const incoming = normalizeChallenge(raw);
+      const existing = this.challenges.get(incoming.id);
+      if (existing === undefined || incoming.updatedAt > existing.updatedAt) this.challenges.set(incoming.id, incoming);
+    }
   }
 
   /**
@@ -911,6 +935,81 @@ export class Workspace {
     return thesisId === undefined ? [...this.thesisAssessments] : this.thesisAssessments.filter((a) => a.thesisId === thesisId);
   }
 
+  // ----- Phase G: persistent falsification challenges ------------------------
+
+  /**
+   * Persist a derived challenge generation (Flow 7 output → durable records). IDEMPOTENT by
+   * fingerprint: the same falsifier against the same thesis claim UPDATES the existing record
+   * (fresh status/evidence/assessment; provenance appended; id stable) instead of minting a
+   * duplicate — no endless re-warning across refreshes. Challenges from an OLDER derivation
+   * run that the newest research did not re-derive are marked STALE (latest research did not
+   * surface them; kept visible, never deleted). A challenge can never mutate its thesis.
+   */
+  recordChallenges(
+    derived: readonly Parameters<typeof createChallenge>[0][],
+    origin: ProvenanceOrigin,
+    at?: Date,
+  ): readonly Challenge[] {
+    const now = (at ?? new Date());
+    const written: Challenge[] = [];
+    const touchedIds = new Set<string>();
+    for (const d of derived) {
+      const candidate = createChallenge(d, origin, now);
+      const existing = [...this.challenges.values()].find((c) => c.fingerprint === candidate.fingerprint);
+      if (existing === undefined) {
+        this.challenges.set(candidate.id, candidate);
+        touchedIds.add(candidate.id);
+        written.push(candidate);
+        continue;
+      }
+      // Re-derivation of a known challenge: refresh the volatile fields, keep identity.
+      const updated: Challenge = {
+        ...existing,
+        status: candidate.status,
+        materialityRationale: candidate.materialityRationale,
+        supportingEvidenceRefs: candidate.supportingEvidenceRefs,
+        counterEvidenceRefs: candidate.counterEvidenceRefs,
+        informationGaps: candidate.informationGaps,
+        conditionObserved: candidate.conditionObserved,
+        researchRef: candidate.researchRef,
+        assessment: candidate.assessment,
+        thesisVersion: candidate.thesisVersion,
+        provenance: appendProvenance(existing.provenance, origin, `re-derived from Flow 7 run (${candidate.researchRef}); status ${existing.status} → ${candidate.status}`, now),
+        updatedAt: now.toISOString(),
+      };
+      this.challenges.set(existing.id, updated);
+      touchedIds.add(existing.id);
+      written.push(updated);
+    }
+    // Supersede: same-thesis challenges from PREVIOUS runs, untouched this round, did not
+    // survive the latest falsification research → STALE (visible in history, re-openable by
+    // new research; never silently deleted).
+    for (const c of this.challenges.values()) {
+      if (c.thesisId !== derived[0]?.thesisId) continue;
+      if (touchedIds.has(c.id)) continue;
+      if (c.researchRef === derived[0]?.researchRef) continue; // same run, different thesis edge
+      if (c.status !== "ACTIVE" && c.status !== "CONTRADICTION" && c.status !== "INFORMATION_GAP") continue;
+      const stale: Challenge = {
+        ...c,
+        status: "STALE",
+        provenance: appendProvenance(c.provenance, origin, `not re-derived by the latest falsification research (${derived[0]?.researchRef ?? ""}); marked stale`, now),
+        updatedAt: now.toISOString(),
+      };
+      this.challenges.set(c.id, stale);
+      written.push(stale);
+    }
+    return written;
+  }
+
+  getChallenge(id: string): Challenge | undefined {
+    return this.challenges.get(id);
+  }
+
+  listChallenges(thesisId?: string): readonly Challenge[] {
+    const all = [...this.challenges.values()];
+    return thesisId === undefined ? all : all.filter((c) => c.thesisId === thesisId);
+  }
+
   latestThesisAssessment(thesisId: string): ThesisAssessmentRecord | undefined {
     const all = this.listThesisAssessments(thesisId);
     return all[all.length - 1];
@@ -995,6 +1094,7 @@ export class Workspace {
       memories: this.listMemories(),
       monitors: this.listMonitors(),
       thesisAssessments: this.listThesisAssessments(),
+      ...(this.challenges.size > 0 ? { challenges: this.listChallenges() } : {}),
       ...(this.savedTombstones.size > 0 ? { savedTombstones: this.listSavedTombstones() } : {}),
       // M6 (audit D1): the trader's explicit selection is working state and must round-trip.
       ...(this.activeThesisId !== undefined ? { activeThesisId: this.activeThesisId } : {}),
@@ -1029,6 +1129,11 @@ export class Workspace {
     for (const m of snap.memories ?? []) ws.memories.set(m.id, m);
     for (const m of snap.monitors ?? []) ws.monitors.set(m.id, m);
     for (const a of snap.thesisAssessments ?? []) ws.thesisAssessments.push(a);
+    for (const c of snap.challenges ?? []) {
+      const normalized = normalizeChallenge(c);
+      ws.challenges.set(normalized.id, normalized);
+      bumpIdCounterPastId(normalized.id); // counter continuity for the ch_ prefix
+    }
     for (const r of snap.researchResponses ?? []) ws.researchResponses.set(r.researchId, r.response);
     if (snap.activeThesisId !== undefined) ws.activeThesisId = snap.activeThesisId;
     // Counter continuity (persistence law): a restored graph must never re-mint existing ids.
