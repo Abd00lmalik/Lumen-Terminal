@@ -77,11 +77,21 @@ export async function startEmailSignIn(email: string): Promise<void> {
 
 export async function completeEmailSignIn(): Promise<boolean> {
   if (auth === undefined) return false;
-  if (!isSignInWithEmailLink(auth, window.location.href)) return false;
+  // Firebase's hosted action handler forwards to continueUrl WITHOUT `mode=signIn`, so the
+  // SDK's strict `isSignInWithEmailLink` misses the arrival on this app (observed live:
+  // the URL carries apiKey + oobCode only). Detect the actual arrival shape instead; a URL
+  // without oobCode, or with an already-consumed/foreign code, still fails TYPED at
+  // Firebase — detection never fabricates a sign-in.
+  const url = new URL(window.location.href);
+  const hasOobCode = url.searchParams.has("oobCode");
+  if (!hasOobCode && !isSignInWithEmailLink(auth, window.location.href)) return false;
   const email = window.localStorage.getItem(EMAIL_KEY);
   if (email === null) throw new Error("This sign-in link is missing its email context; request a new link.");
   await signInWithEmailLink(auth, email, window.location.href);
   window.localStorage.removeItem(EMAIL_KEY);
+  // Clean the credential out of the URL (history/refresh safety) without breaking the SPA route.
+  const clean = `${window.location.origin}${window.location.pathname}#/signin`;
+  window.history.replaceState(null, "", clean);
   return true;
 }
 
@@ -119,7 +129,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     });
     // Complete an email-link sign-in if the URL is one (runs once; safe on every load).
-    completeEmailSignIn().catch(() => {});
+    // Completion fires the auth-state observer above; sign-in view auto-advances.
+    completeEmailSignIn().catch((err) => {
+      // Honest, visible failure (consumed/expired/foreign link): the user must know the
+      // link did NOT sign them in, instead of a silent return to the sign-in view.
+      setAuthError(err instanceof Error ? err.message : "Sign-in link could not be completed.");
+    });
     return unsub;
   }, []);
 

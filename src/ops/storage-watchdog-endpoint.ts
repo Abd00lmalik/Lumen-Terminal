@@ -4,6 +4,7 @@
  */
 import { classifyStorageHealth, type StorageFacts, type WatchdogSample } from "./storage-watchdog.js";
 import { diagnoseBlobTransport } from "../persistence/vercel-edge.js";
+import { readBackupStatus } from "./backup-job.js";
 import type { ResearchApp } from "../api/research-app.js";
 
 /**
@@ -119,9 +120,20 @@ export async function storageWatchdogReport(app: ResearchApp): Promise<unknown> 
   const last = samples[samples.length - 1];
   const now = new Date().toISOString();
 
-  const backupRaw = process.env.BACKUP_STATUS_URL;
+  // Backup facts feed the classifier's BACKUP_* findings. PRIMARY source: the backup
+  // job's own status object, read in-process (same code that writes it — no env, no HTTP
+  // hop, works on every deployment). Fallback: BACKUP_STATUS_URL for split deployments.
+  // Phase F.1 defect fixed here: without this in-process read the endpoint never supplied
+  // backup facts, so BACKUP_* findings were silently vacuous (missing-drill invisible).
   let backup: StorageFacts["backup"];
-  if (backupRaw !== undefined && backupRaw !== "") {
+  try {
+    const jobStatus = await readBackupStatus();
+    if (jobStatus !== undefined) backup = jobStatus as StorageFacts["backup"];
+  } catch {
+    void 0; // status object unreadable: backup findings stay absent rather than lying
+  }
+  const backupRaw = process.env.BACKUP_STATUS_URL;
+  if (backup === undefined && backupRaw !== undefined && backupRaw !== "") {
     try {
       const res = await fetch(backupRaw, { signal: AbortSignal.timeout(5000) });
       if (res.ok) backup = (await res.json()) as StorageFacts["backup"];

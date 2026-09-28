@@ -8,6 +8,36 @@
 import { get, put, head } from "@vercel/blob";
 import { OffsiteBackuper, readBackupEnv, sha256Hex, type BackupResult } from "./offsite-backup.js";
 
+/**
+ * Dangling-reference verdict for the restore drill: the drill's job is proving the BACKUP
+ * is FAITHFUL to its source, not that the source itself was historically pristine.
+ * - clean: no dangling references anywhere.
+ * - faithful-with-condition: the source already had exactly these dangling references
+ *   (recorded in the envelope at backup time); the restore preserves them — a PRE-EXISTING
+ *   data condition (e.g. the documented rs_000251 zombie), reported visibly, never deleted.
+ * - corrupted: the backup has MORE dangling references than its source → the backup or
+ *   the restore introduced damage → the drill MUST fail.
+ */
+export function classifyDanglingRefs(dangling: number, sourceDangling: number | undefined): "clean" | "faithful-with-condition" | "corrupted" {
+  if (dangling === 0) return "clean";
+  if (sourceDangling !== undefined && dangling === sourceDangling) return "faithful-with-condition";
+  return "corrupted";
+}
+
+/** Count run records whose researchId does not resolve (same rule the drill applies). */
+export function countDanglingRunRecords(snapshot: Record<string, unknown>): number {
+  const researchIds = new Set(
+    ((Array.isArray(snapshot.researches) ? snapshot.researches : []) as Array<{ id?: string }>)
+      .map((r) => r.id)
+      .filter((id): id is string => id !== undefined),
+  );
+  let dangling = 0;
+  for (const rec of (Array.isArray(snapshot.researchResponses) ? snapshot.researchResponses : []) as Array<{ researchId?: string }>) {
+    if (rec.researchId === undefined || !researchIds.has(rec.researchId)) dangling += 1;
+  }
+  return dangling;
+}
+
 const STATUS_PATH = "ops/backup-status.json";
 const DRILL_PATH_PREFIX = "ops/drill-restore/";
 
@@ -79,7 +109,11 @@ export async function runOffsiteBackup(): Promise<{ ok: boolean; backed: number;
       detail.push({ ok: false, at: new Date().toISOString(), error: "source unparseable — not backed up", workspaceId: target.id });
       continue;
     }
-    const result = await backuper.backupSnapshot(target.id, text, 2);
+    // Record the source's own integrity in the envelope so the drill can distinguish a
+    // faithful restore of imperfect source data from restore-introduced corruption.
+    let sourceIntegrity: { danglingRunRecords: number } | undefined;
+    try { sourceIntegrity = { danglingRunRecords: countDanglingRunRecords(JSON.parse(text) as Record<string, unknown>) }; } catch { void 0; }
+    const result = await backuper.backupSnapshot(target.id, text, 2, sourceIntegrity);
     detail.push(result);
     if (result.ok) backed += 1; else failed += 1;
   }
@@ -131,7 +165,7 @@ export async function runRestoreDrill(backupKey: string): Promise<DrillReport> {
   checks.push({ check: "backup-fetch", ok: fetched !== undefined });
 
   // 2. Envelope + integrity.
-  let envelope: { sha256?: string; bytes?: number; workspaceId?: string; schemaVersion?: number; snapshot?: unknown };
+  let envelope: { sha256?: string; bytes?: number; workspaceId?: string; schemaVersion?: number; snapshot?: unknown; sourceIntegrity?: { danglingRunRecords?: number } };
   try {
     envelope = JSON.parse(fetched ?? "{}");
   } catch {
@@ -161,17 +195,19 @@ export async function runRestoreDrill(backupKey: string): Promise<DrillReport> {
   const countsOk = counts.researches > 0 || counts.runRecords > 0 || counts.theses > 0 || counts.savedArtifacts > 0;
   checks.push({ check: "non-empty-collections", ok: countsOk, detail: JSON.stringify(counts) });
 
-  // Graph integrity: every run record references an existing research id.
-  const researchIds = new Set(
-    ((Array.isArray(snapshot.researches) ? snapshot.researches : []) as Array<{ id?: string }>)
-      .map((r) => r.id)
-      .filter((id): id is string => id !== undefined),
-  );
-  let dangling = 0;
-  for (const rec of (Array.isArray(snapshot.researchResponses) ? snapshot.researchResponses : []) as Array<{ researchId?: string }>) {
-    if (rec.researchId === undefined || !researchIds.has(rec.researchId)) dangling += 1;
-  }
-  checks.push({ check: "run-record-references", ok: dangling === 0, ...(dangling !== 0 ? { detail: `${dangling} dangling run records` } : {}) });
+  // Graph integrity: every run record must reference an existing research id — now
+  // judged against the SOURCE's own recorded condition (see classifyDanglingRefs).
+  const dangling = countDanglingRunRecords(snapshot);
+  const sourceDangling = typeof envelope.sourceIntegrity?.danglingRunRecords === "number" ? envelope.sourceIntegrity.danglingRunRecords : undefined;
+  const danglingVerdict = classifyDanglingRefs(dangling, sourceDangling);
+  checks.push({
+    check: "run-record-references",
+    ok: danglingVerdict !== "corrupted",
+    ...(danglingVerdict === "clean" ? {}
+      : danglingVerdict === "faithful-with-condition"
+        ? { detail: `${dangling} dangling run record(s) pre-existing in the SOURCE (envelope-recorded); restore is faithful — condition is visible in the legacy inventory, never repaired silently` }
+        : { detail: `${dangling} dangling run records vs ${sourceDangling ?? "unknown"} in source — backup/restore introduced corruption` }),
+  });
 
   // 4. Restore into an ISOLATED verification path (never a workspace path).
   const drillPath = `${DRILL_PATH_PREFIX}${backupKey.replaceAll("/", "_")}`;
@@ -181,7 +217,10 @@ export async function runRestoreDrill(backupKey: string): Promise<DrillReport> {
       contentType: "application/json", cacheControlMaxAge: 60,
     });
     const meta = await head(drillPath);
-    checks.push({ check: "isolated-restore-write", ok: meta.size === (fetched ?? "").length });
+    // Byte-level comparison: head().size is UTF-8 BYTES while string .length is CHARS —
+    // they differ whenever the snapshot contains non-ASCII (they did; first real drill
+    // failed here despite a byte-faithful write).
+    checks.push({ check: "isolated-restore-write", ok: meta.size === Buffer.byteLength(fetched ?? "", "utf8") });
   } catch (err) {
     checks.push({ check: "isolated-restore-write", ok: false, detail: err instanceof Error ? err.message : String(err) });
   }

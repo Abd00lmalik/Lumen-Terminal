@@ -84,8 +84,18 @@ export class OffsiteBackuper {
    * Back up ONE workspace snapshot. The snapshot text is passed in ALREADY READ and
    * parse-verified by the caller (the backup job reads the blob, JSON.parses it, and only
    * then calls this — an unparseable source never reaches the destination).
+   *
+   * `sourceIntegrity` (optional) records the source's OWN pre-existing data conditions
+   * (e.g. dangling run-record references) at backup time, so the restore drill can
+   * distinguish a FAITHFUL restore of imperfect source data from restore-introduced
+   * corruption. The condition stays visible; it is never silently repaired.
    */
-  async backupSnapshot(workspaceId: string, snapshotText: string, schemaVersion: number): Promise<BackupResult> {
+  async backupSnapshot(
+    workspaceId: string,
+    snapshotText: string,
+    schemaVersion: number,
+    sourceIntegrity?: { readonly danglingRunRecords?: number },
+  ): Promise<BackupResult> {
     const at = new Date().toISOString();
     const key = this.keyFor(workspaceId, at);
     try {
@@ -98,6 +108,7 @@ export class OffsiteBackuper {
         createdAt: at,
         bytes: snapshotText.length,
         sha256,
+        ...(sourceIntegrity !== undefined ? { sourceIntegrity } : {}),
         snapshot: JSON.parse(snapshotText), // re-parse = the envelope carries VALID JSON only
       });
       const url = `${this.endpoint}/${this.env.bucket}/${key}`;

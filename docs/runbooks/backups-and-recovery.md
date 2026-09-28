@@ -1,8 +1,8 @@
 # Backups & Recovery Runbook (Phase F)
 
-Status: implemented; offsite ACTIVATION requires the R2 destination setup below. Until a
-restore drill has passed against the real destination, offsite protection must be
-considered NOT YET PROVEN (the watchdog reports `BACKUP_DRILL_MISSING` until then).
+Status: **PROVEN IN PRODUCTION (Phase F.1, 2026-09-28)**: offsite backup to R2 verified by
+read-back, restore drill PASSED against the real destination, watchdog HEALTHY, daily cron
+observed succeeding on its own. See §3.1 and §4.1.
 
 ## 1. Why Cloudflare R2 (decision record)
 
@@ -48,6 +48,19 @@ Rejected: same-store copies (not offsite), S3/GCS (egress + heavier creds), Azur
   already-verified objects.
 - Backups are server-side only; credentials live in env; the bucket is private.
 
+### 3.1 Phase F.1 activation result (2026-09-28)
+
+- First production run: `POST /api/storage/backup` (admin) → verified read-back
+  (`verified:true`), legacy snapshot `_legacy/2026-09-28/snapshot-081933.json`, 16,507,548
+  bytes, sha256 recorded. Manual runs are idempotent/safe (ran 3×).
+- Envelope now carries `sourceIntegrity.danglingRunRecords` (count recorded AT BACKUP
+  TIME). Rationale: the legacy source contains 1 documented dangling run-record reference
+  (rs_000251 zombie; inventory reports `danglingRunRecords:1`), which the drill's
+  reference check would otherwise misclassify as corruption. `classifyDanglingRefs()` →
+  `clean | faithful-with-condition | corrupted`; only `corrupted` fails a drill; the
+  condition stays visible and is NEVER repaired silently.
+- Retention in force: 30 daily points, never below 7 objects per workspace.
+
 ## 4. Restore drill (non-destructive, and required)
 
 A backup is not proven until restored. `POST /api/storage/restore-drill
@@ -61,9 +74,24 @@ A backup is not proven until restored. `POST /api/storage/restore-drill
 5. Reports `{ ok, checks[], counts, bytes }` and records `lastDrillAt`.
 
 Run the drill after enabling backups (once), after any restore-worthy incident, and at
-least quarterly. **A drill has NOT yet been run against the real destination in this
-phase — the Firebase/R2 operator setup is pending; until then offsite recovery is
-designed + implemented but UNPROVEN (reported honestly in the final report).**
+least quarterly.
+
+### 4.1 Phase F.1 drill result (2026-09-28, real destination)
+
+- `POST /api/storage/restore-drill` → `ok:true`, all checks passed against the real R2
+  backup: envelope + recomputed SHA-256 match, counts match the source
+  (249 researches / 103 run-records / 10 theses / 0 saved / 15 tombstones), the 1
+  documented dangling run-record reference classified `faithful-with-condition` (not
+  corruption), and the isolated write check is byte-exact (`Buffer.byteLength` UTF-8 vs
+  bytes — an earlier chars-vs-bytes comparison false-failed on non-ASCII).
+- Watchdog then reports **HEALTHY** (`findings:[]`); `BACKUP_DRILL_MISSING` correctly
+  appeared before the drill was recorded. NOTE: there is a brief blob write→read
+  visibility gap — a status read immediately after a drill/backup can lag one read;
+  re-run the read before investigating (see `blob-storage.md` §7).
+- Watchdog wiring fix during F.1: the endpoint previously read backup facts only from a
+  never-configured `BACKUP_STATUS_URL` env (silently vacuous findings); it now reads
+  `ops/backup-status.json` in-process first, env fallback kept
+  (`src/ops/storage-watchdog-endpoint.ts`).
 
 ## 5. Real recovery (destructive by definition — follow exactly)
 

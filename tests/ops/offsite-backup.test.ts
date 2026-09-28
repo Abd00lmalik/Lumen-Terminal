@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { sha256Hex } from "../../src/ops/offsite-backup.js";
+import { classifyDanglingRefs, countDanglingRunRecords } from "../../src/ops/backup-job.js";
 import { classifyStorageHealth } from "../../src/ops/storage-watchdog.js";
 import type { StorageFacts } from "../../src/ops/storage-watchdog.js";
 
@@ -89,5 +90,40 @@ describe("Phase F backup integrity + drill invariants", () => {
     const drillPrefix = "ops/drill-restore/";
     expect(drillPrefix.startsWith("workspaces/")).toBe(false);
     expect(drillPrefix.startsWith("workspace/")).toBe(false);
+  });
+
+  // ---- Phase F.1 (found in the FIRST real production drill) ----
+
+  it("F.1: a faithful restore of source with a pre-existing dangling record is ok-but-visible", () => {
+    // Production reality: the legacy snapshot carries 1 documented dangling run record
+    // (rs_000251 zombie, kept per the no-deletion mandate). The backup faithfully copied
+    // it; the drill must NOT call a faithful restore "failed" — but the condition stays
+    // reported, and equality with the source's envelope-recorded count is required.
+    expect(classifyDanglingRefs(1, 1)).toBe("faithful-with-condition");
+    expect(classifyDanglingRefs(0, undefined)).toBe("clean");
+    expect(classifyDanglingRefs(0, 1)).toBe("clean"); // source had it, restore does not: data disappeared?
+    // Any count ABOVE the source's own = corruption introduced by backup/restore:
+    expect(classifyDanglingRefs(2, 1)).toBe("corrupted");
+    expect(classifyDanglingRefs(1, undefined)).toBe("corrupted"); // no source record to justify it
+  });
+
+  it("F.1: countDanglingRunRecords matches the drill's rule", () => {
+    const snap = {
+      researches: [{ id: "rs_000001" }, { id: "rs_000002" }],
+      researchResponses: [{ researchId: "rs_000001" }, { researchId: "rs_00000X" }, {}],
+    };
+    expect(countDanglingRunRecords(snap)).toBe(2);
+    expect(countDanglingRunRecords({ researches: [], researchResponses: [] })).toBe(0);
+  });
+
+  it("F.1: byte-length law — chars ≠ UTF-8 bytes for non-ASCII content (drill write check)", () => {
+    // The drill's isolated-restore-write check compared string.length (chars) with
+    // head().size (UTF-8 bytes); the first real snapshot contains non-ASCII and failed
+    // the check despite a byte-faithful write. The fix compares Buffer.byteLength.
+    const ascii = JSON.stringify({ a: "x" });
+    const nonAscii = JSON.stringify({ a: "σÅ" }); // 2 chars, 5 UTF-8 bytes
+    expect(ascii.length).toBe(Buffer.byteLength(ascii, "utf8")); // equal only for ASCII
+    expect(nonAscii.length).not.toBe(Buffer.byteLength(nonAscii, "utf8"));
+    expect(Buffer.byteLength(nonAscii, "utf8")).toBe(8 + 2 + 3); // 8 ASCII structural chars + σ(2) + Å(3)
   });
 });

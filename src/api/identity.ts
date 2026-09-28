@@ -3,8 +3,8 @@
  *
  * Chosen approach (Phase F decision, user-approved): Firebase Auth on the SPA issues
  * short-lived ID tokens (RS256 JWTs); THIS server verifies each one per request against
- * Google's public X.509 keys via `jose` — no service-account secret, no session store, no
- * cookies to forge. Verification checks signature, issuer, audience, expiry, and (for
+ * Google's public keys (JWK Set) via `jose` — no service-account secret, no session store,
+ * no cookies to forge. Verification checks signature, issuer, audience, expiry, and (for
  * email sign-in) the provider's `email_verified` claim, so an unverified email identity
  * is never trusted.
  *
@@ -61,17 +61,30 @@ export function authEnabled(config: IdentityConfig | undefined): boolean {
 }
 
 const ISSUER_PREFIX = "https://securetoken.google.com/";
+/**
+ * Google's public keys for Firebase ID tokens, as a true JWK Set (jose requirement).
+ * The x509 metadata endpoint (robot/v1/metadata/x509) serves a kid→certificate MAP, not
+ * `{keys:[…]}` — createRemoteJWKSet against it silently matches no key and EVERY token
+ * fails verification (found live in Phase F.1: real tokens 401'd while all mocked tests
+ * passed). The service_accounts JWK endpoint serves the same key set (same kids) as JWK.
+ */
+export const REMOTE_JWKS_URL = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
 /** Google rotates keys; jose caches and refreshes the JWKS on unknown `kid`s. */
-const JWKS = createRemoteJWKSet(new URL("https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"));
+const JWKS = createRemoteJWKSet(new URL(REMOTE_JWKS_URL));
 
-/** Verify a Firebase ID token and return the trusted identity, or throw UnauthorizedError. */
-export async function verifyIdToken(raw: string | undefined, config: IdentityConfig): Promise<AuthenticatedUser> {
+/** Verify a Firebase ID token and return the trusted identity, or throw UnauthorizedError.
+ *  `keys` is a test seam (createLocalJWKSet) — production always uses Google's remote JWKS. */
+export async function verifyIdToken(
+  raw: string | undefined,
+  config: IdentityConfig,
+  keys: ReturnType<typeof createRemoteJWKSet> = JWKS,
+): Promise<AuthenticatedUser> {
   if (raw === undefined || raw === "") throw new UnauthorizedError();
   const token = raw.startsWith("Bearer ") ? raw.slice("Bearer ".length).trim() : raw;
   if (token === "") throw new UnauthorizedError();
   let payload: JWTPayload;
   try {
-    ({ payload } = await jwtVerify(token, JWKS, {
+    ({ payload } = await jwtVerify(token, keys, {
       issuer: `${ISSUER_PREFIX}${config.projectId}`,
       audience: config.projectId,
     }));

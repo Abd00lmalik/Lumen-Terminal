@@ -106,6 +106,12 @@ Endpoint: `GET /api/storage/audit` (byte-level breakdown, read-only) and
   snapshot a compaction save can take ~60–90s; a dry-run executed
   immediately afterwards may report against the PRE-compact blob — verify
   via `head()`/`uploadedAt` or repeat the dry-run.
+- **F.1 finding (2026-09-28): the same write→read visibility gap applies to
+  status blobs.** A read of `ops/backup-status.json` / drill status taken
+  immediately after a backup/drill write can lag one read (a healthy drill
+  showed as `BACKUP_DRILL_MISSING` once, then cleared on re-read). Rule:
+  before investigating a stale-looking ops status, re-read (or check
+  `head()`/uploadedAt) — a single lagging read is NOT a failed backup.
 
 ## 8. Recovery procedure (verified 2026-09-27)
 

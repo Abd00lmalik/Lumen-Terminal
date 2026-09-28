@@ -209,7 +209,16 @@ export async function buildApi(deps: ApiDeps): Promise<{ app: FastifyInstance; r
   // AUTH HOOK: resolve the verified user ONCE per request. In OPEN mode this is a no-op
   // (undefined user allowed). In AUTH mode an invalid/missing token throws a typed 401
   // BEFORE any route logic; workspace context is set per request by routes (see routes.ts).
+  // EXEMPTION: /api/health stays public by design — presence-only diagnostics (booleans,
+  // never values, no user data) whose purpose is to make "the deployment predates its env
+  // vars" diagnosable from production (runbook activation checklist reads it pre-auth).
+  // Every other route, including all private APIs, still requires a verified token.
   app.addHook("onRequest", async (req) => {
+    const path = req.url.split("?")[0];
+    if (path === "/api/health") {
+      (req as unknown as { user?: AuthenticatedUser | undefined }).user = undefined;
+      return;
+    }
     if (!authOn) {
       (req as unknown as { user?: AuthenticatedUser | undefined }).user = undefined;
       return;

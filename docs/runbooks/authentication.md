@@ -1,7 +1,8 @@
 # Authentication Runbook (Phase F)
 
-Status: implemented; production activation requires the Firebase project setup below.
-NEVER paste secrets into chat, commits, or issues; all values go through
+Status: ACTIVE IN PRODUCTION (Phase F.1, 2026-09-28): Firebase env live, real two-account
+email-link sign-in verified through the browser UI, admin gates and workspace isolation
+verified live. NEVER paste secrets into chat, commits, or issues; all values go through
 `npx vercel env add` or the Vercel dashboard.
 
 ## 1. What runs where
@@ -52,11 +53,38 @@ not reach already-running functions.
 2. `GET /api/health` → `identity.firebaseConfigured: true`, `authEnforced: true`,
    `openMode: false`.
 3. Browser: opening `/history` signed-out shows the sign-in view (NOT the old shared
-   history).
+   history). ✅ verified live 2026-09-28.
 4. Google sign-in → account indicator appears in the topbar; History is empty (new
-   workspace) — the legacy quarantine is NOT visible (policy).
+   workspace) — the legacy quarantine is NOT visible (policy). (Email-link path is the
+   one production-verified below; Google popup not exercised in F.1.)
 5. Email-link sign-in → the link arrives, opens the app, session established, email
-   verified by construction.
+   verified by construction. ✅ verified live 2026-09-28 (see §4.1).
+
+### 4.1 Phase F.1 activation result (2026-09-28)
+
+- Health: `firebaseConfigured:true, authEnforced:true, openMode:false`.
+- **Found + fixed during activation (production-only failures, mocked tests stayed green):**
+  1. **JWKS endpoint:** verification fetched the x509 cert **map**
+     (`…/metadata/x509/securetoken@system.gserviceaccount.com`) instead of a JWK Set —
+     every real token 401'd. Fixed to `https://www.googleapis.com/service_accounts/v1/jwk/
+     securetoken@system.gserviceaccount.com` (`src/api/identity.ts`, `REMOTE_JWKS_URL`,
+     keys test-seam; regression tests `tests/api/identity-jwks.test.ts`).
+  2. **Email-link completion:** Firebase's hosted action handler forwards to the continue
+     URL **without `mode=signIn`**, so `isSignInWithEmailLink()` returned false and
+     completion silently no-oped. Fixed `frontend/src/auth.tsx` `completeEmailSignIn()`:
+     detect `oobCode` OR `isSignInWithEmailLink()`, clean `#/signin` from the URL on
+     success, and surface completion errors as typed UI errors (quota-exceeded is how
+     Firebase's daily email limit actually renders).
+  3. **`/api/health` exemption:** the global onRequest 401 hook blocked the health probe;
+     explicit exemption for exactly `/api/health` (path before `?`), all other routes
+     still gated.
+- Verified live (real Chrome profiles, real emails, real tokens): admin + one non-admin
+  account completed sign-in through the actual UI flow; fresh workspaces start EMPTY (no
+  legacy inheritance); all 7 `/api/storage/*` endpoints return 404 for non-admins;
+  non-admin sees only their own records. Full run: `.data/phase-f1-acceptance/`.
+- Known limitation: Firebase **daily email-quota protection** blocks further sign-in-link
+  sends per project/day (rendered as `auth/quota-exceeded` in the UI). Wait for the quota
+  window or use Google sign-in.
 
 ## 5. Legacy workspace assignment (explicit operator act)
 
