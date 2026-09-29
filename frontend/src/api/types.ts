@@ -273,6 +273,55 @@ export type AssessmentStatusDto =
   | "INDETERMINATE";
 
 // ---------------------------------------------------------------------------
+// Monitor (Phase H): thesis-aware material change monitoring
+// ---------------------------------------------------------------------------
+
+export interface MonitorAssessmentDto {
+  readonly ref: string;
+  readonly monitorRef: string;
+  readonly thesisRef?: string;
+  readonly checkId: string;
+  readonly checkedAt: string;
+  readonly outcome: "NO_MATERIAL_CHANGE" | "MATERIAL_CHANGE" | "INSUFFICIENT_EVIDENCE" | "PROVIDER_UNAVAILABLE" | "MONITOR_PAUSED";
+  readonly changedConditions: readonly {
+    readonly condition: string;
+    readonly previousState: string;
+    readonly currentState: string;
+    readonly evidenceRefs: readonly string[];
+    readonly materiality: "NOISE" | "MINOR" | "MEANINGFUL" | "MATERIAL";
+    readonly materialityRationale: string;
+    readonly freshness: "CURRENT" | "STALE" | "HISTORICAL";
+  }[];
+  readonly thesisImpact: "SUPPORTS_THESIS" | "WEAKENS_THESIS" | "POTENTIALLY_INVALIDATES_ASSUMPTION" | "NO_IMPACT" | "UNDETERMINED";
+  readonly summary: string;
+  readonly confidence: "HIGH" | "MODERATE" | "LOW";
+  readonly uncertainty: readonly string[];
+  readonly researchRef?: string;
+  readonly notificationRef?: string;
+  readonly provenance: readonly ProvenanceEntryDto[];
+  readonly createdAt: string;
+}
+
+export interface MonitorNotificationDto {
+  readonly ref: string;
+  readonly monitorRef: string;
+  readonly assessmentRef: string;
+  readonly title: string;
+  readonly summary: string;
+  readonly materiality: "NOISE" | "MINOR" | "MEANINGFUL" | "MATERIAL";
+  readonly thesisImpact: string;
+  readonly researchRef?: string;
+  readonly read: boolean;
+  readonly createdAt: string;
+}
+
+export interface MonitorCheckResultDto {
+  readonly assessment: MonitorAssessmentDto;
+  readonly notification?: MonitorNotificationDto;
+  readonly executed: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Challenge (Phase G): persistent falsification records derived from Flow 7
 // ---------------------------------------------------------------------------
 
@@ -390,6 +439,14 @@ export interface MonitorDto {
     readonly note: string;
     readonly at: string;
   }[];
+  // Phase H execution state
+  readonly cadence?: "DAILY" | "WEEKLY" | "MANUAL";
+  readonly lastCheckedAt?: string;
+  readonly lastTriggeredAt?: string;
+  readonly lastAssessmentRef?: string;
+  readonly linkedChallengeRefs?: readonly string[];
+  readonly watchRationale?: string;
+  readonly nextScheduledCheckAt?: string;
 }
 
 // ---------------------------------------------------------------------------

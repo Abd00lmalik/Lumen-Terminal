@@ -95,6 +95,10 @@ export function mergeSnapshots(local: WorkspaceSnapshot, remote: WorkspaceSnapsh
     monitors: mergeById(local.monitors, remote.monitors),
     thesisAssessments: mergeById(local.thesisAssessments, remote.thesisAssessments),
     challenges: mergeById(local.challenges ?? [], remote.challenges ?? []),
+    // Phase H: assessments and notifications are immutable records → union by id (idempotent
+    // across instances; checkId dedup happens at creation). Monitor objects merge like theses.
+    monitoringAssessments: mergeById(local.monitoringAssessments ?? [], remote.monitoringAssessments ?? []),
+    monitorNotifications: mergeById(local.monitorNotifications ?? [], remote.monitorNotifications ?? []),
     ...(activeThesisId !== undefined ? { activeThesisId } : {}),
     ...(mergedResponses.size > 0
       ? { researchResponses: [...mergedResponses.entries()].map(([researchId, response]) => ({ researchId, response })) }

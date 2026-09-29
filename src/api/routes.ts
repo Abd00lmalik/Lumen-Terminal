@@ -584,6 +584,57 @@ export function registerRoutes(app: FastifyInstance, context: RouteContext): voi
     }),
   });
 
+  // ------------------------------------------------------------------
+  // Phase H: Monitor execution. Creation derives conditions from the workspace's CHALLENGE
+  // records (never model-invented); every monitor is PROPOSED + inert until the explicit
+  // activate call above. Checks run the bounded, idempotent orchestrator (manual + cron use
+  // the SAME pipeline). All routes resolve through the authenticated per-user workspace:
+  // isolation is structural (§19), not filter-based.
+  // ------------------------------------------------------------------
+
+  app.post("/api/monitors/from-challenge", {
+    handler: withErrors(async (req) => {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      return (await appForRequest(req)).createMonitorFromChallenge({
+        ...(isString(body.thesisRef) ? { thesisRef: body.thesisRef } : {}),
+        ...(isString(body.cadence) && ["DAILY", "WEEKLY", "MANUAL"].includes(body.cadence) ? { cadence: body.cadence as "DAILY" | "WEEKLY" | "MANUAL" } : {}),
+        ...(isString(body.title) ? { title: body.title } : {}),
+      });
+    }),
+  });
+  app.post("/api/monitors/:ref/status", {
+    handler: withErrors(async (req) => {
+      const ref = (req.params as { ref: string }).ref;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const to = isString(body.status) ? body.status.toUpperCase() : "";
+      if (to !== "PAUSED" && to !== "ACTIVE" && to !== "COMPLETED") {
+        throw new InvalidRequestError("status must be PAUSED, ACTIVE, or COMPLETED");
+      }
+      return (await appForRequest(req)).setMonitorStatus(ref, to);
+    }),
+  });
+  app.post("/api/monitors/:ref/check", {
+    handler: withErrors(async (req) => {
+      const ref = (req.params as { ref: string }).ref;
+      return (await appForRequest(req)).checkMonitorNow(ref);
+    }),
+  });
+  app.get("/api/monitors/:ref/assessments", {
+    handler: withErrors(async (req) => {
+      const ref = (req.params as { ref: string }).ref;
+      return (await appForRequest(req)).listMonitorAssessments(ref);
+    }),
+  });
+  app.get("/api/notifications", {
+    handler: withErrors(async (req) => (await appForRequest(req)).listNotifications()),
+  });
+  app.post("/api/notifications/:ref/read", {
+    handler: withErrors(async (req) => {
+      const ref = (req.params as { ref: string }).ref;
+      return (await appForRequest(req)).markNotificationRead(ref);
+    }),
+  });
+
   void TRADER_ORIGIN;
 }
 

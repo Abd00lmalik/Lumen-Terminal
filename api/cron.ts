@@ -125,9 +125,63 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     };
     await writeStatus(next);
     void watchdog;
-    res.status(200).json({ ok: true, backup: { backed: backup.backed, failed: backup.failed, skipped: backup.skipped } });
+    // Phase H: bounded monitoring pass AFTER backups (independent stage; a monitor failure
+    // never affects backup state and vice versa). Per-workspace isolation: each workspace's
+    // monitors run against THEIR store through the same ResearchApp/session machinery the
+    // API uses; one failed workspace/monitor never aborts the others (§9).
+    let monitors: { workspacesProcessed: number; checks: number; budgetExhausted: boolean; errors: number } = { workspacesProcessed: 0, checks: 0, budgetExhausted: false, errors: 0 };
+    try {
+      monitors = await runMonitorBatch();
+    } catch { monitors = { workspacesProcessed: 0, checks: 0, budgetExhausted: false, errors: 1 }; }
+    res.status(200).json({ ok: true, backup: { backed: backup.backed, failed: backup.failed, skipped: backup.skipped }, monitors });
   } catch (err) {
     await writeStatus({ ...status, lastAttemptAt: new Date().toISOString() });
     res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
+}
+
+/**
+ * Phase H monitoring batch (§9): iterate workspace snapshots from storage, build a headless
+ * ResearchApp per workspace, run the due ACTIVE monitors (bounded batch), persist through the
+ * app (merge law). MONITOR research flows through the same engine and lands in the same
+ * History as user research (§15); check identity keeps retries/concurrency idempotent (§10).
+ */
+async function runMonitorBatch(): Promise<{ workspacesProcessed: number; checks: number; budgetExhausted: boolean; errors: number }> {
+  let workspacesProcessed = 0;
+  let checks = 0;
+  let budgetExhausted = false;
+  let errors = 0;
+  const { createBitgetAdapterSet } = await import("../src/adapters/bitget-skills.js");
+  const { runDueMonitorChecks } = await import("../src/ops/monitor-check.js");
+  const { VercelBlobStore, workspaceBlobPath } = await import("../src/persistence/vercel-edge.js");
+  const { ResearchApp } = await import("../src/api/research-app.js");
+  const { buildModelChain } = await import("./research.js");
+  const adapterSet = createBitgetAdapterSet();
+  const provider = buildModelChain();
+
+  const paths = new Set<string>();
+  try {
+    const blobs = await list({ prefix: "workspaces/" });
+    for (const b of blobs.blobs) {
+      if (b.pathname.endsWith("/snapshot.json")) paths.add(b.pathname);
+    }
+  } catch { return { workspacesProcessed: 0, checks: 0, budgetExhausted: false, errors: errors + 1 }; }
+
+  for (const path of paths) {
+    const uid = path.split("/")[1] ?? "";
+    if (uid === "") continue;
+    try {
+      // Per-workspace store + app (the same construction the API's session factory uses:
+      // provider + registry + per-uid store; no HTTP layer needed for the batch).
+      const store = new VercelBlobStore(undefined, { pathname: workspaceBlobPath(uid) });
+      const researchApp = await ResearchApp.create({ provider, registry: adapterSet.registry, store });
+      const result = await runDueMonitorChecks(researchApp, { kind: "system", detail: "cron monitoring pass" }, new Date());
+      workspacesProcessed += 1;
+      checks += result.checked.filter((c) => c.executed).length;
+      budgetExhausted = budgetExhausted || result.budgetExhausted;
+    } catch {
+      errors += 1; // one workspace failing never aborts the others (§9)
+    }
+  }
+  return { workspacesProcessed, checks, budgetExhausted, errors };
 }

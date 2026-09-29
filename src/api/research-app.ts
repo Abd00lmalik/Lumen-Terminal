@@ -27,9 +27,9 @@ import type { ProvenanceOrigin } from "../domain/provenance.js";
 import type { ProgressListener } from "../research/progress.js";
 import {
   evidenceToDTO, evidenceSummaryDTO, judgmentToDTO, researchToDTO, continuitySnapshotToDTO,
-  thesisToDTO, thesisAssessmentToDTO, artifactToDTO, memoryToDTO, monitorToDTO,
+  thesisToDTO, thesisAssessmentToDTO, artifactToDTO, memoryToDTO,
   provenanceToDTO, toHistoricalAnalysisDTO, uiText, savedArtifactToDTO, savedArtifactToSummaryDTO,
-  challengeToDTO,
+  challengeToDTO, monitorToDTO, monitoringAssessmentToDTO, monitorNotificationToDTO,
   type ResearchResponseDTO, type ResearchDiagnosticsDTO, type RequirementDiagnosticDTO, type AnswerDTO, type EvidenceDTO, type JudgmentDTO,
   type ResearchRunSummaryDTO, type ResearchRunAggregateDTO, type ResearchRecordTierDTO,
   type SavedItemDTO, type SavedItemSummaryDTO, type SavedOriginDTO, type ChallengeRunDTO,
@@ -1195,6 +1195,146 @@ export class ResearchApp {
         : {}),
       challenges,
     };
+  }
+
+  // ------------------------------------------------------------------
+  // Phase H: Monitor execution surface (§3/§13/§14). Proposal/activation stays behind the
+  // M5 trader-confirmation boundary; conditions derive from Challenge (§5); checks are
+  // bounded, idempotent, and run the SAME research pipeline (§6/§7/§10).
+  // ------------------------------------------------------------------
+
+  /**
+   * Create a monitor PROPOSAL from the workspace's Challenge records for a thesis (§5).
+   * Conditions come from challenges/falsifiers — the model invents nothing here. The monitor
+   * is PROPOSED + inert; the user activates it explicitly (§3).
+   */
+  async createMonitorFromChallenge(input: { thesisRef?: string; cadence?: "DAILY" | "WEEKLY" | "MANUAL"; title?: string }) {
+    await this.refreshTheses();
+    const workspace = this.ws();
+    // Deterministic thesis resolution (same law as Challenge: explicit → single → clarify).
+    let targetId = input.thesisRef;
+    if (targetId === undefined) {
+      const explicitId = workspace.explicitActiveThesisId();
+      if (explicitId !== undefined) targetId = explicitId;
+      else {
+        const active = workspace.activeTheses();
+        if (active.length === 1) targetId = active[0]!.id;
+      }
+    }
+    if (targetId === undefined) {
+      const count = workspace.activeTheses().length;
+      throw new InvalidRequestError(count === 0
+        ? "no active thesis to monitor. Create or select a thesis first."
+        : "several theses are active and none is selected; pass thesisRef or select a thesis.");
+    }
+    const thesis = workspace.getThesis(targetId);
+    if (thesis === undefined) throw new NotFoundError("thesis not found in this workspace");
+
+    const { conditionsFromChallenges } = await import("../domain/monitor-derive.js");
+    const { conditions, challengeRefs } = conditionsFromChallenges(workspace, thesis.id);
+    if (conditions.length === 0) {
+      throw new InvalidRequestError("no active challenges to derive monitoring conditions from. Run 'Challenge my thesis' first (monitoring watches real falsifiers, not invented ones).");
+    }
+    const origin: ProvenanceOrigin = { kind: "trader", detail: "monitor proposal from challenge (inert until explicit activation)" };
+    const monitor = workspace.addExecutableMonitorProposal({
+      target: input.title ?? thesis.asset ?? thesis.statement.slice(0, 80),
+      conditions,
+      triggerRationale: `Derived from ${challengeRefs.length} active challenge record(s) on thesis ${thesis.id}; watching the falsifiers the user's own challenge research identified.`,
+      thesisRef: thesis.id,
+      thesisVersion: thesis.version,
+      ...(input.cadence !== undefined ? { cadence: input.cadence } : {}),
+      linkedChallengeRefs: challengeRefs,
+    }, origin, new Date());
+    await this.persist();
+    return { monitor: monitorToDTO(monitor), challengeRefs };
+  }
+
+  /** List monitors grouped by lifecycle (active/paused/proposed); read-freshness applied. */
+  async listMonitorsGrouped() {
+    await this.refreshTheses();
+    const all = this.ws().listMonitors().map(monitorToDTO);
+    return {
+      active: all.filter((m) => m.status === "ACTIVE"),
+      paused: all.filter((m) => m.status === "PAUSED"),
+      proposed: all.filter((m) => m.status === "PROPOSED"),
+      completed: all.filter((m) => m.status === "COMPLETED" || m.status === "STALE"),
+    };
+  }
+
+  /** List a monitor's assessments (history; newest last). */
+  async listMonitorAssessments(monitorRef: string) {
+    await this.refreshTheses();
+    if (this.ws().getMonitor(monitorRef) === undefined) throw new NotFoundError("monitor");
+    return this.ws().listMonitoringAssessments(monitorRef).map(monitoringAssessmentToDTO);
+  }
+
+  /** List the workspace's notifications (newest first); material-change only by construction. */
+  async listNotifications() {
+    await this.refreshTheses();
+    return this.ws().listNotifications().map(monitorNotificationToDTO);
+  }
+
+  /** Mark a notification read (user action). */
+  async markNotificationRead(ref: string) {
+    await this.refreshTheses();
+    if (this.ws().getNotification(ref) === undefined) throw new NotFoundError("notification");
+    const updated = this.ws().markNotificationRead(ref, { kind: "trader", detail: "marked read via API" }, new Date());
+    await this.persist();
+    return monitorNotificationToDTO(updated);
+  }
+
+  /** Pause/resume through the domain transition table (explicit user action; §3). */
+  async setMonitorStatus(ref: string, to: "PAUSED" | "ACTIVE" | "COMPLETED") {
+    await this.refreshTheses();
+    const workspace = this.ws();
+    if (workspace.getMonitor(ref) === undefined) throw new NotFoundError("monitor");
+    const updated = workspace.transitionMonitor(ref, to, { kind: "trader", detail: `explicit ${to.toLowerCase()} via API` }, `trader ${to.toLowerCase()}ed the monitor via API`, new Date());
+    await this.persist();
+    return monitorToDTO(updated);
+  }
+
+  /**
+   * Manual "Check now" (§8): SAME pipeline as scheduled checks (research engine + materiality
+   * + idempotent persistence); force bypasses only the due gate, never the lifecycle gates.
+   */
+  async checkMonitorNow(ref: string) {
+    await this.refreshTheses();
+    if (this.ws().getMonitor(ref) === undefined) throw new NotFoundError("monitor");
+    const { runMonitorCheck } = await import("../ops/monitor-check.js");
+    const result = await runMonitorCheck(this, ref, { kind: "trader", detail: "manual check via API" }, { force: true, now: new Date() });
+    return {
+      assessment: monitoringAssessmentToDTO(result.assessment),
+      ...(result.notification !== undefined ? { notification: monitorNotificationToDTO(result.notification) } : {}),
+      executed: result.executed,
+    };
+  }
+
+  /**
+   * Run the falsification ENGINE for a monitoring check (Phase H). The monitor orchestrator
+   * (not the LLM) calls this; the engine's Flow 7 pipeline, evidence validation, and
+   * completion gates are the ONLY research path. Persists nothing here (the orchestrator does).
+   */
+  /** Persist monitoring results (orchestrator entry point; same merge law as submitResearchRequest). */
+  async persistAfterMonitorCheck(): Promise<void> {
+    await this.persist();
+  }
+
+  async runEngineFlow7(objective: string, thesisRef: string, deadlineMs: number) {
+    const workspace = this.ws();
+    const { runFlow7 } = await import("../research/flow7.js");
+    beginRun({ runId: `${newId(idPrefixes.run)}-${crypto.randomUUID().slice(0, 8)}`, userQuestion: objective });
+    try {
+      return await runFlow7(objective, {
+        provider: this.options.provider,
+        registry: this.options.registry,
+        workspace,
+        store: this.options.store,
+        thesisRef,
+        deadlineMs,
+      });
+    } finally {
+      endRun();
+    }
   }
 
   // Memory / saved artifacts -------------------------------------------

@@ -54,7 +54,7 @@ import { VercelBlobStore } from "../src/persistence/vercel-edge.js";
  * Safety refusals are never bypassed; the facade's breaker adds temporary cooldown after
  * repeated technical failures without ever permanently disabling a provider.
  */
-function buildModelChain(): ModelFallbackProvider {
+export function buildModelChain(): ModelFallbackProvider {
   const providers: (GeminiProvider | GroqProvider)[] = [new GeminiProvider({ deferCredentialCheck: true })];
   if (process.env.GROQ_API_KEY !== undefined && process.env.GROQ_API_KEY !== "") {
     providers.push(new GroqProvider({ deferCredentialCheck: true }));

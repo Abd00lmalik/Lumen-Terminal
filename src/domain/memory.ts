@@ -187,6 +187,16 @@ export interface Monitor {
   readonly status: MonitorLifecycleStatus;
   /** Source unavailability is a STATE, never a false alert (M5 §12). */
   readonly sourceStates: readonly { readonly ref: string; readonly state: "SOURCE_UNAVAILABLE" | "OK"; readonly note: string; readonly at: ISO }[];
+  // --- Phase H execution state (monitoring.ts); optional so M5 records load unchanged ---
+  /** Deterministic cadence (daily/weekly/manual); MANUAL monitors never auto-fire. */
+  readonly cadence?: "DAILY" | "WEEKLY" | "MANUAL";
+  readonly lastCheckedAt?: ISO;
+  readonly lastTriggeredAt?: ISO;
+  readonly lastAssessmentRef?: string;
+  /** Challenges/falsifiers this monitor watches (challengeRef linkage; §17). */
+  readonly linkedChallengeRefs?: readonly string[];
+  /** Bumped when conditions/trigger config legitimately change (re-check becomes legal). */
+  readonly triggerVersion?: number;
   readonly provenance: Provenance;
   readonly createdAt: ISO;
   readonly updatedAt: ISO;

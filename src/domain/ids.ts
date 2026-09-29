@@ -64,6 +64,8 @@ export const idPrefixes = {
   memory: "mem", // M5 research memory
   monitor: "mon", // M5 monitoring handoff
   challenge: "ch", // Phase G falsification challenge records (Flow 7 derived)
+  monitorCheck: "mk", // Phase H monitoring assessment records
+  notification: "nt", // Phase H in-app material-change notifications
 } as const;
 
 /**

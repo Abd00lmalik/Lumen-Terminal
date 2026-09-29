@@ -26,6 +26,10 @@ import {
   type Challenge,
 } from "./challenge.js";
 import {
+  applyExecutionPatch,
+  type MonitoringAssessment, type MonitorNotification, type MonitorExecutionPatch,
+} from "./monitoring.js";
+import {
   createMemoryEntry, decayMemory, revalidateMemory, proposeMonitor, transitionMonitor,
   recordMonitorSourceState, flagMonitorForReview,
   type MemoryEntry, type MemoryCategory, type MemoryStatus, type Monitor,
@@ -85,6 +89,9 @@ export interface WorkspaceSnapshot {
   readonly thesisAssessments: readonly ThesisAssessmentRecord[];
   /** Phase G: persistent falsification challenges (Flow 7 derived; never thesis mutations). */
   readonly challenges?: readonly Challenge[];
+  /** Phase H: monitoring assessments + in-app notifications (execution state). */
+  readonly monitoringAssessments?: readonly MonitoringAssessment[];
+  readonly monitorNotifications?: readonly MonitorNotification[];
   /** M6 (audit D1): the trader's explicit active-thesis selection (working state). */
   readonly activeThesisId?: string;
   /**
@@ -120,6 +127,9 @@ export class Workspace {
   private readonly thesisAssessments: ThesisAssessmentRecord[] = [];
   /** Phase G: falsification challenges keyed by id (see domain/challenge.ts). */
   private readonly challenges = new Map<string, Challenge>();
+  /** Phase H: monitoring assessments + notifications keyed by id. */
+  private readonly monitoringAssessments = new Map<string, MonitoringAssessment>();
+  private readonly notifications = new Map<string, MonitorNotification>();
   /** M6 (audit D1): the trader's EXPLICIT active-thesis selection (MANAGE_STATE set-active-thesis).
    *  Without it, "active thesis" was inferred from updatedAt ordering; an inference, not state.
    *  Trader-owned working state must be recorded, never guessed. */
@@ -747,6 +757,19 @@ export class Workspace {
       const existing = this.challenges.get(incoming.id);
       if (existing === undefined || incoming.updatedAt > existing.updatedAt) this.challenges.set(incoming.id, incoming);
     }
+    // Phase H: monitor execution state, assessments, notifications (union-by-id; the
+    // monitors' own execution fields ride the existing thesis-style monitor merge).
+    for (const raw of snapshot.monitors ?? []) {
+      const existing = this.monitors.get(raw.id);
+      if (existing === undefined || raw.updatedAt > existing.updatedAt) this.monitors.set(raw.id, raw);
+    }
+    for (const a of snapshot.monitoringAssessments ?? []) {
+      const existing = this.monitoringAssessments.get(a.id);
+      if (existing === undefined) this.monitoringAssessments.set(a.id, a);
+    }
+    for (const n of snapshot.monitorNotifications ?? []) {
+      if (!this.notifications.has(n.id)) this.notifications.set(n.id, n);
+    }
   }
 
   /**
@@ -874,6 +897,104 @@ export class Workspace {
   }
 
   /** Source unavailability is a STATE; never a false invalidation alert (M5 §12). */
+  // ----- Phase H: monitoring execution ---------------------------------------
+
+  /**
+   * Create a PROPOSED monitor with Phase H execution state (cadence, challenge linkage).
+   * Still inert until the trader activates it (§3 law: Lumen proposes, the user activates).
+   */
+  addExecutableMonitorProposal(
+    input: Omit<Parameters<Workspace["addMonitorProposal"]>[0], "freshnessExpectation" | "suggestedFrequency"> & {
+      cadence?: "DAILY" | "WEEKLY" | "MANUAL";
+      linkedChallengeRefs?: readonly string[];
+    },
+    origin: ProvenanceOrigin,
+    at?: Date,
+  ): Monitor {
+    const { cadence, linkedChallengeRefs, ...rest } = input;
+    const proposalInput = { ...rest } as Parameters<Workspace["addMonitorProposal"]>[0];
+    const monitor = this.addMonitorProposal(proposalInput, origin, at);
+    const executable: Monitor = {
+      ...monitor,
+      ...(cadence !== undefined ? { cadence } : { cadence: "MANUAL" as const }),
+      ...(linkedChallengeRefs !== undefined && linkedChallengeRefs.length > 0 ? { linkedChallengeRefs: Object.freeze([...linkedChallengeRefs]) } : {}),
+      triggerVersion: 1,
+      provenance: appendProvenance(monitor.provenance, origin, `execution state attached (cadence ${cadence ?? "MANUAL"}; challenge-linked: ${linkedChallengeRefs?.length ?? 0})`, at),
+    };
+    this.monitors.set(executable.id, executable);
+    return executable;
+  }
+
+  /** Explicit user update of monitor conditions (§14 user action; NEVER silent/self). */
+  updateMonitorConditions(id: string, conditions: readonly MonitorCondition[], origin: ProvenanceOrigin, note: string, at?: Date): Monitor {
+    const monitor = this.monitors.get(id);
+    if (monitor === undefined) throw new Error(`Unknown monitor: ${id}`);
+    if (origin.kind !== "trader") throw new Error("monitor conditions can only be changed by the trader; the monitor never silently rewrites itself");
+    const updated: Monitor = {
+      ...monitor,
+      conditions: Object.freeze([...conditions]),
+      triggerVersion: (monitor.triggerVersion ?? 1) + 1, // re-check becomes legitimate
+      provenance: appendProvenance(monitor.provenance, origin, `conditions updated by trader: ${note}`, at),
+      updatedAt: (at ?? new Date()).toISOString(),
+    };
+    this.monitors.set(id, updated);
+    return updated;
+  }
+
+  /** Record a completed monitoring check (idempotent by checkId at the caller level too). */
+  recordMonitorCheck(id: string, patch: MonitorExecutionPatch, origin: ProvenanceOrigin, note: string, at?: Date): Monitor {
+    const monitor = this.monitors.get(id);
+    if (monitor === undefined) throw new Error(`Unknown monitor: ${id}`);
+    const updated = applyExecutionPatch(monitor, patch, origin, note, at);
+    this.monitors.set(id, updated);
+    return updated;
+  }
+
+  /** Persist a monitoring assessment; IDEMPOTENT by checkId (§10). */
+  recordMonitoringAssessment(assessment: MonitoringAssessment): MonitoringAssessment {
+    this.monitoringAssessments.set(assessment.id, assessment);
+    return assessment;
+  }
+
+  getMonitoringAssessment(id: string): MonitoringAssessment | undefined {
+    return this.monitoringAssessments.get(id);
+  }
+
+  findMonitoringAssessmentByCheckId(checkId: string): MonitoringAssessment | undefined {
+    return [...this.monitoringAssessments.values()].find((a) => a.checkId === checkId);
+  }
+
+  listMonitoringAssessments(monitorRef?: string): readonly MonitoringAssessment[] {
+    const all = [...this.monitoringAssessments.values()].sort((a, b) => a.checkedAt.localeCompare(b.checkedAt));
+    return monitorRef === undefined ? all : all.filter((a) => a.monitorRef === monitorRef);
+  }
+
+  /** Persist a material-change notification; IDEMPOTENT by checkId (at most one per check). */
+  recordNotification(notification: MonitorNotification): MonitorNotification {
+    this.notifications.set(notification.id, notification);
+    return notification;
+  }
+
+  findNotificationByCheckId(checkId: string): MonitorNotification | undefined {
+    return [...this.notifications.values()].find((n) => n.checkId === checkId);
+  }
+
+  getNotification(id: string): MonitorNotification | undefined {
+    return this.notifications.get(id);
+  }
+
+  listNotifications(): readonly MonitorNotification[] {
+    return [...this.notifications.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  markNotificationRead(id: string, origin: ProvenanceOrigin, at?: Date): MonitorNotification {
+    const notification = this.notifications.get(id);
+    if (notification === undefined) throw new Error(`Unknown notification: ${id}`);
+    const updated: MonitorNotification = { ...notification, read: true, provenance: appendProvenance(notification.provenance, origin, "marked read", at) };
+    this.notifications.set(id, updated);
+    return updated;
+  }
+
   recordMonitorSourceState(id: string, sourceRef: string, state: "SOURCE_UNAVAILABLE" | "OK", note: string, origin: ProvenanceOrigin, at?: Date): Monitor {
     const monitor = this.monitors.get(id);
     if (monitor === undefined) throw new Error(`Unknown monitor: ${id}`);
@@ -1095,6 +1216,8 @@ export class Workspace {
       monitors: this.listMonitors(),
       thesisAssessments: this.listThesisAssessments(),
       ...(this.challenges.size > 0 ? { challenges: this.listChallenges() } : {}),
+      ...(this.monitoringAssessments.size > 0 ? { monitoringAssessments: this.listMonitoringAssessments() } : {}),
+      ...(this.notifications.size > 0 ? { monitorNotifications: this.listNotifications() } : {}),
       ...(this.savedTombstones.size > 0 ? { savedTombstones: this.listSavedTombstones() } : {}),
       // M6 (audit D1): the trader's explicit selection is working state and must round-trip.
       ...(this.activeThesisId !== undefined ? { activeThesisId: this.activeThesisId } : {}),
@@ -1133,6 +1256,14 @@ export class Workspace {
       const normalized = normalizeChallenge(c);
       ws.challenges.set(normalized.id, normalized);
       bumpIdCounterPastId(normalized.id); // counter continuity for the ch_ prefix
+    }
+    for (const a of snap.monitoringAssessments ?? []) {
+      ws.monitoringAssessments.set(a.id, a);
+      bumpIdCounterPastId(a.id); // mk_ counter continuity
+    }
+    for (const n of snap.monitorNotifications ?? []) {
+      ws.notifications.set(n.id, n);
+      bumpIdCounterPastId(n.id); // nt_ counter continuity
     }
     for (const r of snap.researchResponses ?? []) ws.researchResponses.set(r.researchId, r.response);
     if (snap.activeThesisId !== undefined) ws.activeThesisId = snap.activeThesisId;

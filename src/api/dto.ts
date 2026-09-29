@@ -19,6 +19,7 @@ import type { MemoryEntry, MemoryStatus, MemoryCategory, Monitor, MonitorConditi
 import type { SavedArtifact, SavedKind, Thesis, ThesisAssessmentRecord, ThesisStatus } from "../domain/thesis.js";
 import { THESIS_TRANSITIONS } from "../domain/thesis.js";
 import type { Challenge } from "../domain/challenge.js";
+import type { MonitoringAssessment, MonitorNotification } from "../domain/monitoring.js";
 import type { Provenance, ProvenanceOrigin } from "../domain/provenance.js";
 
 // ---------------------------------------------------------------------------
@@ -652,6 +653,61 @@ export interface MonitorDTO {
   readonly status: MonitorLifecycleDTO;
   /** SOURCE_UNAVAILABLE is source STATE data, never an invalidation alert (M5 §12). */
   readonly sourceStates: readonly { readonly ref: string; readonly state: "SOURCE_UNAVAILABLE" | "OK"; readonly note: string; readonly at: string }[];
+  // --- Phase H execution state ---
+  readonly cadence?: "DAILY" | "WEEKLY" | "MANUAL";
+  readonly lastCheckedAt?: string;
+  readonly lastTriggeredAt?: string;
+  readonly lastAssessmentRef?: string;
+  readonly linkedChallengeRefs?: readonly string[];
+  /** Why am I watching this? Derived from the thesis/challenge relationship (§14). */
+  readonly watchRationale?: string;
+  readonly nextScheduledCheckAt?: string;
+}
+
+export interface MonitoringAssessmentDTO {
+  readonly ref: string;
+  readonly monitorRef: string;
+  readonly thesisRef?: string;
+  readonly checkId: string;
+  readonly checkedAt: string;
+  readonly outcome: "NO_MATERIAL_CHANGE" | "MATERIAL_CHANGE" | "INSUFFICIENT_EVIDENCE" | "PROVIDER_UNAVAILABLE" | "MONITOR_PAUSED";
+  readonly changedConditions: readonly {
+    readonly condition: string;
+    readonly previousState: string;
+    readonly currentState: string;
+    readonly evidenceRefs: readonly string[];
+    readonly materiality: "NOISE" | "MINOR" | "MEANINGFUL" | "MATERIAL";
+    readonly materialityRationale: string;
+    readonly freshness: "CURRENT" | "STALE" | "HISTORICAL";
+  }[];
+  readonly thesisImpact: "SUPPORTS_THESIS" | "WEAKENS_THESIS" | "POTENTIALLY_INVALIDATES_ASSUMPTION" | "NO_IMPACT" | "UNDETERMINED";
+  readonly summary: string;
+  readonly confidence: "HIGH" | "MODERATE" | "LOW";
+  readonly uncertainty: readonly string[];
+  readonly researchRef?: string;
+  readonly notificationRef?: string;
+  readonly provenance: readonly ProvenanceEntryDTO[];
+  readonly createdAt: string;
+}
+
+export interface MonitorNotificationDTO {
+  readonly ref: string;
+  readonly monitorRef: string;
+  readonly assessmentRef: string;
+  readonly title: string;
+  readonly summary: string;
+  readonly materiality: "NOISE" | "MINOR" | "MEANINGFUL" | "MATERIAL";
+  readonly thesisImpact: string;
+  readonly researchRef?: string;
+  readonly read: boolean;
+  readonly createdAt: string;
+}
+
+export interface MonitorCheckResultDTO {
+  readonly assessment: MonitoringAssessmentDTO;
+  readonly notification?: MonitorNotificationDTO;
+  /** False when the check was deduplicated (idempotent replay) or not executed. */
+  readonly executed: boolean;
 }
 
 export function monitorToDTO(m: Monitor): MonitorDTO {
@@ -673,6 +729,67 @@ export function monitorToDTO(m: Monitor): MonitorDTO {
     triggerRationale: m.triggerRationale,
     status: m.status,
     sourceStates: m.sourceStates.map((s) => ({ ref: s.ref, state: s.state, note: s.note, at: s.at })),
+    // Phase H execution state + the "why am I watching this" rationale (challenge-derived).
+    ...(m.cadence !== undefined ? { cadence: m.cadence } : {}),
+    ...(m.lastCheckedAt !== undefined ? { lastCheckedAt: m.lastCheckedAt } : {}),
+    ...(m.lastTriggeredAt !== undefined ? { lastTriggeredAt: m.lastTriggeredAt } : {}),
+    ...(m.lastAssessmentRef !== undefined ? { lastAssessmentRef: m.lastAssessmentRef } : {}),
+    ...(m.linkedChallengeRefs !== undefined ? { linkedChallengeRefs: idRefs(m.linkedChallengeRefs) } : {}),
+    ...(m.thesisRef !== undefined ? { watchRationale: `Watching the falsifiers of thesis ${m.thesisRef} (v${m.thesisVersion ?? "?"}): this monitor checks whether the challenged conditions have materially changed; the thesis itself is never modified by monitoring.` } : {}),
+    ...nextCheckField(m),
+  };
+}
+
+/** Next scheduled check (deterministic cadence law; MANUAL monitors are never scheduled). */
+function nextCheckField(m: Monitor): { nextScheduledCheckAt?: string } {
+  if (m.status !== "ACTIVE") return {};
+  const interval = m.cadence === "DAILY" ? 24 * 60 * 60 * 1000 : m.cadence === "WEEKLY" ? 7 * 24 * 60 * 60 * 1000 : undefined;
+  if (interval === undefined) return {};
+  const base = m.lastCheckedAt !== undefined ? Date.parse(m.lastCheckedAt) : Date.parse(m.createdAt);
+  if (Number.isNaN(base)) return {};
+  return { nextScheduledCheckAt: new Date(base + interval).toISOString() };
+}
+
+export function monitoringAssessmentToDTO(a: MonitoringAssessment): MonitoringAssessmentDTO {
+  return {
+    ref: a.id,
+    monitorRef: a.monitorRef,
+    ...(a.thesisRef !== undefined ? { thesisRef: a.thesisRef } : {}),
+    checkId: a.checkId,
+    checkedAt: a.checkedAt,
+    outcome: a.outcome,
+    changedConditions: a.changedConditions.map((c) => ({
+      condition: c.condition,
+      previousState: c.previousState,
+      currentState: c.currentState,
+      evidenceRefs: idRefs(c.evidenceRefs),
+      materiality: c.materiality,
+      materialityRationale: c.materialityRationale,
+      freshness: c.freshness,
+    })),
+    thesisImpact: a.thesisImpact,
+    summary: a.summary,
+    confidence: a.confidence,
+    uncertainty: [...a.uncertainty],
+    ...(a.researchRef !== undefined ? { researchRef: a.researchRef } : {}),
+    ...(a.notificationRef !== undefined ? { notificationRef: a.notificationRef } : {}),
+    provenance: provenanceToDTO(a.provenance),
+    createdAt: a.createdAt,
+  };
+}
+
+export function monitorNotificationToDTO(n: MonitorNotification): MonitorNotificationDTO {
+  return {
+    ref: n.id,
+    monitorRef: n.monitorRef,
+    assessmentRef: n.assessmentRef,
+    title: n.title,
+    summary: n.summary,
+    materiality: n.materiality,
+    thesisImpact: n.thesisImpact,
+    ...(n.researchRef !== undefined ? { researchRef: n.researchRef } : {}),
+    read: n.read,
+    createdAt: n.createdAt,
   };
 }
 
