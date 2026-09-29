@@ -1,17 +1,19 @@
 # Lumen Terminal; Benchmark Report
 
-Latest update: **2026-09-21** (requirement-completeness benchmark suite) · Spec: [`BENCHMARK.md`](BENCHMARK.md) · Verification categories are never collapsed:
+Latest update: **2026-09-29** (research-integrity provenance fix + adversarial evidence-provenance suite + monitoring-handoff chain + Flow 8 framework-inconsistency detection) · Spec: [`BENCHMARK.md`](BENCHMARK.md) · Verification categories are never collapsed:
 **VERIFIED LIVE** / **VERIFIED DETERMINISTICALLY** / **MOCKED** / **UNVERIFIED** / **BLOCKED-EXTERNAL**.
 
 ## Overall status
 
 | Layer | Result | Mode |
 |---|---|---|
-| Deterministic suite (backend) | **659 passed / 0 failed**, 25 env-gated skipped (684 total) | VERIFIED DETERMINISTICALLY |
-| Requirement-completeness benchmark | **38 passed / 0 failed** (7 categories: MACRO_REGIME, SINGLE_ASSET, EARNINGS/EVENT, COMMODITY/CROSS-ASSET, CRYPTO_MARKET, CAUSAL/TRANSMISSION, ADVERSARIAL/UNSEEN + cross-category integration) | VERIFIED DETERMINISTICALLY |
-| Frontend deterministic suite (new) | **11 passed / 0 failed**; URL resolution (prod = same-origin, never localhost), NetworkError environment vocabulary, BackendDownNote rendering, single-fetch-boundary scan | VERIFIED DETERMINISTICALLY |
-| Backend typecheck (`tsc --noEmit`) | clean | VERIFIED DETERMINISTICALLY |
+| Deterministic suite (backend) | **994 passed / 0 failed**, 29 env-gated skipped (1023 total) | VERIFIED DETERMINISTICALLY |
+| Research-integrity benchmark (new) | **20 passed / 0 failed** (duplicate-report non-corroboration, provenance-derived quality, confident-but-unsupported, Flow 8 framework inconsistency) | VERIFIED DETERMINISTICALLY |
+| Monitoring handoff chain (new) | **4 passed / 0 failed** (proposal → persist → activate → pause → resume; agent-origin rejected; SOURCE_UNAVAILABLE is a state) | VERIFIED DETERMINISTICALLY |
+| Frontend deterministic suite | **81 passed / 0 failed**; adds evidence-provenance adapter tests (origin/kind/duplicate surfacing, legacy-DTO omission) | VERIFIED DETERMINISTICALLY |
+| Backend typecheck (`tsc --noEmit` + api) | clean | VERIFIED DETERMINISTICALLY |
 | Frontend typecheck + production build | clean | VERIFIED DETERMINISTICALLY |
+| Secret scan (credential-pattern grep over src/api/frontend/tests) | clean | VERIFIED DETERMINISTICALLY |
 | **Production deployment** | **https://asklumen.vercel.app; health 200; Flow 1 research COMPLETED end-to-end on the serverless API; provider fallback served live with provenance trail; SPA same-origin /api (no localhost dependency)** | VERIFIED LIVE |
 | Live suite (Suite B, env-gated) | Flow 1 TA scenario COMPLETED with real Bitget evidence (2026-09-15); Flow 5 COMPLETED with 1,095 real historical candles (2026-09-16) | VERIFIED LIVE |
 | Browser E2E (Suite C / raw CDP) | real ask-bar submission → **new backend research object with judgment** (backend-side proof, not DOM-only) | VERIFIED LIVE |
@@ -78,6 +80,7 @@ Consolidated anti-laundering probe (Suite A, 11 tests): observation vs derived v
 
 ## Defects found & fixed (cumulative, with regression tests)
 
+0. **Source provenance never reached the requirement ledger's evidence-quality assessment** (2026-09-29 audit; the 2026-09-21 brief's scenario 7); `coverageEvidenceOf`/`coverageEvidenceOfFlow` built CoverageEvidence rows WITHOUT `sourceProvider`/`sourceType`, so `assessEvidenceQuality` scored every real run's evidence as diversity-1/`CORRELATIONAL` regardless of actual provenance — capping confidence at MODERATE and demoting every causal link on live runs, while unit tests (hand-built rows) stayed green. Fix: provenance now derives at the evidence boundary (`sourceProviderForOutput`: payload publisher → upstream lineage → serving transport; `sourceTypeForOutput`: interpretation-class = ANALYSIS, G2 sourceClass mapping, conservative SECONDARY for textual payloads without a class, PRIMARY for direct quantitative feeds), travels on Evidence objects (additive, snapshot-compatible), threads through both coverage builders, and feeds `assessEvidenceQuality` with two false-corroboration guards (adapter-flagged duplicates add nothing; identical payloads from one origin collapse to one). Regression tests: the 20-test research-integrity suite incl. end-to-end adaptive-loop proofs.
 1. **Flow 5 fall-through to the generic loop** (benchmark phase); HISTORICAL objective registered; dedicated `flow5.ts`; scope guard; 5 regression tests.
 2. **API DTO omitted Flow 5 evidence** (G1 phase); `research-app.ts` flow loop missed `flow5`; one-line fix + API regression test.
 3. **Generic-loop calls to HISTORICAL_COMPARISON lacked a query envelope** (G1 phase); capability-level defaults (explicit params win); regression-tested.

@@ -578,6 +578,12 @@ function coverageEvidenceOfFlow(workspace: Workspace, researchRef: string) {
       freshness: e.freshness,
       ...(e.subject !== undefined ? { subject: e.subject } : {}),
       ...(e.timestamp !== undefined ? { observedAt: e.timestamp } : {}),
+      // Same law as the adaptive loop: provenance-derived source identity/kind reach the
+      // requirement's evidence-quality assessment (distinct origins = diversity; a primary
+      // feed = DIRECT_EVIDENCE). Defaults stay honest when the fields are absent.
+      ...(e.sourceProvider !== undefined ? { sourceProvider: e.sourceProvider } : {}),
+      ...(e.sourceType !== undefined ? { sourceType: e.sourceType } : {}),
+      ...(e.duplicateContent === true ? { duplicateContent: true } : {}),
     }));
 }
 

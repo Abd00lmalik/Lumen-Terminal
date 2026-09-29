@@ -149,6 +149,8 @@ export interface CoverageEvidence {
   readonly sourceProvider?: string;
   /** Whether this evidence is a primary source or secondary reporting. */
   readonly sourceType?: "PRIMARY" | "SECONDARY" | "COMMUNITY" | "ANALYSIS";
+  /** Adapter-flagged repeated content: never adds source diversity (same underlying report). */
+  readonly duplicateContent?: boolean;
 }
 
 const DAY_MS = 86_400_000;
@@ -1756,16 +1758,24 @@ export function assessEvidenceQuality(
     return { quality: "UNRESOLVED", directness: "INFERRED", sourceDiversity: 0 };
   }
 
-  // Source diversity: count unique providers/sources
-  const uniqueSources = new Set(
-    evidenceItems
-      .map((e) => e.sourceProvider ?? "unknown")
-      .filter((s) => s !== "unknown")
-  );
-  const sourceDiversity = Math.max(uniqueSources.size, 1);
+  // Source diversity: count UNIQUE, INDEPENDENT origins. Two laws keep repeated reporting
+  // from manufacturing corroboration (research contract §evidence quality):
+  // 1. An adapter-flagged duplicate never ADDS an origin: it is the same underlying report,
+  //    not independent confirmation.
+  // 2. Identical payloads naming the same origin collapse to ONE origin (re-served copies of
+  //    the same report must not be counted once per copy). The origin string is the whole
+  //    key: no content-based dedup here, that is the adapter layer's declared job (G2 flags
+  //    repeated content per item; the engine honors the flag rather than re-deriving it).
+  const distinct = new Set<string>();
+  for (const item of evidenceItems) {
+    if (item.duplicateContent === true) continue;
+    distinct.add(item.sourceProvider ?? `content:${item.text}`);
+  }
+  const sourceDiversity = Math.max(distinct.size, 1);
 
-  // Directness: primary sources vs secondary reporting/analysis
-  const hasPrimarySource = evidenceItems.some((e) => e.sourceType === "PRIMARY");
+  // Directness: primary sources vs secondary reporting/analysis. Duplicate-flagged items do
+  // not establish directness either; a duplicate of an already-counted origin adds nothing.
+  const hasPrimarySource = evidenceItems.some((e) => e.sourceType === "PRIMARY" && e.duplicateContent !== true);
   const hasTypedSource = evidenceItems.some((e) => e.sourceType !== undefined);
   const hasOnlySecondary = evidenceItems.every(
     (e) => e.sourceType === "SECONDARY" || e.sourceType === "COMMUNITY" || e.sourceType === "ANALYSIS"
