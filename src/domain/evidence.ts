@@ -13,6 +13,7 @@
 import type { Evidence, EvidenceClass, Freshness } from "./objects.js";
 import { createEvidence } from "./objects.js";
 import type { ToolOutput, ToolResult } from "./tool-result.js";
+import { isInterpretationClass } from "./tool-result.js";
 import type { ProvenanceOrigin } from "./provenance.js";
 
 /** Mapping from normalized tool-output class to evidence class. */
@@ -34,6 +35,57 @@ export function evidenceClassForOutput(output: ToolOutput): EvidenceClass {
       // A failed/unavailable output never becomes evidence.
       throw new Error("UNAVAILABLE/ERROR tool outputs must not become evidence");
   }
+}
+
+/**
+ * SOURCE CLASS for evidence-quality assessment (research contract §evidence quality): what the
+ * system can honestly say about the ORIGIN of this output. Derived only from validated
+ * provenance and payload facts the engine itself verified — never invented:
+ * - an interpretation-class output is authored analysis, not a market observation;
+ * - the G2 adapter's payload-level sourceClass maps to the typed kind it already declares;
+ * - everything else: the serving transport is the only known origin (the transport IS the
+ *   serving source for a quantitative feed, and counting it is factual).
+ * A source class is NEVER assigned from the output TEXT (no content sniffing).
+ */
+export function sourceTypeForOutput(output: ToolOutput): "PRIMARY" | "SECONDARY" | "COMMUNITY" | "ANALYSIS" {
+  if (isInterpretationClass(output.outputClass)) return "ANALYSIS";
+  const payload = output.content;
+  if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
+    const rec = payload as Record<string, unknown>;
+    switch (rec["sourceClass"]) {
+      case "primary/official":
+        return "PRIMARY";
+      case "secondary/encyclopedic":
+      case "secondary/news-report":
+      case "secondary/unclassified":
+        return "SECONDARY";
+      case "community/social-signal":
+        return "COMMUNITY";
+    }
+  }
+  // No declared source class: a direct quantitative feed served by its own transport is a
+  // primary observation; a textual/structured FACTUAL payload without one is treated as
+  // SECONDARY reporting (conservative default, never silently primary; g2 law).
+  if (output.outputClass === "QUANTITATIVE_OBSERVATION" || output.outputClass === "SENTIMENT_SIGNAL") return "PRIMARY";
+  return "SECONDARY";
+}
+
+/**
+ * SOURCE IDENTITY for evidence-quality assessment: the distinct origin this output came from.
+ * Priority: an in-payload publisher/upstream declaration the system verified, else the serving
+ * transport (which IS the serving origin for a quantitative feed). Repeated outputs from the
+ * same origin never add diversity; the duplicateContent flag makes that explicit per item.
+ */
+export function sourceProviderForOutput(result: ToolResult, output: ToolOutput): string {
+  const payload = output.content;
+  if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
+    const rec = payload as Record<string, unknown>;
+    const publisher = rec["publisher"];
+    if (typeof publisher === "string" && publisher.trim() !== "") return publisher.trim();
+    const upstream = rec["upstreamSource"];
+    if (typeof upstream === "string" && upstream.trim() !== "") return upstream.trim();
+  }
+  return result.transport;
 }
 
 export interface EvidenceQuality {
@@ -135,8 +187,24 @@ export function evidenceFromToolResult(
       // never names the ticker (real indicator/news payloads often don't).
       ...(output.about !== undefined && output.about.trim() !== "" ? { subject: output.about } : {}),
       toolResultRef: result.id,
+      // Provenance-derived source identity/kind for the evidence-quality assessment
+      // (research contract §evidence quality): a requirement's sourceDiversity counts DISTINCT
+      // origins, and G2/Heurist payloads that declare publisher/upstream are honored so the
+      // same upstream reached via different paths is never counted as independent corroboration.
+      sourceProvider: sourceProviderForOutput(result, output),
+      sourceType: sourceTypeForOutput(output),
+      ...(payloadDuplicateFlag(output) ? { duplicateContent: true } : {}),
     },
     origin,
     at,
   );
+}
+
+/** The adapter's repeated-content flag, when the payload carries one. */
+function payloadDuplicateFlag(output: ToolOutput): boolean {
+  const payload = output.content;
+  if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
+    return (payload as Record<string, unknown>)["duplicateContent"] === true;
+  }
+  return false;
 }

@@ -53,6 +53,9 @@ export function EvidencePage() {
                   <KV k="event time" v={new Date(current.eventTimestamp).toISOString().slice(0, 16).replace("T", " ")} />
                 )}
                 {current.toolResultRef !== undefined && <KV k="tool result" v={current.toolResultRef} />}
+                {current.sourceProvider !== undefined && <KV k="source origin" v={current.sourceProvider} />}
+                {current.sourceType !== undefined && <KV k="source kind" v={current.sourceType} />}
+                {current.duplicateContent === true && <KV k="repeated content" v="yes; same underlying report, not independent corroboration" />}
                 <KV k="type" v={current.evidenceType} />
               </div>
               <div className="rail-section">
@@ -135,6 +138,9 @@ export function EvidencePage() {
                       <ClassBadge cls={e.evidenceClass} />
                       <FreshnessBadge freshness={e.freshness} />
                       {e.proxyBasis !== undefined && <ProxyNote basis={e.proxyBasis} />}
+                      {e.duplicateContent === true && (
+                        <span className="ev-time mono" style={{ color: "var(--warn)" }}>repeat of same report</span>
+                      )}
                       <span className="ev-time mono">{e.ref} · {timeAgo(e.observedAt)}</span>
                     </div>
                   </div>

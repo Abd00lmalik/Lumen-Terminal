@@ -77,6 +77,12 @@ export interface EvidenceDTO {
   readonly eventTimestamp?: string;
   readonly sourceRefs: readonly string[];
   readonly toolResultRef?: string;
+  /** Serving source identity (transport/publisher/upstream) when known; distinct origins only corroborate. */
+  readonly sourceProvider?: string;
+  /** Source kind (PRIMARY/SECONDARY/COMMUNITY/ANALYSIS) when derivable from provenance. */
+  readonly sourceType?: "PRIMARY" | "SECONDARY" | "COMMUNITY" | "ANALYSIS";
+  /** Repeated-content flag: same underlying report as another item; never independent corroboration. */
+  readonly duplicateContent?: boolean;
   readonly supports: readonly string[];
   readonly contradicts: readonly string[];
 }
@@ -93,6 +99,9 @@ export function evidenceToDTO(e: Evidence): EvidenceDTO {
     ...(e.timestamp !== undefined ? { eventTimestamp: e.timestamp } : {}),
     sourceRefs: idRefs(e.sourceRefs),
     ...(e.toolResultRef !== undefined ? { toolResultRef: e.toolResultRef } : {}),
+    ...(e.sourceProvider !== undefined ? { sourceProvider: e.sourceProvider } : {}),
+    ...(e.sourceType !== undefined ? { sourceType: e.sourceType } : {}),
+    ...(e.duplicateContent === true ? { duplicateContent: true } : {}),
     supports: idRefs(e.supports),
     contradicts: idRefs(e.contradicts),
   };

@@ -168,6 +168,44 @@ decision-quality/process/requirement-completeness benchmarks): the full default 
 (`npm test`) passes hermetically.
 
 
+## RESEARCH-INTEGRITY BENCHMARK (adversarial evidence-provenance suite)
+
+`tests/benchmark/research-integrity.test.ts` — deterministic (MOCKED-INTEGRATION), 20 tests.
+Covers the adversarial scenario families the product standards require (brief §5 Step 3), each
+asserted through the real domain/evidence layer, real requirement-coverage engine, and the real
+adaptive loop:
+
+- **Duplicate-report non-corroboration (S7):** one report syndicated 3x stays ONE origin
+  (`CORRELATIONAL`, diversity 1); an adapter-flagged duplicate never adds diversity or directness;
+  the same upstream reached via two paths (direct + Heurist lineage) is ONE origin.
+- **Provenance-derived evidence quality (S1/S12):** >=3 distinct primary origins raise
+  `DIRECT_EVIDENCE`; two stay `SUPPORTED_INFERENCE`; single-origin secondary reporting stays
+  `CORRELATIONAL` — and the difference propagates into the confidence ladder in both directions.
+- **Confident-but-unsupported (S22):** a single secondary report cannot reach HIGH confidence
+  (`weakQuality` pressure).
+- **Boundary classification laws (unchanged, re-pinned):** failed tool results never become
+  evidence; interpretation-class outputs stay `ANALYSIS`, never observations; G2 payload
+  `sourceClass` maps to the typed source kind; conservative SECONDARY default when no source
+  class is declared (textual payloads), PRIMARY for direct quantitative feeds.
+- **Flow 8 framework inconsistency (S14):** deterministic detection of unsatisfiable threshold
+  pairs on the same measure, all-vs-some quantifier conflicts, and declared-but-unimplemented
+  scoring; consistent frameworks produce zero findings (no false positives). Findings are
+  REPORTED (`frameworkIssues`), never auto-applied; the framework artifact is untouched.
+
+The fix this suite pins: source provenance (transport/publisher/upstream + source kind + the
+adapter's duplicate flag) now travels from validated TOOL_RESULTs into Evidence objects and into
+the requirement ledger's evidence-quality assessment. Before it, every real-run item defaulted to
+one unknown origin, forcing `CORRELATIONAL`/diversity-1 quality onto ALL real evidence regardless
+of actual provenance strength (unit tests passed because they hand-built CoverageEvidence rows).
+
+## MONITORING HANDOFF chain
+
+`tests/lui/monitor-handoff.test.ts` — deterministic, 4 tests: the END-TO-END law through the real
+LUI + real workspace: Flow 7 falsification → LUI MONITOR proposal → persisted PROPOSED monitor
+(inert, distinct INVALIDATION/EARLY_WARNING kinds, thesis ref+version bound, thesis untouched) →
+trader-only activation → pause → resume → terminal COMPLETED; agent-origin activation rejected;
+`SOURCE_UNAVAILABLE` is a state, never an invalidation.
+
 ## Pass criteria
 
 - Deterministic + mocked-integration suites: 100% pass, hermetic (no `GEMINI_API_KEY` needed).

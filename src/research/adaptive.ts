@@ -1156,6 +1156,13 @@ function coverageEvidenceOf(workspace: Workspace, researchRef: string): readonly
       // The declared subject travels into coverage: a payload may never name its own ticker.
       ...(e.subject !== undefined ? { subject: e.subject } : {}),
       ...(e.timestamp !== undefined ? { observedAt: e.timestamp } : {}),
+      // Provenance-derived source identity/kind feed the requirement's evidence-quality
+      // assessment: sourceDiversity counts DISTINCT origins (transport/publisher/upstream),
+      // and a primary feed can satisfy a requirement as DIRECT_EVIDENCE. Without these the
+      // assessment defaulted every real item to a single unknown source (CORRELATIONAL).
+      ...(e.sourceProvider !== undefined ? { sourceProvider: e.sourceProvider } : {}),
+      ...(e.sourceType !== undefined ? { sourceType: e.sourceType } : {}),
+      ...(e.duplicateContent === true ? { duplicateContent: true } : {}),
     });
   }
   return items;

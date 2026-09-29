@@ -89,6 +89,25 @@ export interface Evidence {
    * the free-text observation never names (an indicator reading often omits its ticker).
    */
   readonly subject?: string;
+  /**
+   * Serving source identity for evidence-quality assessment (research contract §evidence
+   * quality): the distinct origin this observation came from (a transport endpoint or, when
+   * the payload names one, its publisher/upstream). Repeated reporting from the same origin
+   * is never independent corroboration; distinct origins feed source diversity.
+   */
+  readonly sourceProvider?: string;
+  /**
+   * Source kind the adapter declared or that is derivable from the payload: PRIMARY (official
+   * data/primary document), SECONDARY (reporting about it), COMMUNITY (social/community
+   * signal), ANALYSIS (an authored interpretation). Undefined when nothing is known.
+   */
+  readonly sourceType?: "PRIMARY" | "SECONDARY" | "COMMUNITY" | "ANALYSIS";
+  /**
+   * True when the adapter flagged this item as repeated content (same substance as another
+   * item in the same result). A duplicate never ADDS source diversity — it is the same
+   * underlying report, not independent corroboration.
+   */
+  readonly duplicateContent?: boolean;
   readonly provenance: Provenance;
 }
 
@@ -105,6 +124,9 @@ export function createEvidence(
     proxyBasis?: string;
     toolResultRef?: string;
     subject?: string;
+    sourceProvider?: string;
+    sourceType?: "PRIMARY" | "SECONDARY" | "COMMUNITY" | "ANALYSIS";
+    duplicateContent?: boolean;
   },
   origin: ProvenanceOrigin,
   at = new Date(),
@@ -126,6 +148,9 @@ export function createEvidence(
     freshness: input.freshness ?? "CURRENT",
     ...(input.proxyBasis !== undefined ? { proxyBasis: input.proxyBasis } : {}),
     ...(input.toolResultRef !== undefined ? { toolResultRef: input.toolResultRef } : {}),
+    ...(input.sourceProvider !== undefined ? { sourceProvider: input.sourceProvider } : {}),
+    ...(input.sourceType !== undefined ? { sourceType: input.sourceType } : {}),
+    ...(input.duplicateContent !== undefined ? { duplicateContent: input.duplicateContent } : {}),
     ...(input.subject !== undefined ? { subject: input.subject } : {}),
     provenance: createProvenance(origin, `evidence classified as ${input.evidenceClass}`, at),
   });
