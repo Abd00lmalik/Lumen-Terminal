@@ -18,6 +18,15 @@
 import type { ModelProvider } from "../model/provider.js";
 import { ModelFailure } from "../model/provider.js";
 import { runFlow, validateFlowOutcome, type FlowObjective, type FlowOutcome, type FlowMode } from "./flow-runner.js";
+import { computeConfidence, boundConfidence } from "./confidence.js";
+import { venueBaseSymbolForAsset } from "../adapters/g1-historical.js";
+
+/** Canonical asset -> venue base symbol for the historical envelope (shared law with G1). */
+function normalizeHistoricalBase(asset: string | undefined): string {
+  const raw = (asset ?? "BTC/USDT").toUpperCase();
+  if (raw.includes("/")) return raw; // already a venue-format pair
+  return venueBaseSymbolForAsset(raw);
+}
 import { analyzeEpisodes, renderEpisodeAnalysis, type EpisodeAnalysis } from "./episode-analysis.js";
 import type { Workspace } from "../domain/workspace.js";
 import type { WorkspaceStore } from "../persistence/index.js";
@@ -87,7 +96,14 @@ function historicalQueryEnvelope(
   window: Flow5Options["historicalWindow"],
   at: Date,
 ): Record<string, unknown> {
-  const base = (asset ?? "BTC/USDT").toUpperCase();
+  // CANONICAL-ASSET NORMALIZATION (remediation D8): the resolved asset is a canonical display
+  // name ("ETHEREUM", "BITCOIN"), not a provider symbol. Live failure: "ETHEREUM" + "/USDT"
+  // was sent as "ETHEREUMUSDT" and both historical venues rejected the invalid symbol. The
+  // canonical->venue mapping lives in the adapter layer (g1-historical.ts); this envelope maps
+  // through the same law before pair formatting so every historical provider sees a real
+  // venue symbol. Reuse the adapter's mapper via a shared import-free duplicate here is
+  // deliberately avoided: the mapper is exported from the adapter and imported below.
+  const base = normalizeHistoricalBase(asset);
   const symbol = base.includes("/") || base.includes("USDT") || base.includes("USD") ? base : `${base}/USDT`;
   const to = window?.to ?? at.toISOString();
   const from = window?.from ?? new Date(at.getTime() - 3 * 365 * 86_400_000).toISOString();
@@ -270,6 +286,21 @@ export async function runFlow5(objective: string, options: Flow5Options): Promis
   // findings. Flow 5's judgment is DETERMINISTIC; coverage/similarity computed from the
   // retrieved record, never model sentiment, and it never reads as prediction.
   const analysis = analyzeRetrievedRecord(scoped.evidence);
+  // STATE-CONSISTENCY LAW (remediation D3): the judgment's confidence must not exceed the
+  // engine's computed level. The observed live defect: a Flow 5 judgment stated MODERATE
+  // while the computed confidence was LOW with 0% core coverage. computeConfidence is the
+  // deterministic authority; the heuristic level (matching episodes found) may only state
+  // at most that ceiling.
+  const computed = computeConfidence({
+    requirements: scoped.requirements,
+    stoppedBecause: scoped.stoppedBecause,
+    failedPaths: scoped.executions.filter((e) => e.result.failure.type !== "NONE").length,
+  });
+  const judgmentLevel: "MODERATE" | "LOW" = analysis !== undefined && analysis.matches.length > 0 ? "MODERATE" : "LOW";
+  // Judgment confidence excludes UNKNOWN (a judgment either states a level or states none);
+  // UNKNOWN computed coverage here means the ledger never ran, which is a LOW claim, not none.
+  const boundedLevel =
+    computed.level === "UNKNOWN" ? judgmentLevel : (boundConfidence(judgmentLevel, computed.level) === "UNKNOWN" ? judgmentLevel : boundConfidence(judgmentLevel, computed.level) as "HIGH" | "MODERATE" | "LOW");
   const judgmentInput = {
     researchRef: research.id,
     statement:
@@ -282,7 +313,7 @@ export async function runFlow5(objective: string, options: Flow5Options): Promis
         keyClaims: [],
         hypotheses: scoped.hypotheses.map((h) => h.id),
       },
-      ...(analysis !== undefined && analysis.matches.length > 0 ? { confidence: "MODERATE" as const } : { confidence: "LOW" as const }),
+      confidence: boundedLevel,
       uncertainty: [
         "similarity is computed from the retrieved price/volume record only; no fundamental context",
         "historical precedent does not establish that a similar outcome follows",
@@ -296,7 +327,6 @@ export async function runFlow5(objective: string, options: Flow5Options): Promis
   };
   workspace.addJudgment(judgmentInput, systemOrigin, at());
 
-  // SHARED CONTRACT BOUNDARY: same validation law as the adaptive loop (no per-flow validator).
   return validateFlowOutcome(
     {
       outcome: scoped,

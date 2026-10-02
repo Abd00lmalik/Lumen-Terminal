@@ -76,6 +76,10 @@ export function useResearchStream() {
   // older submission check the token before patching state, so a late event, late final
   // result, or a reconnecting stream from run A can NEVER write into run B's state.
   const runToken = useRef(0);
+  // The live submission's abort handle, so an explicit reset (New research) can detach from
+  // an in-flight run instead of waiting it out. The backend run itself continues server-side
+  // and remains reachable in Research history.
+  const abortRef = useRef<AbortController | null>(null);
 
   const stopTimer = useCallback(() => {
     if (timer.current !== null) {
@@ -89,11 +93,14 @@ export function useResearchStream() {
   const submit = useCallback(
     (question: string, options?: { confirmed?: boolean }) => {
       stopTimer();
+      abortRef.current?.abort(); // defensive: detach any leftover stream before a new one
       runToken.current += 1;
       const token = runToken.current;
       capsRef.current = new Map();
       stagesRef.current = [];
       startedAt.current = Date.now();
+      const controller = new AbortController();
+      abortRef.current = controller;
       patch((prev) => ({
         running: true,
         question,
@@ -162,11 +169,39 @@ export function useResearchStream() {
             }));
           },
         },
-        options,
+        { ...options, signal: controller.signal },
       );
     },
     [patch, stopTimer],
   );
 
-  return { state, submit };
+  /**
+   * Explicit reset ("New research"): detach from the current conversation. The run token is
+   * bumped FIRST so every in-flight callback of the abandoned run is stale, then the stream
+   * is aborted and the state returns to its initial shape. The backend run (if any) is
+   * untouched — it completes server-side and stays in Research history.
+   */
+  const reset = useCallback(() => {
+    stopTimer();
+    runToken.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    capsRef.current = new Map();
+    stagesRef.current = [];
+    startedAt.current = 0;
+    patch((prev) => ({
+      running: false,
+      question: "",
+      stages: [],
+      capabilities: [],
+      findings: [],
+      result: undefined,
+      error: undefined,
+      // errorId stays monotonic: a later failure must still advance it past a recorded turn.
+      errorId: prev.errorId,
+      elapsedSeconds: 0,
+    }));
+  }, [patch, stopTimer]);
+
+  return { state, submit, reset };
 }

@@ -632,6 +632,9 @@ export class ResearchApp {
    */
   listResearch(options: ResearchListOptions = {}): ResearchRunSummaryDTO[] {
     const ws = this.ws();
+    // NOTE: listResearch stays SYNCHRONOUS (an SSE-critical hot path); freshness is served by
+    // the caller-side absorption in submitResearchRequest/persist and by getResearch. The
+    // CURRENT pointer it reports is computed from the absorbed graph at snapshot time.
     const all = ws.listResearch();
     const activeId = ws.getContinuitySnapshot().activeResearchTarget?.id;
     const groups = new Map<string, Research[]>();
@@ -723,6 +726,18 @@ export class ResearchApp {
    * `researchRef` is ALWAYS the ref this aggregate was requested by, so a client navigating
    * from a history entry always lands on the same identity it listed.
    */
+  /**
+   * Aggregate read with EXECUTION READ FRESHNESS (remediation D4/D5/D7): a warm instance
+   * loaded the workspace once; another instance's completed run (and its judgment/evidence)
+   * lives only in the blob. Without absorption the Save target 404s (D7), CURRENT goes stale
+   * (D5), and a persisted judgment id can be re-minted (D4). Scoped to the execution
+   * collections; an in-flight run is never clobbered.
+   */
+  async getResearchFresh(ref: string): Promise<ResearchRunAggregateDTO> {
+    await this.refreshExecutionState();
+    return this.getResearch(ref);
+  }
+
   getResearch(ref: string): ResearchRunAggregateDTO {
     const ws = this.ws();
     const r = ws.getResearch(ref);
@@ -884,6 +899,28 @@ export class ResearchApp {
     }
     if (fresh === undefined) return;
     workspace.absorbThesisState(fresh.toSnapshot());
+  }
+
+  /**
+   * EXECUTION READ FRESHNESS (remediation D4/D5/D7): absorb another instance's completed
+   * runs/judgments/evidence/responses into this warm graph before research reads. Scoped to
+   * the execution collections (never a whole-graph reload) so an in-flight run is never
+   * clobbered; a transient store read failure degrades to the local state (read paths never
+   * fail because freshness could not be confirmed).
+   */
+  private async refreshExecutionState(): Promise<void> {
+    const workspace = this.workspace;
+    if (workspace === undefined) return;
+    let fresh: Workspace | undefined;
+    try {
+      fresh = this.options.store.loadFresh !== undefined
+        ? await this.options.store.loadFresh()
+        : await this.options.store.load();
+    } catch {
+      return; // transient store read failure: serve what we hold, never fail the read
+    }
+    if (fresh === undefined) return;
+    workspace.absorbExecutionState(fresh.toSnapshot());
   }
 
   /** Bounded list window: exact status filter + case-insensitive substring search. */
@@ -1577,6 +1614,10 @@ export class ResearchApp {
     // Refresh before the identity lookup so a warm instance reuses another instance's existing
     // artifact for the same identity (idempotency must hold across instances, not just locally).
     await this.refreshSaved();
+    // EXECUTION FRESHNESS for the Save target (remediation D7): the intermittent "NOT_FOUND ·
+    // research not found" happened when a warm instance that predated the run served the Save.
+    // Absorbing the execution state first guarantees the just-completed researchRef resolves.
+    await this.refreshExecutionState();
     const ws = this.ws();
     const research = ws.getResearch(researchRef);
     if (research === undefined) throw new NotFoundError("research");
@@ -1643,6 +1684,7 @@ export class ResearchApp {
     const memberIds = new Set(members.map((m) => m.id));
     switch (kind) {
       case "RESEARCH": {
+        // Caller (createSaved) has already refreshed execution state before this read.
         const agg = this.getResearch(researchRef);
         const question = agg.question.length > 0 ? agg.question : agg.objective;
         const answer = agg.answer?.answer ?? "";
@@ -1773,8 +1815,14 @@ export class ResearchApp {
     };
     if (!includeTier) return base;
     try {
-      const agg = this.getResearch(researchRef);
-      return { ...base, createdAt: agg.createdAt, recordTier: agg.recordTier, degraded: agg.degraded };
+      // Synchronous domain read (savedOrigin stays sync; its callers are sync list rows).
+      // Tier derivation mirrors getResearch: a persisted record with a real answer is FULL;
+      // a record whose answer never landed (or no record) is an honest degraded tier. The
+      // aggregate read is avoided here because it is synchronous-only in this class.
+      const payload = recordPayload(this.ws().getResearchResponse(researchRef));
+      const hasAnswer = typeof payload?.answer?.answer === "string" && payload.answer.answer.trim() !== "";
+      const recordTier: ResearchRecordTierDTO = hasAnswer ? "FULL" : "SUMMARY";
+      return { ...base, recordTier, degraded: recordTier !== "FULL" };
     } catch {
       return base;
     }
@@ -1786,6 +1834,17 @@ export class ResearchApp {
   }
 
   // Monitors ------------------------------------------------------------
+
+  /**
+   * Grouped monitor list with READ FRESHNESS (remediation D9): the stale last-checked
+   * timestamp happened when a check completed on one serverless instance while the UI read
+   * monitors from a warm instance that predated it. `refreshTheses` absorbs monitor
+   * execution state (Phase H already rides it); the list is now async so it can refresh first.
+   */
+  async listMonitorsFresh() {
+    await this.refreshTheses();
+    return this.listMonitors();
+  }
 
   listMonitors() {
     const all = this.ws().listMonitors().map(monitorToDTO);

@@ -159,11 +159,14 @@ describe("six LUI actions (locked set)", () => {
     const { lui } = buildLui(provider, registry);
     const result = await lui.handle("What could affect NVDA around its next earnings?");
 
-    expect(result.research).toBeDefined();
+    // ACTIVE-FLOW DISPATCH (architecture lock): the resolved target's flow IS the
+    // methodology, so this factor question runs Flow 3 rather than the generic loop.
+    // The backstop law is unchanged: the capability executed WITH the resolved target's
+    // asset and actually served evidence (no honest-but-useless ticker-resolution failure).
+    expect(result.flow3).toBeDefined();
     expect(seenParams.length).toBeGreaterThan(0);
     expect(seenParams.every((p) => p["asset"] === "NVDA")).toBe(true);
-    // The capability actually served (no honest-but-useless ticker-resolution failure).
-    expect(result.research?.evidence.length).toBeGreaterThan(0);
+    expect(result.flow3?.outcome.evidence.length).toBeGreaterThan(0);
   });
 
   it("process-commentary guard: a run-description rationale is replaced by a deterministic findings answer", async () => {
@@ -271,7 +274,10 @@ describe("six LUI actions (locked set)", () => {
     // The inherited asset never reached capability params (crypto capabilities are never
     // routed), and the capability still served without it.
     expect(seenParams.every((p) => p["asset"] === undefined)).toBe(true);
-    expect(macroResult.research?.evidence.length).toBeGreaterThan(0);
+    // ACTIVE-FLOW DISPATCH: WHAT_DOES_ALL_INFORMATION_SAY runs Flow 6, and the run still
+    // gathered real evidence after the asset was dropped (the target law's core check).
+    expect(macroResult.flow6).toBeDefined();
+    expect(macroResult.flow6?.outcome.evidence.length).toBeGreaterThan(0);
 
     // Positive control: the SAME inherited asset survives when the question names it.
     seenParams.length = 0;

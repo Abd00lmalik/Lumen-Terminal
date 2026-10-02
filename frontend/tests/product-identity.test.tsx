@@ -4,8 +4,10 @@
  * Laws under test:
  * - IDENTITY: public UI copy never mentions the hackathon (Bitget AI Hackathon / Track 3);
  *   Bitget appears only as provider/technical metadata, never as product identity.
- * - THEME: resolveTheme maps Dark/Light/System; System follows prefers-color-scheme;
- *   the preference persists to localStorage; applyTheme sets data-theme + meta theme-color.
+ * - THEME: light is the default; only an explicit "dark" preference applies dark;
+ *   "system" never infers dark from prefers-color-scheme; the preference persists to
+ *   localStorage; applyTheme sets data-theme + meta theme-color; index.html carries a
+ *   pre-paint snippet that applies the same rule before React mounts (no FOUC).
  * - PRODUCTION HYGIENE: no frontend source references localhost/127.0.0.1 outside the
  *   single dev-default seam in client.ts; no secret-shaped assignments anywhere.
  */
@@ -56,22 +58,32 @@ describe("theme resolution (mandate §14)", () => {
     expect(resolveTheme("light")).toBe("light");
   });
 
-  it("system resolves from prefers-color-scheme (global matchMedia, as in every real browser)", () => {
+  it("system never infers dark from prefers-color-scheme — light is the default surface", () => {
     const original = globalThis.matchMedia;
+    // OS says light → light.
     globalThis.matchMedia = ((query: string) => ({ matches: query.includes("light"), media: query, addEventListener() {}, removeEventListener() {} })) as unknown as typeof globalThis.matchMedia;
     expect(resolveTheme("system")).toBe("light");
+    // OS says dark → still light: dark requires an explicit choice.
     globalThis.matchMedia = ((query: string) => ({ matches: !query.includes("light"), media: query, addEventListener() {}, removeEventListener() {} })) as unknown as typeof globalThis.matchMedia;
-    expect(resolveTheme("system")).toBe("dark");
+    expect(resolveTheme("system")).toBe("light");
     globalThis.matchMedia = original;
   });
 
-  it("preference narrowing: invalid stored values can never be applied as a theme", () => {
-    // The hook's reader narrows to the union; "neon" must fall back to "system".
+  it("preference narrowing: invalid stored values fall back to the light default", () => {
+    // The hook's reader narrows to the union; "neon" must fall back to "light".
     const stored: unknown = "neon";
     const valid: ThemePreference[] = ["dark", "light", "system"];
-    const narrowed = valid.includes(stored as ThemePreference) ? (stored as ThemePreference) : "system";
-    expect(narrowed).toBe("system");
+    const narrowed = valid.includes(stored as ThemePreference) ? (stored as ThemePreference) : "light";
+    expect(narrowed).toBe("light");
     expect(["light", "dark", "system"]).toContain(narrowed);
+  });
+
+  it("index.html applies the light default before React mounts (FOUC guard mirrors resolveTheme)", () => {
+    const html = readFileSync(join(import.meta.dirname, "..", "index.html"), "utf8");
+    expect(html).toContain("lumen.theme");
+    // same rule as resolveTheme: dark only when explicitly stored, else light
+    expect(html).toMatch(/stored === \"dark\" \? \"dark\" : \"light\"/);
+    expect(html).toContain('setAttribute("data-theme"');
   });
 });
 

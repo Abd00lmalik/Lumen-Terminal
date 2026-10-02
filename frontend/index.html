@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Lumen Terminal — AI Research Workbench</title>
+    <!-- Pre-paint theme: light is the default; dark only when explicitly stored.
+         Mirrors resolveTheme() in src/hooks/useTheme.ts so there is no FOUC. -->
+    <script>
+      (function () {
+        var stored = null;
+        try { stored = localStorage.getItem("lumen.theme"); } catch (e) { /* private mode: default */ }
+        document.documentElement.setAttribute("data-theme", stored === "dark" ? "dark" : "light");
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -109,7 +109,7 @@ export function SettingsPage() {
             <Row title="Motion" hint="Subtle progress and pulse animations">
               <Toggle on={motion} onChange={setMotion} label="Motion" />
             </Row>
-            <Row title="Theme" hint="Dark is the native surface; light is a full token set. System follows your OS">
+            <Row title="Theme" hint="Light is the default surface; dark applies only when explicitly chosen. System resolves to light — the OS preference never selects dark.">
               <Segmented
                 options={["Dark", "Light", "System"]}
                 value={theme === "system" ? "System" : theme === "light" ? "Light" : "Dark"}

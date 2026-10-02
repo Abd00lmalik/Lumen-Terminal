@@ -40,6 +40,7 @@ import type { WorkspaceStore } from "../persistence/index.js";
 import { runAdaptiveResearch, type AdaptiveLoopOutcome, MAX_RESEARCH_ROUNDS } from "../research/adaptive.js";
 import { progressEvent, type ProgressListener } from "../research/progress.js";
 import { buildResearchContext, renderResearchContext, type ResearchContext } from "../research/context.js";
+import { guardFlow, type FlowGuardResult } from "./flow-guard.js";
 
 export { MAX_RESEARCH_ROUNDS };
 
@@ -220,6 +221,16 @@ const TARGET_SYSTEM = [
   "- Resolve 'it', 'that', 'my thesis' etc. from the CURRENT WORKSPACE STATE only.",
   "- NEVER invent research/object ids. Anything not resolvable goes into `unresolved`.",
   "- `flow` must be one of: WHAT_HAPPENED, WHY_IT_HAPPENED, WHAT_COULD_AFFECT_IT, DOES_MY_THESIS_HOLD, HAS_THIS_HAPPENED_BEFORE, WHAT_DOES_ALL_INFORMATION_SAY, WHAT_COULD_PROVE_ME_WRONG, EVALUATE_WITH_MY_FRAMEWORK.",
+  "- Flow distinctions (get the METHODOLOGY right):",
+  "  WHAT_HAPPENED = factual event reconstruction: what was observed, a timeline, chronology, verified events. No verdict, no causes.",
+  "  WHY_IT_HAPPENED = causal explanation of a move/event the message names ('why did X rise/drop').",
+  "  WHAT_COULD_AFFECT_IT = material-factor discovery: what could affect/impact/move an asset going forward. NOT a thesis evaluation.",
+  "  DOES_MY_THESIS_HOLD = evaluating the trader's OWN stored thesis.",
+  "  HAS_THIS_HAPPENED_BEFORE = historical precedent/parallel analysis.",
+  "  WHAT_DOES_ALL_INFORMATION_SAY = aggregate ALL available information into one picture.",
+  "  WHAT_COULD_PROVE_ME_WRONG = active falsification of the trader's thesis/belief.",
+  "  EVALUATE_WITH_MY_FRAMEWORK = evaluation against a framework the trader supplied (criteria, weights, 'according to this framework').",
+  "- Explicit negative constraints are binding: 'do not explain why' means the request is NOT causal even if a move is mentioned; 'do not perform a thesis or falsification assessment' forbids DOES_MY_THESIS_HOLD and WHAT_COULD_PROVE_ME_WRONG.",
   "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
@@ -364,6 +375,8 @@ export function resolveChallengeThesis(workspace: Workspace): ChallengeThesisRes
 
 export class Lui {
   private currentMessage: string | undefined;
+  /** The deterministic flow guard's verdict for the CURRENT message (reset every handle()). */
+  private flowGuard: FlowGuardResult | undefined;
 
   constructor(private readonly options: LuiOptions) {}
 
@@ -381,6 +394,7 @@ export class Lui {
     // The verbatim message, kept for the target law (a model-resolved asset is only the
     // question's target when the QUESTION ITSELF names it).
     this.currentMessage = userMessage;
+    this.flowGuard = undefined;
 
     // 1–2. INPUT NORMALIZATION + INTENT DETECTION (validated; model failure aborts honestly).
     progress?.(progressEvent("request_accepted", new Date(), "request accepted", { messageLength: userMessage.length }));
@@ -416,6 +430,29 @@ export class Lui {
         preferJson: true,
       });
       target = this.validateTarget(validateModelOutput<ResolvedTarget>(RESOLVED_TARGET_SCHEMA, res.raw).data);
+      // DETERMINISTIC FLOW GUARD (routing remediation): the model classifies the flow, but the
+      // user's own explicit task language and constraints are authoritative. A "what happened"
+      // timeline classified FALSIFICATION (live production failure) is corrected here BEFORE
+      // any plan is built, so the wrong methodology never executes.
+      const guarded = guardFlow({ message: userMessage, ...(target.flow !== undefined ? { classified: target.flow } : {}) });
+      this.flowGuard = guarded;
+      if (guarded.flow !== target.flow) {
+        target = {
+          ...target,
+          ...(guarded.flow !== undefined ? { flow: guarded.flow } : {}),
+        };
+        if (guarded.flow === undefined) {
+          const { flow: _dropped, ...rest } = target;
+          target = rest as ResolvedTarget;
+        }
+        progress?.(progressEvent("target_resolved", new Date(),
+          guarded.source === "corrected"
+            ? `flow corrected by task language: ${guarded.correction?.from} -> ${guarded.flow}`
+            : "flow determined from task language",
+          guarded.source === "corrected" && guarded.correction !== undefined
+            ? { correctedFrom: guarded.correction.from, correctedTo: guarded.flow ?? "" }
+            : {}));
+      }
       progress?.(progressEvent("target_resolved", new Date(), "target resolved from workspace context", {}));
     } catch (error) {
       return this.failureResult(userMessage, error, request);
@@ -564,7 +601,20 @@ export class Lui {
           // defines objective + analytical mode, the engine picks capabilities (no Flow→Tool
           // hardcoding). Unmapped flows keep the M3 adaptive loop. Flow classification is
           // INTERNAL research routing; the user-facing action set remains the locked six.
-          const flow = step.params["flow"];
+          // Flow precedence (routing remediation): the GUARD's verdict — corrected/determined
+          // from the user's own words, or an explicit-constraint veto — is verified against the
+          // message, so for a SINGLE-step plan (the whole utterance IS this step) it outranks a
+          // plan-step echo and a constraint veto blocks every echo. A COMPOUND plan carries
+          // per-step methodologies ("full picture AND challenge my thesis"), so each step's own
+          // flow leads there, with the guarded target flow as the fallback when the step omits one.
+          const guardHadSay =
+            this.flowGuard !== undefined &&
+            (this.flowGuard.source === "corrected" ||
+              this.flowGuard.source === "determined" ||
+              this.flowGuard.correction !== undefined);
+          const flow = plan.steps.length === 1
+            ? (guardHadSay ? this.flowGuard?.flow : (step.params["flow"] ?? target.flow))
+            : (step.params["flow"] ?? target.flow);
           if (flow === "WHY_IT_HAPPENED" || flow === "WHAT_DOES_ALL_INFORMATION_SAY" || flow === "WHAT_COULD_AFFECT_IT" || flow === "DOES_MY_THESIS_HOLD" || flow === "EVALUATE_WITH_MY_FRAMEWORK" || flow === "HAS_THIS_HAPPENED_BEFORE") {
             await this.dispatchM4Flow(flow, step, result, origin, progress, deadlineMs);
             break;
@@ -584,7 +634,28 @@ export class Lui {
         case "CHALLENGE":
           // M4 §23: CHALLENGE (LUI action) with a falsification objective invokes Flow 7
           // the research METHODOLOGY. The action and the flow remain distinct.
-          if (target.flow === "WHAT_COULD_PROVE_ME_WRONG" || step.params["flow"] === "WHAT_COULD_PROVE_ME_WRONG" || step.params["mode"] === "falsification") {
+          // Guard precedence: when the flow guard DETERMINED a non-falsification flow from
+          // the user's explicit task language (e.g. a factual timeline that mentions "prove"
+          // only inside a constraint sentence), the falsification branch must not swallow it.
+          // COMPOUND SCOPING (Phase G law): the guard classifies the WHOLE message, but in a
+          // compound plan only the step's own params/mode scope which methodology THIS step
+          // runs ("…and challenge my thesis" never turns an independently-described challenge
+          // step into Flow 7); the guard-determined falsification flow applies when the plan
+          // is single-step, where the whole utterance IS this step.
+          const guardHadSay =
+            this.flowGuard !== undefined &&
+            (this.flowGuard.source === "corrected" ||
+              this.flowGuard.source === "determined" ||
+              this.flowGuard.correction !== undefined);
+          const stepScopedFalsification =
+            step.params["flow"] === "WHAT_COULD_PROVE_ME_WRONG" || step.params["mode"] === "falsification";
+          const targetScopedFalsification =
+            target.flow === "WHAT_COULD_PROVE_ME_WRONG" && plan.steps.length === 1;
+          // The guard's verified NON-falsification verdict (task language resolved another
+          // methodology, or an explicit constraint vetoed falsification) outranks any echo.
+          const guardOverridesFalsification =
+            guardHadSay && target.flow !== "WHAT_COULD_PROVE_ME_WRONG";
+          if ((stepScopedFalsification || targetScopedFalsification) && !guardOverridesFalsification) {
             await this.dispatchFlow7(step, result, origin, progress, deadlineMs);
             break;
           }
@@ -1176,6 +1247,12 @@ export class Lui {
     const flowResult = result.flow2 ?? result.flow6 ?? result.flow7 ?? result.flow3 ?? result.flow4 ?? result.flow8 ?? result.flow5;
     if (flowResult !== undefined) {
       const answerText = flowResult.response;
+      // Confidence for a degraded flow (no synthesis) comes from the ENGINE's computed
+      // components, never from a model level that was never produced: coreCoverage=0 with a
+      // synthesis-less run must read LOW/UNKNOWN, not MODERATE (state-consistency law).
+      const degradedConfidence = flowResult.modelFailure !== undefined
+        ? ((flowResult.outcome.evidence.length >= 3 ? "LOW" : "UNKNOWN") as FinalResponse["confidence"])
+        : undefined;
       const cited = result.flow2?.synthesis?.citedObjectRefs ?? result.flow6?.synthesis?.citedObjectRefs ?? result.flow7?.assessment?.citedObjectRefs
         ?? result.flow3?.landscape?.citedObjectRefs ?? result.flow4?.evaluation?.citedObjectRefs ?? result.flow8?.evaluation?.citedObjectRefs
         ?? result.flow5?.outcome.evidence.slice(0, 6).map((e) => e.id) ?? [];
@@ -1205,7 +1282,7 @@ export class Lui {
         answer: answerText,
         supportingReasons: [], // already embedded in the flow's structured answer
         opposingReasons: opposing,
-        confidence: confidence as FinalResponse["confidence"],
+        confidence: degradedConfidence ?? (confidence as FinalResponse["confidence"]),
         keyUncertainty,
         implication: "Deeper disclosure levels available; the trader decides.",
         citedObjectRefs: cited,

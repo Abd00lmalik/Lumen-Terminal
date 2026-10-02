@@ -65,7 +65,8 @@
    LIGHT MODE (mandate §14): high-end analytical software, not a
    generic white SaaS dashboard. Warm off-white canvas, soft gray
    surfaces, restrained borders, dark text, same teal accent.
-   Dark remains the default (no data-theme attribute needed).
+   Light is the default: index.html sets data-theme="light" pre-paint and
+   useTheme resolves every preference except an explicit "dark" to light.
    ================================================================ */
 [data-theme="light"] {
   /* ----- 60% surfaces: warm neutral off-whites ----- */
@@ -139,6 +140,8 @@ body {
 }
 
 ::selection { background: rgba(1, 212, 200, 0.25); }
+/* light mode: the dark-tuned teal wash is too pale on paper — use the AA-tuned accent */
+[data-theme="light"]::selection, [data-theme="light"] ::selection { background: rgba(10, 143, 134, 0.22); }
 
 /* scrollbars — quiet, terminal-flavored (theme-aware) */
 ::-webkit-scrollbar { width: 10px; height: 10px; }

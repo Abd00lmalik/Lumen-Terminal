@@ -665,6 +665,8 @@ export interface MonitorDTO {
   // --- Phase H execution state ---
   readonly cadence?: "DAILY" | "WEEKLY" | "MANUAL";
   readonly lastCheckedAt?: string;
+  /** Last check ATTEMPT distinct from completion (remediation D9: attempted ≠ completed). */
+  readonly lastAttemptedCheckAt?: string;
   readonly lastTriggeredAt?: string;
   readonly lastAssessmentRef?: string;
   readonly linkedChallengeRefs?: readonly string[];
@@ -741,6 +743,7 @@ export function monitorToDTO(m: Monitor): MonitorDTO {
     // Phase H execution state + the "why am I watching this" rationale (challenge-derived).
     ...(m.cadence !== undefined ? { cadence: m.cadence } : {}),
     ...(m.lastCheckedAt !== undefined ? { lastCheckedAt: m.lastCheckedAt } : {}),
+    ...(m.lastAttemptedCheckAt !== undefined ? { lastAttemptedCheckAt: m.lastAttemptedCheckAt } : {}),
     ...(m.lastTriggeredAt !== undefined ? { lastTriggeredAt: m.lastTriggeredAt } : {}),
     ...(m.lastAssessmentRef !== undefined ? { lastAssessmentRef: m.lastAssessmentRef } : {}),
     ...(m.linkedChallengeRefs !== undefined ? { linkedChallengeRefs: idRefs(m.linkedChallengeRefs) } : {}),

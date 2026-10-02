@@ -18,7 +18,7 @@ import {
 } from "../components/ui.js";
 import { evidenceFromDto, judgmentFromDto, thesisFromDto } from "../data/adapters.js";
 import { isResearchRef, preferTurn, runOpenRef, turnIdentity } from "../data/identity.js";
-import { isExpandedTurn, railBelongsToActive, selectActiveTurnRef } from "./researchView.js";
+import { isExpandedTurn, isNewResearchRequest, railBelongsToActive, selectActiveTurnRef } from "./researchView.js";
 import { ApiError, getWorkspace, listResearch, getResearch, listSaved, createSaved, deleteSaved, createThesis } from "../api/index.js";
 import { savedKey, savedKindLabel } from "../data/saved.js";
 import type { EvidenceItem, JudgmentView, ThesisView } from "../data/types.js";
@@ -169,8 +169,13 @@ export function ResearchWorkspacePage() {
   // mount: every successful save/unsave bumps this counter and the section re-fetches.
   const [savedSectionNonce, setSavedSectionNonce] = useState(0);
   const [saveError, setSaveError] = useState<string | undefined>(undefined);
-  const { state: stream, submit } = useResearchStream();
+  const { state: stream, submit, reset: resetStream } = useResearchStream();
   const askedFromHome = useRef(""); // guards double-submission of a home-hero example in StrictMode
+  // D6 (New research): true when this instance MOUNTED with the explicit new-research flag
+  // (arriving from another page). The mount-time history hydration below must not undo the
+  // reset — the FIRST history merge after such a mount is skipped, so "New research" lands on
+  // the same empty thread whether it was pressed on this page or elsewhere.
+  const mountedForNewResearch = useRef(isNewResearchRequest(location.state));
 
   // The saved-artifact index (identity → savedId) is loaded from the backend, never inferred;
   // it drives the SAVE/SAVED/UNSAVE state on every contextual control.
@@ -307,6 +312,13 @@ export function ResearchWorkspacePage() {
       historyTurns = hydrated.filter((t): t is Turn => t !== undefined);
     } catch {
       // History unavailable (cold store, transient fault); existing turns stay untouched.
+    }
+    // D6: consume the one-shot hydration hold (see mountedForNewResearch). The thread stays
+    // clean for this fresh conversation; later refreshes merge history again as always.
+    // Consumed even when the read failed, so the hold cannot leak into a LATER refresh.
+    if (mountedForNewResearch.current) {
+      mountedForNewResearch.current = false;
+      historyTurns = undefined;
     }
     if (historyTurns !== undefined) {
       setRuns((prev) => {
@@ -495,6 +507,26 @@ export function ResearchWorkspacePage() {
       navigate(location.pathname, { replace: true }); // clear the state so refresh/resubmit doesn't re-ask
       ask(q);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
+
+  // D6 (New research): an EXPLICIT handoff from the shell's New research button. A bare
+  // navigate("/research") is a no-op on this route — the previous thread, the viewed run and
+  // the completed stream all survived, so "New research" opened the old conversation. The
+  // reset drops every conversation-scoped piece of state (thread, selection, stream, input)
+  // and clears the flag so a refresh/back-forward replay cannot reset again. The home hero's
+  // `{ question }` state is a different handoff and is never treated as this one.
+  useEffect(() => {
+    if (!isNewResearchRequest(location.state)) return;
+    resetStream();
+    setRuns([]);
+    setViewedRef(undefined);
+    setLinkedNotFound(false);
+    setRefLoadError(undefined);
+    setInput("");
+    setSubmitting(false);
+    setSaveError(undefined);
+    navigate(location.pathname, { replace: true }); // consume the flag
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state]);
 

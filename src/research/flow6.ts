@@ -162,10 +162,22 @@ export async function runFlow6(objective: string, options: Flow6Options): Promis
   } catch (error) {
     // M4 §33: provider-level failure keeps its type; never laundered into a validation failure.
     const failure = error instanceof ModelFailure ? error : new ModelFailure("INVALID_OUTPUT", String(error), false);
+    // DEGRADED-PROVIDER LAW (synthesis remediation): provider failure must not erase
+    // already-valid evidence. When the flow actually gathered evidence, the run returns a
+    // STRUCTURED PARTIAL RESULT built deterministically from that evidence (what is
+    // established, what is not, why, what is missing); the modelFailure stays typed and the
+    // response NEVER pretends no research material exists. Only a run with NO evidence at all
+    // ends as a pure failure response.
+    if (flowOutcome.evidence.length > 0) {
+      return { outcome: flowOutcome, synthesis: undefined, modelFailure: failure, response: partialSynthesisResponse(flowOutcome, failure) };
+    }
     return { outcome: flowOutcome, synthesis: undefined, modelFailure: failure, response: synthesisFailureResponse(failure) };
   }
   if (synthesis === undefined) {
     const failure = new ModelFailure("INVALID_OUTPUT", "cross-domain synthesis failed validation; no overall picture is asserted", false);
+    if (flowOutcome.evidence.length > 0) {
+      return { outcome: flowOutcome, synthesis: undefined, modelFailure: failure, response: partialSynthesisResponse(flowOutcome, failure) };
+    }
     return { outcome: flowOutcome, synthesis: undefined, modelFailure: failure, response: synthesisFailureResponse(failure) };
   }
 
@@ -265,6 +277,41 @@ function synthesisFailureResponse(failure: ModelFailure): string {
     `**Why this is not a finding:** model/provider failure is a system condition, not evidence about the market.`,
     `**What would change this:** a reachable model provider; already-collected research state is preserved.`,
   ].join("\n");
+}
+
+/**
+ * DEGRADED-PROVIDER partial result (synthesis remediation): the model failed to synthesize
+ * AFTER real evidence was gathered. The evidence is valid research material; the failure is
+ * infrastructure. This deterministic partial answer states what IS established (from the
+ * gathered evidence, verbatim observations), what is NOT established, why, which evidence is
+ * missing, and what would resolve the gap. Nothing is fabricated; no overall picture is
+ * asserted (that is the synthesizer's job and it did not run).
+ */
+function partialSynthesisResponse(flowOutcome: FlowOutcome, failure: ModelFailure): string {
+  const domains = [...new Set(flowOutcome.executions.map((e) => e.capability))];
+  const failedPaths = flowOutcome.executions.filter((e) => e.result.failure.type !== "NONE").map((e) => `${e.capability}: ${e.result.failure.message}`);
+  const established = flowOutcome.evidence.slice(0, 5).map((e) => `  • [${e.id}] ${summarizeObservation(e.observation)}`);
+  const gaps = flowOutcome.context.limitations.slice(0, 4);
+  const lines: string[] = [];
+  lines.push(`**Answer:** Cross-domain synthesis could not be completed (${failure.type}: ${failure.message}). The gathered evidence is preserved below; no overall picture is asserted without the synthesis step.`);
+  lines.push(`**What is established (from ${flowOutcome.evidence.length} evidence object(s) across ${domains.length} investigation path(s)):**`);
+  lines.push(...(established.length > 0 ? established : ["  • (no validated evidence objects were produced)"]));
+  lines.push(`**What is NOT established:** the cross-domain overall picture, typed disagreements, and the weighted confidence judgment. The research ran; the synthesis step failed.`);
+  lines.push(`**Why it could not be established:** ${failure.type} is a system condition, not evidence about the market. The failure keeps its type and is never read as a negative finding.`);
+  if (failedPaths.length > 0) lines.push([`**Provider paths that failed (technical conditions):**`, ...failedPaths.slice(0, 4).map((f) => `  • ${f}`)].join("\n"));
+  if (gaps.length > 0) lines.push([`**Missing evidence / limitations:**`, ...gaps.map((g) => `  • ${g}`)].join("\n"));
+  lines.push(`**What would resolve the gap:** re-running the synthesis with a reachable model provider; the evidence objects (refs above) remain in the workspace and stay citable.`);
+  return lines.join("\n");
+}
+
+function summarizeObservation(text: string, max = 160): string {
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    if (typeof parsed.title === "string") return parsed.title.slice(0, max);
+  } catch {
+    // not JSON
+  }
+  return text.slice(0, max);
 }
 
 function buildFlow6Response(synthesis: CrossDomainSynthesis, flowOutcome: FlowOutcome): string {

@@ -12,6 +12,7 @@ import { CapabilityRegistry, type ProviderAdapter } from "../../src/adapters/cap
 import { resetIdCounters } from "../../src/domain/ids.js";
 import { FakeModelProvider, responses } from "../model/fakes.js";
 import { runMonitorCheck, MAX_CHECKS_PER_CRON } from "../../src/ops/monitor-check.js";
+import type { Workspace } from "../../src/domain/workspace.js";
 
 const trader = { kind: "trader" as const, detail: "test" };
 const system = { kind: "system" as const, detail: "cron" };
@@ -211,5 +212,57 @@ describe("Phase H: monitor check pipeline (MONITOR-002..009)", () => {
     expect(result.checked.length).toBeLessThanOrEqual(MAX_CHECKS_PER_CRON);
     // The rest are still ACTIVE (never silently skipped-and-lost; next window picks them up).
     expect(ws.listMonitors().filter((m) => m.status === "ACTIVE").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D9: attempted ≠ completed (attempt stamped BEFORE research runs)
+// ---------------------------------------------------------------------------
+
+describe("D9: monitor check attempt timestamp", () => {
+  it("stamps lastAttemptedCheckAt BEFORE any research runs; completion stamps lastCheckedAt", async () => {
+    const provider = new FakeModelProvider(new Map());
+    scriptFlow7(provider);
+    const app = await makeApp(provider);
+    const ref = await seedMonitor(app);
+    const ws = app.getWorkspace();
+
+    // Record every execution patch in call order, plus how many provider calls had happened
+    // when the FIRST patch landed — the attempt must precede all research execution.
+    const patches: Array<Record<string, unknown>> = [];
+    let providerCallsAtFirstPatch = -1;
+    type Patch = Parameters<Workspace["recordMonitorCheck"]>[1];
+    type Origin = Parameters<Workspace["recordMonitorCheck"]>[2];
+    const original = ws.recordMonitorCheck.bind(ws);
+    const mutable = ws as unknown as {
+      recordMonitorCheck: (id: string, patch: Patch, origin: Origin, note: string, at?: Date) => ReturnType<Workspace["recordMonitorCheck"]>;
+    };
+    mutable.recordMonitorCheck = (id, patch, origin, note, at) => {
+      if (patches.length === 0) providerCallsAtFirstPatch = provider.calls.length;
+      patches.push({ ...patch });
+      return original(id, patch, origin, note, at);
+    };
+
+    const now = new Date("2026-09-30T10:00:00.000Z");
+    const result = await runMonitorCheck(app, ref, trader, { force: true, now });
+    expect(result.executed).toBe(true);
+
+    // The FIRST patch is the ATTEMPT: it carries the attempt timestamp, NOT a completion,
+    // and no research had run yet (observed live defect: a check that died mid-flight
+    // looked like it never attempted because only completions were stamped).
+    expect(patches.length).toBeGreaterThanOrEqual(2);
+    expect(patches[0]!.lastAttemptedCheckAt).toBe(now.toISOString());
+    expect(patches[0]!.lastCheckedAt).toBeUndefined();
+    expect(providerCallsAtFirstPatch).toBe(0);
+
+    // The FINAL patch is the COMPLETION.
+    expect(patches[patches.length - 1]!.lastCheckedAt).toBe(now.toISOString());
+
+    // The monitor view carries both, attempted ≤ completed.
+    const monitor = app.getWorkspace().getMonitor(ref)!;
+    expect(monitor.lastAttemptedCheckAt).toBe(now.toISOString());
+    expect(monitor.lastCheckedAt).toBe(now.toISOString());
+    expect(String(monitor.lastAttemptedCheckAt) <= String(monitor.lastCheckedAt)).toBe(true);
+    await app.persistAfterMonitorCheck();
   });
 });

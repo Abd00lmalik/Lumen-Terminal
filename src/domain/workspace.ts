@@ -773,6 +773,63 @@ export class Workspace {
   }
 
   /**
+   * Merge a persisted snapshot's EXECUTION collections into this graph (remediation D4/D5/D7;
+   * the research/judgment/evidence/analysis/branch analogue of absorbSavedState and
+   * absorbThesisState).
+   *
+   * Root causes this closes:
+   * - D4 (judgment id reuse): a warm instance that loaded BEFORE another instance persisted a
+   *   run re-mints the other run's judgment id (its counter was seeded low). Absorbing the
+   *   other instance's objects bumps the id counters past them, so a new judgment can never
+   *   collide with a persisted one (same law as saved-tombstone continuity).
+   * - D5 (CURRENT pointer): the continuity snapshot's CURRENT research is derived from Map
+   *   insertion order; without absorption a warm instance's pointer ages while newer runs
+   *   land in the store. The union keeps the graph current and `getContinuitySnapshot` picks
+   *   the NEWEST COMPLETED research by timestamp, never bare insertion order.
+   * - D7 (Save NOT_FOUND): the Save path resolves `researchRef` against this graph; a warm
+   *   instance that predates the run 404s. Read paths absorb first, so the Save target exists.
+   *
+   * Scoped to execution collections — never a whole-graph reload — so an in-flight research
+   * run is never clobbered. Union by id with the SAME newer-wins law as the snapshot merge
+   * (more provenance/history entries = later state); local in-flight writes win ties.
+   */
+  absorbExecutionState(snapshot: WorkspaceSnapshot): void {
+    for (const raw of snapshot.researches ?? []) {
+      const existing = this.researches.get(raw.id);
+      if (existing === undefined || revisionsOf(raw) > revisionsOf(existing)) this.researches.set(raw.id, raw);
+    }
+    for (const raw of snapshot.judgments ?? []) {
+      const existing = this.judgments.get(raw.id);
+      if (existing === undefined || revisionsOf(raw) > revisionsOf(existing)) this.judgments.set(raw.id, raw);
+      // Counter continuity (D4): a persisted judgment id must never be re-minted.
+      bumpIdCounterPastId(raw.id);
+    }
+    for (const raw of snapshot.evidence ?? []) {
+      const existing = this.evidence.get(raw.id);
+      if (existing === undefined || revisionsOf(raw) > revisionsOf(existing)) this.evidence.set(raw.id, raw);
+      bumpIdCounterPastId(raw.id);
+    }
+    for (const raw of snapshot.analyses ?? []) {
+      const existing = this.analyses.get(raw.id);
+      if (existing === undefined || revisionsOf(raw) > revisionsOf(existing)) this.analyses.set(raw.id, raw);
+      bumpIdCounterPastId(raw.id);
+    }
+    for (const raw of snapshot.claims ?? []) {
+      const existing = this.claims.get(raw.id);
+      if (existing === undefined || revisionsOf(raw) > revisionsOf(existing)) this.claims.set(raw.id, raw);
+      bumpIdCounterPastId(raw.id);
+    }
+    for (const raw of snapshot.hypotheses ?? []) {
+      const existing = this.hypotheses.get(raw.id);
+      if (existing === undefined || revisionsOf(raw) > revisionsOf(existing)) this.hypotheses.set(raw.id, raw);
+      bumpIdCounterPastId(raw.id);
+    }
+    for (const raw of snapshot.researchResponses ?? []) {
+      if (!this.researchResponses.has(raw.researchId)) this.researchResponses.set(raw.researchId, raw.response);
+    }
+  }
+
+  /**
    * Roll back an in-memory saved-artifact mutation whose persistence FAILED, so the library the
    * client reads can never show an artifact the durable store does not hold (no phantom save,
    * no tombstone invented by a failed unsave). Used only by the application layer on write error.
@@ -1157,7 +1214,21 @@ export class Workspace {
     importantContradictions: readonly string[];
   } {
     const researches = this.listResearch();
-    const activeResearchTarget = researches[researches.length - 1];
+    // CURRENT research selection (remediation D5): Map insertion order is NOT run order —
+    // multi-instance merges and absorbs insert objects in arbitrary order, which left CURRENT
+    // pointing at an older run after newer ones completed (observed live). The CURRENT target
+    // is the NEWEST COMPLETED research by lifecycle timestamp, falling back to the newest
+    // research of any status when nothing has completed yet. Opening an older history record
+    // never changes this pointer (selection is a read-path concern, not workspace state).
+    // TIE LAW: two runs created/completed in the same millisecond share a provenance
+    // timestamp; the stable descending sort would keep insertion order for the tie, which
+    // leaves the OLDER inserted object first. Reversing before the sort makes the tie fall
+    // to the LATER-inserted object — in-process insertion order IS creation order, so a new
+    // run started in the same millisecond as the previous one still becomes CURRENT.
+    const newestBy = (rows: readonly Research[]): Research | undefined =>
+      rows.slice().reverse().sort((a, b) => researchTimestamp(b).localeCompare(researchTimestamp(a)))[0];
+    const activeResearchTarget = newestBy(researches.filter((r) => r.status === "COMPLETED"))
+      ?? newestBy(researches);
     // CURRENT judgment = the ACTIVE research target's own judgment (scoped, honest).
     // The previous global-latest rule leaked the PREVIOUS run's verdict into a new run's
     // panel (observed live: a TSLA research displayed the prior BTC run's Clarity Act
@@ -1329,4 +1400,23 @@ function thesisIsNewer(candidate: Thesis, existing: Thesis): boolean {
   }
   if (candidate.version !== existing.version) return candidate.version > existing.version;
   return candidate.updatedAt > existing.updatedAt;
+}
+
+/**
+ * Recency comparison for absorbExecutionState (mirrors mergeSnapshots' per-object law):
+ * provenance is append-only and every mutation appends, so MORE entries = later state.
+ * Tolerates snapshot objects whose provenance was optional in legacy records.
+ */
+function revisionsOf(o: { provenance?: readonly unknown[] }): number {
+  return o.provenance?.length ?? 0;
+}
+
+/**
+ * Monotonic timestamp of a research object for CURRENT selection: the provenance tail's
+ * timestamp (every lifecycle mutation appends a provenance entry), else the empty string
+ * (objects without provenance sort last and never win CURRENT).
+ */
+function researchTimestamp(r: { readonly provenance?: readonly { readonly at?: string }[] }): string {
+  const last = r.provenance?.[r.provenance.length - 1]?.at;
+  return typeof last === "string" ? last : "";
 }

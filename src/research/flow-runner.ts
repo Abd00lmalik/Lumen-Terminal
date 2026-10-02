@@ -172,7 +172,7 @@ export interface FlowOutcome {
   /** Engine-COMPUTED confidence and its components (never the model's own claim). */
   readonly confidence?: ConfidenceComponents;
   /** Claims the SHARED contract boundary stripped from the flow's own prose (never swallowed). */
-  readonly contractViolations?: readonly { readonly type: string; readonly detail: string; readonly action: "STRIPPED" | "REJECTED_PROSE" }[];
+  readonly contractViolations?: readonly { readonly type: string; readonly detail: string; readonly action: "STRIPPED" | "REJECTED_PROSE" | "RECORDED" }[];
   /** The engine's gap statement for violations that survived (appended to the flow response). */
   readonly contractGap?: string;
   /** QUESTION RESOLUTION (research contract): whether this flow run resolves the trader's need. */

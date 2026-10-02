@@ -73,7 +73,9 @@ export function AppShell({ title, children, contextRail }: {
           <span className="crumb">lumen / <b>{title.toLowerCase()}</b></span>
           <div className="topbar-right">
             <span className="badge gray" title="Connection status">F0 API</span>
-            <button className="btn sm" onClick={() => navigate("/research")}>New research</button>
+            {/* D6: the flag makes the workspace DROP its thread/viewed run/stream — a plain
+                navigate("/research") left the previous conversation on screen (same route). */}
+            <button className="btn sm" onClick={() => navigate("/research", { state: { newResearch: true } })}>New research</button>
             {user !== null && (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                 <span className="badge gray" title={user.email ?? user.uid} aria-label="Account identity indicator">

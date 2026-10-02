@@ -107,6 +107,9 @@ async function runMonitorCheckInner(
 
   // §7: the RESEARCH ENGINE owns research execution (Flow 7 falsification, same pipeline as
   // Challenge). One run per check; the engine's own budget laws apply inside ours.
+  // D9 distinction: the ATTEMPT is stamped BEFORE research runs, so a check that dies
+  // mid-flight still visibly attempted (lastCheckedAt remains the last COMPLETION).
+  workspace.recordMonitorCheck(monitorRef, { lastAttemptedCheckAt: now.toISOString() }, origin, `check ${identity.checkId}: attempt`, now);
   const objective = `Monitoring check for thesis (${monitor.target}): what could prove this wrong, and has anything material changed?`;
   const deadline = startedAt + MONITOR_CHECK_BUDGET_MS;
   let flow7: Awaited<ReturnType<ResearchApp["runEngineFlow7"]>>;

@@ -83,6 +83,46 @@ interface VenueFetch {
   readonly attempts: number;
 }
 
+/**
+ * CANONICAL ASSET -> VENUE SYMBOL normalization (remediation D8).
+ *
+ * The engine's `asset` param is a CANONICAL display name ("ETHEREUM", "BITCOIN", "SOLANA")
+ * or a ticker ("ETH", "BTC"); it is NOT a provider symbol. Live failure: the historical
+ * provider formatted the display name directly into a venue pair ("ETHEREUM" + "/USDT" ->
+ * "ETHEREUMUSDT") and both venues rejected the invalid symbol. The normalization layer maps
+ * canonical names (and common aliases) to the venue's base-asset symbol BEFORE pair
+ * formatting; unknown tokens pass through uppercased (a genuinely unknown asset should fail
+ * honestly at the venue, not be silently reinterpreted here).
+ */
+const CANONICAL_TO_VENUE_SYMBOL: Readonly<Record<string, string>> = {
+  BITCOIN: "BTC", XBT: "BTC",
+  ETHEREUM: "ETH",
+  SOLANA: "SOL",
+  RIPPLE: "XRP",
+  CARDANO: "ADA",
+  DOGECOIN: "DOGE",
+  AVALANCHE: "AVAX",
+  CHAINLINK: "LINK",
+  POLKADOT: "DOT",
+  LITECOIN: "LTC",
+  TRON: "TRX",
+  SHIBA_INU: "SHIB", SHIBAINU: "SHIB",
+  POLYGON: "MATIC", MATIC_POLYGON: "MATIC",
+  BNB: "BNB", BINANCE_COIN: "BNB",
+  TETHER: "USDT", USD_COIN: "USDC",
+};
+
+/** Map a canonical asset/token to the venue's base-asset symbol (pass-through for tickers). */
+function venueBaseSymbol(assetOrSymbol: string): string {
+  const upper = assetOrSymbol.trim().toUpperCase();
+  return CANONICAL_TO_VENUE_SYMBOL[upper] ?? upper;
+}
+
+/** Public seam for the canonical-asset -> venue-symbol law (the flow5 envelope uses it too). */
+export function venueBaseSymbolForAsset(assetOrSymbol: string): string {
+  return venueBaseSymbol(assetOrSymbol);
+}
+
 /** Symbol in venue REST format (no slash, uppercased). */
 function restSymbol(symbol: string): string {
   return symbol.replace("/", "").toUpperCase();
@@ -265,7 +305,11 @@ export class G1HistoricalDataAdapter implements HistoricalDataProvider {
     if (asset !== undefined && /[=^]/.test(asset)) {
       throw new TransportError("SCHEMA_ERROR", `${asset} is not a crypto venue instrument; its history is served by the market-domain capability, not historical crypto candles`, { retriable: false });
     }
-    const symbol = p.symbol ?? (asset !== undefined ? (asset.includes("/") ? asset : `${asset}/USDT`) : "BTC/USDT");
+    // CANONICAL-ASSET NORMALIZATION (remediation D8): the asset may be a canonical display
+    // name ("ETHEREUM") or a ticker ("ETH"); the venue needs its base symbol either way.
+    // An explicit venue-format symbol (contains "/" or ends in a quote asset) passes through.
+    const normalizedAsset = asset !== undefined ? venueBaseSymbol(asset) : undefined;
+    const symbol = p.symbol ?? (normalizedAsset !== undefined ? (normalizedAsset.includes("/") ? normalizedAsset : `${normalizedAsset}/USDT`) : "BTC/USDT");
     const nowMs = this.now().getTime();
     return {
       symbol,

@@ -191,6 +191,8 @@ export interface Monitor {
   /** Deterministic cadence (daily/weekly/manual); MANUAL monitors never auto-fire. */
   readonly cadence?: "DAILY" | "WEEKLY" | "MANUAL";
   readonly lastCheckedAt?: ISO;
+  /** Last check ATTEMPT (set before research runs; lastCheckedAt = last COMPLETION). */
+  readonly lastAttemptedCheckAt?: ISO;
   readonly lastTriggeredAt?: ISO;
   readonly lastAssessmentRef?: string;
   /** Challenges/falsifiers this monitor watches (challengeRef linkage; §17). */

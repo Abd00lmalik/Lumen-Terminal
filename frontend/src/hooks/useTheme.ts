@@ -1,9 +1,12 @@
 /**
  * Theme controller (mandate §14): Dark | Light | System, persisted in
- * localStorage ("lumen.theme"), defaulting to System which respects
- * prefers-color-scheme. Dark is the product's primary identity; light is a
- * first-class token set, not an inversion. Applies `data-theme` on <html> and
- * keeps the meta theme-color in sync for mobile chrome.
+ * localStorage ("lumen.theme"). Light is the product default: with no stored
+ * value the app resolves to light, and the "system" preference never infers
+ * dark from prefers-color-scheme (an explicit Dark choice is the only way to
+ * get dark). An existing explicit choice is respected and never reset.
+ * Applies `data-theme` on <html> and keeps the meta theme-color in sync for
+ * mobile chrome. A matching pre-paint snippet in index.html applies the
+ * attribute before React mounts so there is no flash of the wrong theme.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -13,19 +16,20 @@ const STORAGE_KEY = "lumen.theme";
 function readStoredPreference(): ThemePreference {
   try {
     const v = localStorage.getItem(STORAGE_KEY);
-    return v === "light" || v === "dark" || v === "system" ? v : "system";
+    return v === "light" || v === "dark" || v === "system" ? v : "light";
   } catch {
-    return "system";
+    return "light";
   }
 }
 
-function systemPrefersLight(): boolean {
-  return typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: light)").matches;
-}
-
-/** Resolve a preference to the concrete theme applied to the document. */
+/**
+ * Resolve a preference to the concrete theme applied to the document.
+ * Light is the default surface: only an explicit "dark" preference (or a
+ * stored "dark" from before this default) applies dark. "system" resolves to
+ * light — the OS preference is never used to infer dark.
+ */
 export function resolveTheme(preference: ThemePreference): "dark" | "light" {
-  return preference === "system" ? (systemPrefersLight() ? "light" : "dark") : preference;
+  return preference === "dark" ? "dark" : "light";
 }
 
 function applyTheme(theme: "dark" | "light"): void {
@@ -45,14 +49,6 @@ export function useTheme(): { preference: ThemePreference; setPreference: (p: Th
 
   useEffect(() => {
     applyTheme(resolveTheme(preference));
-  }, [preference]);
-
-  useEffect(() => {
-    if (preference !== "system" || typeof matchMedia !== "function") return;
-    const media = matchMedia("(prefers-color-scheme: light)");
-    const onChange = () => applyTheme(resolveTheme("system"));
-    media.addEventListener("change", onChange);
-    return () => media.removeEventListener("change", onChange);
   }, [preference]);
 
   const setPreference = useCallback((p: ThemePreference) => {

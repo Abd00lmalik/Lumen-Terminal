@@ -32,8 +32,7 @@ export interface ActiveViewInput {
   readonly running: boolean;
 }
 
-/** Identity of the turn that may render as the ACTIVE result, or undefined (none). */
-export function selectActiveTurnRef(input: ActiveViewInput): string | undefined {
+/** Identity of the turn that may render as the ACTIVE result, or undefined (none). */export function selectActiveTurnRef(input: ActiveViewInput): string | undefined {
   if (input.running) return undefined; // rule 1: a new run owns the active area
   if (input.viewedRef !== undefined && input.viewedRef !== "") return input.viewedRef; // rule 2
   if (input.liveRef !== undefined && input.liveRef !== "") return input.liveRef;
@@ -43,6 +42,17 @@ export function selectActiveTurnRef(input: ActiveViewInput): string | undefined 
     if (ref !== undefined && ref !== "") return ref;
   }
   return undefined;
+}
+
+/**
+ * Whether a navigation state carries the explicit "New research" handoff (D6). The shell's
+ * New research button used to call a bare navigate("/research"), which is a no-op on the
+ * same route: the previous thread, viewed run and completed stream all survived. The flag is
+ * strict (only `true` counts) so unrelated navigation state (e.g. the home hero's
+ * `{ question }`) can never trigger a reset.
+ */
+export function isNewResearchRequest(state: unknown): boolean {
+  return typeof state === "object" && state !== null && (state as { newResearch?: unknown }).newResearch === true;
 }
 
 /** Is this turn the expanded active result (as opposed to an archival row)? */

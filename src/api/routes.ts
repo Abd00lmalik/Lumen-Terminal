@@ -391,7 +391,9 @@ export function registerRoutes(app: FastifyInstance, context: RouteContext): voi
     handler: withErrors(async (req) => (await appForRequest(req)).listResearch(readResearchListOptions(req.query))),
   });
   app.get("/api/research/:ref", {
-    handler: withErrors(async (req) => (await appForRequest(req)).getResearch((req.params as { ref: string }).ref)),
+    // FRESH aggregate read (D4/D5/D7): absorbs execution state before resolving the ref so a
+    // warm instance always sees runs completed on another instance.
+    handler: withErrors(async (req) => (await appForRequest(req)).getResearchFresh((req.params as { ref: string }).ref)),
   });
   app.get("/api/evidence", {
     handler: withErrors(async (req) => {
@@ -576,7 +578,7 @@ export function registerRoutes(app: FastifyInstance, context: RouteContext): voi
   // implied. Activation goes through the domain's trader-confirmation boundary.
   // ------------------------------------------------------------------
 
-  app.get("/api/monitors", { handler: withErrors(async (req) => (await appForRequest(req)).listMonitors()) });
+  app.get("/api/monitors", { handler: withErrors(async (req) => (await appForRequest(req)).listMonitorsFresh()) });
   app.post("/api/monitors/:ref/activate", {
     handler: withErrors(async (req) => {
       const ref = (req.params as { ref: string }).ref;

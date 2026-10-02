@@ -193,5 +193,44 @@ describe("Flow 6; WHAT DOES ALL THE INFORMATION SAY? (cross-domain synthesis)", 
     expect(result.synthesis).toBeUndefined();
     expect(result.modelFailure).toBeDefined();
     expect(result.response).toContain("could not be completed");
+    // With NOTHING gathered there is no partial material to preserve: the pure-failure
+    // response never claims established evidence (regression: degraded-provider law).
+    expect(result.response).not.toContain("What is established");
+    expect(result.response).toContain("already-collected research state is preserved");
+  });
+
+  it("DEGRADED PROVIDER: synthesis failure AFTER real evidence returns a structured partial result (evidence never erased)", async () => {
+    // flow6.cross_domain_synthesis is intentionally UNSCRIPTED: the fake provider throws
+    // EMPTY_OUTPUT for it while plan/decision/execution all succeed, so the run gathers
+    // genuine evidence and THEN fails at the synthesis step — the observed live defect was
+    // a provider failure discarding already-valid research material.
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", PLAN],
+      ["research.adaptive_decision", responses.adaptiveDecision("COMPLETE")],
+    ]));
+    const registry = new CapabilityRegistry();
+    for (const c of ["TECHNICAL_ANALYSIS", "SENTIMENT_ANALYSIS", "MACRO_ANALYSIS", "NEWS_ANALYSIS"]) {
+      registry.register(timedCapability(c, 5));
+    }
+    const workspace = new Workspace();
+    const result = await runFlow6("What does all information say about BTC right now?", { provider, registry, workspace, store: new MemoryStore() });
+
+    // The failure keeps its type; it is never laundered into a validation result.
+    expect(result.modelFailure).toBeDefined();
+    expect(result.modelFailure?.type).toBe("EMPTY_OUTPUT");
+    expect(result.synthesis).toBeUndefined();
+
+    // Real evidence was gathered and must be preserved in the partial answer.
+    expect(result.outcome.evidence.length).toBeGreaterThan(0);
+    expect(result.response).toContain("could not be completed");
+    expect(result.response).toContain("no overall picture is asserted");
+    expect(result.response).toContain("What is established");
+    expect(result.response).toContain(result.outcome.evidence[0]!.id);
+    // A system condition is never read as a market finding.
+    expect(result.response).toContain("system condition, not evidence about the market");
+    // No synthesis ran → the full-synthesis surface is absent, and no judgment is minted
+    // from a synthesis that never happened.
+    expect(result.response).not.toContain("**Overall picture:**");
+    expect(workspace.currentJudgment(result.outcome.researchId)).toBeUndefined();
   });
 });

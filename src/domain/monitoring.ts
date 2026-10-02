@@ -180,7 +180,10 @@ export function createNotification(
 /** Merge-safe update of an existing Monitor with execution state (never conditions). */
 export interface MonitorExecutionPatch {
   readonly cadence?: MonitorCadence;
+  /** Timestamp of the last check that actually COMPLETED research (or honestly failed). */
   readonly lastCheckedAt?: ISO;
+  /** Timestamp of the last check ATTEMPT (may not have completed; set before research runs). */
+  readonly lastAttemptedCheckAt?: ISO;
   readonly lastTriggeredAt?: ISO;
   readonly lastAssessmentRef?: string;
   /** Challenges/falsifiers this monitor watches (challengeRef linkage; §17). */
@@ -194,6 +197,7 @@ export function applyExecutionPatch(monitor: import("./memory.js").Monitor, patc
     ...monitor,
     ...(patch.cadence !== undefined ? { cadence: patch.cadence } : {}),
     ...(patch.lastCheckedAt !== undefined ? { lastCheckedAt: patch.lastCheckedAt } : {}),
+    ...(patch.lastAttemptedCheckAt !== undefined ? { lastAttemptedCheckAt: patch.lastAttemptedCheckAt } : {}),
     ...(patch.lastTriggeredAt !== undefined ? { lastTriggeredAt: patch.lastTriggeredAt } : {}),
     ...(patch.lastAssessmentRef !== undefined ? { lastAssessmentRef: patch.lastAssessmentRef } : {}),
     ...(patch.linkedChallengeRefs !== undefined ? { linkedChallengeRefs: Object.freeze([...patch.linkedChallengeRefs]) } : {}),

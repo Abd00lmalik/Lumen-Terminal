@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { RestTransport } from "../../src/adapters/transports/rest.js";
-import { G1HistoricalDataAdapter, BINANCE_VISION_BASE_URL, type HistoricalCandle } from "../../src/adapters/g1-historical.js";
+import { G1HistoricalDataAdapter, BINANCE_VISION_BASE_URL, venueBaseSymbolForAsset, type HistoricalCandle } from "../../src/adapters/g1-historical.js";
 import { CapabilityRegistry } from "../../src/adapters/capability-registry.js";
 import { createBitgetAdapterSet } from "../../src/adapters/bitget-skills.js";
 import { normalizedResult } from "../../src/domain/tool-result.js";
@@ -233,5 +233,32 @@ describe("G1 historical-data adapter (vendor: Bitget → Binance Vision)", () =>
     expect(toolResult.normalizedOutput.every((o) => o.outputClass === "QUANTITATIVE_OBSERVATION")).toBe(true);
     const chunk = toolResult.normalizedOutput[0]!.content as { candleCount: number };
     expect(chunk.candleCount).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Canonical asset → venue symbol law (remediation D8)
+// ---------------------------------------------------------------------------
+
+describe("canonical asset → venue symbol normalization (D8)", () => {
+  it("maps canonical display names to the venue's base-asset symbol", () => {
+    expect(venueBaseSymbolForAsset("ETHEREUM")).toBe("ETH");
+    expect(venueBaseSymbolForAsset("BITCOIN")).toBe("BTC");
+    expect(venueBaseSymbolForAsset("XBT")).toBe("BTC");
+    expect(venueBaseSymbolForAsset("SOLANA")).toBe("SOL");
+    expect(venueBaseSymbolForAsset("DOGECOIN")).toBe("DOGE");
+  });
+
+  it("is case-insensitive and trims whitespace (the display name arrives raw)", () => {
+    expect(venueBaseSymbolForAsset("ethereum")).toBe("ETH");
+    expect(venueBaseSymbolForAsset("  bitcoin  ")).toBe("BTC");
+    expect(venueBaseSymbolForAsset(" Eth ")).toBe("ETH");
+  });
+
+  it("passes tickers through; a genuinely unknown asset is never reinterpreted", () => {
+    expect(venueBaseSymbolForAsset("SOL")).toBe("SOL");
+    expect(venueBaseSymbolForAsset("BTC")).toBe("BTC");
+    expect(venueBaseSymbolForAsset("pepe")).toBe("PEPE"); // unknown → uppercased, fails honestly at the venue
+    expect(venueBaseSymbolForAsset("MOONCOIN")).toBe("MOONCOIN");
   });
 });

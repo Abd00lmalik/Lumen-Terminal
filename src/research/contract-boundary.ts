@@ -28,6 +28,11 @@
  *
  * Failures are recorded on the outcome (violationReport) instead of being swallowed, so an
  * external benchmark can see every rejection the boundary made.
+ *
+ * LEDGER INVARIANTS (D3): before the laws run, the ledger itself is checked against its own
+ * evidence refs (ledgerInvariantViolations). A row whose status contradicts its refs would
+ * corrupt coverage/completion/confidence silently, so the breach is RECORDED on the report —
+ * never thrown, never re-classified, never able to change the outcome on its own.
  */
 import type { ConfidenceComponents, ConfidenceLevel } from "./confidence.js";
 import {
@@ -38,6 +43,7 @@ import {
   type ContractViolation,
 } from "./contract-checks.js";
 import { computeConfidence } from "./confidence.js";
+import { ledgerInvariantViolations } from "./ledger-invariants.js";
 import { blockingRequirements, type ResearchRequirement } from "./requirements.js";
 import {
   evaluateQuestionResolution,
@@ -80,8 +86,11 @@ export interface ContractOutcomeInput {
 export interface ContractViolationRecord {
   readonly type: string;
   readonly detail: string;
-  /** What the boundary did: removed the sentence, or rejected the whole prose. */
-  readonly action: "STRIPPED" | "REJECTED_PROSE";
+  /**
+   * What the boundary did: removed the sentence, rejected the whole prose, or — for a LEDGER
+   * invariant breach — recorded the corrupted row without touching the prose at all.
+   */
+  readonly action: "STRIPPED" | "REJECTED_PROSE" | "RECORDED";
 }
 
 /** The outcome after the shared boundary: same research, enforced contract. */
@@ -144,6 +153,19 @@ export function validateContractOutcome<L>(
     }
   }
   const contractGap = surviving.length > 0 ? contractGapStatement(surviving) : undefined;
+
+  // 1b. LEDGER INVARIANTS (engine ledger integrity): a row whose status contradicts its own
+  // evidence refs is a corrupted input to every law below (completion, confidence, resolution).
+  // The breach is RECORDED on the report — appended after the claim violations so the claim
+  // rejection order every existing consumer sees stays stable. The prose, stop reason, and
+  // confidence are never derived from these records; they exist so the breach cannot hide.
+  report.push(
+    ...ledgerInvariantViolations(input.ledger).map((v) => ({
+      type: v.type,
+      detail: v.detail,
+      action: "RECORDED" as const,
+    })),
+  );
 
   // 2. QUESTION RESOLUTION (research contract: QUESTION RESOLUTION ≠ EVIDENCE COLLECTION).
   // The engine evaluates whether THIS run's evidence + prose resolve the trader's verbatim

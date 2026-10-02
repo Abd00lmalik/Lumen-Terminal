@@ -20,6 +20,7 @@ import { CapabilityRegistry, HistoricalDataStub } from "../../src/adapters/capab
 import { resetIdCounters } from "../../src/domain/ids.js";
 import { ModelFailure } from "../../src/model/provider.js";
 import { FakeModelProvider, newStore, responses } from "../model/fakes.js";
+import { computeConfidence } from "../../src/research/confidence.js";
 import type { ProviderAdapter } from "../../src/adapters/capability-registry.js";
 
 const trader = { kind: "trader" as const, detail: "test" };
@@ -323,6 +324,131 @@ describe("Flow 5; historical comparison (G1 unavailable)", () => {
     expect(Date.parse(q.to)).toBe(now.getTime());
     // 3-year deterministic lookback
     expect(Date.parse(q.to) - Date.parse(q.from)).toBeCloseTo(3 * 365 * 86_400_000, -6);
+  });
+
+  it("normalizes a CANONICAL display asset to the venue symbol (D8: ETHEREUM never becomes ETHEREUMUSDT)", async () => {
+    // Live failure: the envelope formatted the display name straight into the pair
+    // ("ETHEREUM" + "/USDT" → "ETHEREUMUSDT") and both venues rejected it. The canonical
+    // name must map through the adapter's venue-symbol law BEFORE pair formatting.
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", HISTORICAL_UNAVAILABLE_PLAN],
+      ["research.adaptive_decision", responses.adaptiveDecision("COMPLETE")],
+    ]));
+    const seenParams: Record<string, unknown>[] = [];
+    const registry = new CapabilityRegistry();
+    registry.register({
+      providerId: "fake/g1-canonical",
+      capabilities: ["HISTORICAL_COMPARISON"],
+      limitations: [],
+      freshnessProfile: "test:live",
+      async execute(_cap, params) {
+        seenParams.push({ ...params });
+        return {
+          tool: "fake/g1-canonical",
+          capability: _cap,
+          transport: "fake",
+          outputs: [{ outputClass: "QUANTITATIVE_OBSERVATION", content: "2024-09 analogous setup", about: "ETH" }],
+        };
+      },
+    });
+
+    await runFlow5("Have we seen this ETH setup before?", {
+      provider, registry, workspace: new Workspace(), store: new MemoryStore(), asset: "ETHEREUM",
+    });
+
+    expect(seenParams).toHaveLength(1);
+    const q = seenParams[0] as { symbol: string };
+    expect(q.symbol).toBe("ETH/USDT"); // canonical name → real venue symbol
+    expect(q.symbol).not.toContain("ETHEREUM");
+  });
+
+  it("D3: the judgment's confidence never exceeds the engine's computed level (heuristic MODERATE cannot win)", async () => {
+    // Observed live defect: a Flow 5 judgment stated MODERATE while the computed confidence
+    // was LOW. Fixture: real monthly candle chunks whose +2%/day runs match the trailing
+    // reference (the analysis heuristic WANTS MODERATE), while the run stops on an honest
+    // evidence gap — computeConfidence must own the final level.
+    const DAY = 86_400_000;
+    const candles: Array<{ openTime: string; closeTime: string; open: number; high: number; low: number; close: number; baseVolume: number }> = [];
+    let price = 100;
+    const t0 = Date.UTC(2020, 0, 1);
+    for (let i = 0; i < 90; i++) {
+      const dailyPct = i >= 40 && i <= 49 ? 2.0 : i >= 80 ? 2.0 : 0.2;
+      const open = price;
+      const close = price * (1 + dailyPct / 100);
+      candles.push({
+        openTime: new Date(t0 + i * DAY).toISOString(),
+        closeTime: new Date(t0 + i * DAY + DAY - 1).toISOString(),
+        open,
+        high: Math.max(open, close) * 1.005,
+        low: Math.min(open, close) * 0.995,
+        close,
+        baseVolume: 1000,
+      });
+      price = close;
+    }
+    // G1 monthly-chunk packaging (the adapter's real observation shape).
+    const byMonth = new Map<string, typeof candles>();
+    for (const c of candles) {
+      const month = c.openTime.slice(0, 7);
+      const arr = byMonth.get(month) ?? [];
+      arr.push(c);
+      byMonth.set(month, arr);
+    }
+    const chunks = [...byMonth.values()].map((month) =>
+      JSON.stringify({ month: month[0]!.openTime.slice(0, 7), candleCount: month.length, candles: month }));
+
+    const plan = JSON.stringify({
+      objective: "Have we seen this BTC setup before?",
+      scopeIncluded: ["historical episodes"],
+      scopeExcluded: [],
+      tasks: [
+        { type: "FACT_FINDING", objective: "retrieve analogous historical episodes", capabilities: ["HISTORICAL_COMPARISON"], completion: "episodes retrieved or unavailability recorded" },
+      ],
+      completionCriteria: ["historical episodes retrieved or honest unavailability recorded"],
+      adaptationPolicy: "STOP_ON_INSUFFICIENT",
+    });
+    const provider = new FakeModelProvider(new Map([
+      ["research.plan", plan],
+      // Honest-gap stop: the run ends naming an unresolved requirement, not EVIDENCE_SUFFICIENT.
+      ["research.adaptive_decision", responses.adaptiveDecision("INSUFFICIENT_EVIDENCE")],
+    ]));
+    const registry = new CapabilityRegistry();
+    registry.register({
+      providerId: "fake/g1-confidence",
+      capabilities: ["HISTORICAL_COMPARISON"],
+      limitations: [],
+      freshnessProfile: "test:live",
+      async execute(_cap) {
+        return {
+          tool: "fake/g1-confidence",
+          capability: _cap,
+          transport: "fake",
+          outputs: chunks.map((content) => ({ outputClass: "QUANTITATIVE_OBSERVATION" as const, content, about: "BTC" })),
+        };
+      },
+    });
+
+    const workspace = new Workspace();
+    const result = await runFlow5("Have we seen this BTC setup before?", {
+      provider, registry, workspace, store: new MemoryStore(),
+    });
+
+    // The analysis layer DID find matching episodes — its heuristic level is MODERATE.
+    expect(result.historicalAnalysis).toBeDefined();
+    expect(result.historicalAnalysis!.matches.length).toBeGreaterThan(0);
+
+    // The deterministic authority computes the ceiling from engine state (honest gap → LOW).
+    const computed = computeConfidence({
+      requirements: result.outcome.requirements,
+      stoppedBecause: result.outcome.stoppedBecause,
+      failedPaths: result.outcome.executions.filter((e) => e.result.failure.type !== "NONE").length,
+    });
+    expect(computed.level).toBe("LOW");
+
+    // The persisted judgment must state the COMPUTED level, never the heuristic MODERATE.
+    const judgment = workspace.listJudgments().find((j) => j.basis.supportingEvidence.length > 0);
+    expect(judgment).toBeDefined();
+    expect(judgment!.confidence).toBe("LOW");
   });
 });
 
