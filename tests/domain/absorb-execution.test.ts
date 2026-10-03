@@ -25,9 +25,13 @@ const T0 = new Date("2026-01-01T00:00:00.000Z");
 beforeEach(() => resetIdCounters());
 
 /** A research run created at T0 and completed at `completedAt` (2 provenance steps + create). */
-function completedRun(ws: Workspace, question: string, completedAt: string): string {
-  const r = ws.addResearch({ objective: question, question, flow: "WHAT_HAPPENED" }, trader, T0);
-  ws.transitionResearch(r.id, "ACTIVE", trader, "run started", T0);
+function completedRun(ws: Workspace, question: string, completedAt: string, createdAt: string = T0.toISOString()): string {
+  // Runs are CREATED at distinct times in reality; CURRENT is selected by submission order
+  // (creation), never by completion order, so the helper models a distinct creation instant
+  // and keeps the completion instant separately.
+  const created = new Date(createdAt);
+  const r = ws.addResearch({ objective: question, question, flow: "WHAT_HAPPENED" }, trader, created);
+  ws.transitionResearch(r.id, "ACTIVE", trader, "run started", created);
   ws.transitionResearch(r.id, "COMPLETED", trader, "run completed", new Date(completedAt));
   return r.id;
 }
@@ -64,8 +68,8 @@ describe("absorbExecutionState (D4/D5/D7)", () => {
     const other = new Workspace();
     // Insertion order: newer FIRST, older LAST — the pre-fix selection (insertion order)
     // pointed CURRENT at the older run after the merge/absorb reordered the graph.
-    const newer = completedRun(other, "newer run", "2026-01-05T00:00:00.000Z");
-    const older = completedRun(other, "older run", "2026-01-03T00:00:00.000Z");
+    const newer = completedRun(other, "newer run", "2026-01-05T00:00:00.000Z", "2026-01-04T00:00:00.000Z");
+    const older = completedRun(other, "older run", "2026-01-03T00:00:00.000Z", "2026-01-02T00:00:00.000Z");
     const snap = other.toSnapshot();
     expect(snap.researches.map((r) => r.id)).toEqual([newer, older]); // insertion order ≠ run order
 
@@ -76,6 +80,16 @@ describe("absorbExecutionState (D4/D5/D7)", () => {
     // Direct selection (no absorption involved) applies the same law.
     const direct = Workspace.fromSnapshot(snap);
     expect(direct.getContinuitySnapshot().activeResearchTarget?.id).toBe(newer);
+  });
+
+  it("a run that finishes LAST is not CURRENT when it was submitted first", () => {
+    const other = new Workspace();
+    // Submitted first, finishes last (slow providers, gap recovery). CURRENT is the run the
+    // trader asked for last, not the one that happened to complete last.
+    const submittedFirst = completedRun(other, "slow run", "2026-01-09T00:00:00.000Z", "2026-01-02T00:00:00.000Z");
+    const submittedLast = completedRun(other, "fast run", "2026-01-03T00:00:00.000Z", "2026-01-08T00:00:00.000Z");
+    expect(other.getContinuitySnapshot().activeResearchTarget?.id).toBe(submittedLast);
+    expect(other.getContinuitySnapshot().activeResearchTarget?.id).not.toBe(submittedFirst);
   });
 
   it("union newer-wins: a staler snapshot never ages a local record; a fresher one catches it up", () => {
@@ -102,7 +116,7 @@ describe("absorbExecutionState (D4/D5/D7)", () => {
 
   it("absorbs evidence and responses with the same law; unknown ids are added, local-only state is untouched", () => {
     const other = new Workspace();
-    const rid = completedRun(other, "remote run", "2026-01-02T00:00:00.000Z");
+    const rid = completedRun(other, "remote run", "2026-01-02T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
     const ev = other.addEvidence(
       { observation: "remote evidence", evidenceType: "market", evidenceClass: "OBSERVATION", researchRef: rid },
       trader,
@@ -110,7 +124,7 @@ describe("absorbExecutionState (D4/D5/D7)", () => {
     const snap = other.toSnapshot();
 
     const warm = new Workspace();
-    const localRid = completedRun(warm, "local in-flight run", "2026-01-04T00:00:00.000Z");
+    const localRid = completedRun(warm, "local in-flight run", "2026-01-04T00:00:00.000Z", "2026-01-03T00:00:00.000Z");
     warm.absorbExecutionState(snap);
 
     expect(warm.getResearch(rid)).toBeDefined(); // remote run added

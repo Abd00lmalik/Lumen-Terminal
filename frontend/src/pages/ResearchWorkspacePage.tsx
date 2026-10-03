@@ -24,7 +24,7 @@ import { savedKey, savedKindLabel } from "../data/saved.js";
 import type { EvidenceItem, JudgmentView, ThesisView } from "../data/types.js";
 import type {
   ResearchResponseDto, ResearchDto, ContinuitySnapshotDto, HistoricalAnalysisDto,
-  ResearchRecordTierDto, QuestionResolutionDto, SavedKindDto, SavedItemSummaryDto,
+  ResearchRecordTierDto, QuestionResolutionDto, SavedKindDto, SavedItemSummaryDto, JudgmentDto,
 } from "../api/index.js";
 import { useResearchStream } from "../hooks/useResearchStream.js";
 
@@ -34,6 +34,44 @@ interface WorkspaceData {
   readonly thesis: ThesisView | undefined;
   readonly snapshot: ContinuitySnapshotDto | undefined;
   readonly loadError: unknown;
+}
+
+/**
+ * RUN COHERENCE (provenance contract, client side): every artifact a response carries must
+ * belong to the SAME research run as the response itself. The backend enforces this at the
+ * domain boundary; the client checks it again before rendering, because a response that
+ * fails the check is exactly the "fresh retrieval answered from another run's evidence"
+ * failure the trader would otherwise see.
+ */
+export function isCoherentRunResponse(response: ResearchResponseDto | undefined): boolean {
+  if (response === undefined) return false;
+  const runId = response.researchRunId ?? response.researchRef;
+  if (runId === undefined) return true; // a non-research action has no run to bind to
+  const allBelong = (refs: readonly string[]): boolean =>
+    refs.every((ref) => response.evidence.some((e) => e.ref === ref));
+  if (!allBelong(response.answer.citedObjectRefs)) return false;
+  for (const judgment of response.judgments) {
+    if (judgment.researchRunId !== runId) return false;
+    if (!allBelong(judgment.supportingEvidence) || !allBelong(judgment.opposingEvidence)) return false;
+  }
+  for (const e of response.evidence) {
+    if (e.researchRunId !== undefined && e.researchRunId !== runId) return false;
+  }
+  return true;
+}
+
+/**
+ * Does this continuity panel belong to the snapshot's CURRENT research run? The backend
+ * already scopes the snapshot; this is the client's refusal to display a mismatched
+ * Current Judgment or evidence list if the two ever disagree.
+ */
+export function judgmentBelongsToCurrentRun(
+  snapshot: ContinuitySnapshotDto,
+): JudgmentDto | undefined {
+  const judgment = snapshot.currentJudgment;
+  if (judgment === undefined) return undefined;
+  const current = snapshot.currentResearchRunId ?? snapshot.activeResearch?.ref;
+  return current !== undefined && judgment.researchRunId !== current ? undefined : judgment;
 }
 
 /**
@@ -246,9 +284,17 @@ export function ResearchWorkspacePage() {
   const streamDone = stream.result !== undefined;
   useEffect(() => {
     if (streamDone) {
+      // ASYNC INTEGRITY: a result is accepted only when every artifact in it belongs to ONE
+      // research run, and that run is the one the thread is now on. A late completion from a
+      // previous submission is discarded rather than rendered or saved as CURRENT.
+      if (!isCoherentRunResponse(stream.result)) return;
       // Replace any history-hydrated copy of this same question with the fresh full response
-      // (dedup by question text: history loads first, the live result supersedes it).
-      setRuns((prev) => [...prev.filter((t) => t.question !== stream.question), { question: stream.question, run: stream.result! }]);
+      // (dedup by run identity first, question text only as a fallback).
+      const liveRef = stream.result.researchRunId;
+      setRuns((prev) => [
+        ...prev.filter((t) => (liveRef !== undefined ? t.run.researchRef !== liveRef : t.question !== stream.question)),
+        { question: stream.question, run: stream.result! },
+      ]);
       void refresh();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -352,7 +398,7 @@ export function ResearchWorkspacePage() {
       const snapshot = await getWorkspace();
       setWs({
         evidence: snapshot.recentEvidence.map(evidenceFromDto),
-        judgment: snapshot.currentJudgment !== undefined ? judgmentFromDto(snapshot.currentJudgment) : undefined,
+        judgment: (() => { const current = judgmentBelongsToCurrentRun(snapshot); return current !== undefined ? judgmentFromDto(current) : undefined; })(),
         thesis: snapshot.activeThesis !== undefined ? thesisFromDto(snapshot.activeThesis, []) : undefined,
         snapshot,
         loadError: undefined,
@@ -365,7 +411,7 @@ export function ResearchWorkspacePage() {
         const snapshot = await getWorkspace();
         setWs({
           evidence: snapshot.recentEvidence.map(evidenceFromDto),
-          judgment: snapshot.currentJudgment !== undefined ? judgmentFromDto(snapshot.currentJudgment) : undefined,
+          judgment: (() => { const current = judgmentBelongsToCurrentRun(snapshot); return current !== undefined ? judgmentFromDto(current) : undefined; })(),
           thesis: snapshot.activeThesis !== undefined ? thesisFromDto(snapshot.activeThesis, []) : undefined,
           snapshot,
           loadError: undefined,
@@ -483,7 +529,7 @@ export function ResearchWorkspacePage() {
         if (!cancelled) {
           setWs({
             evidence: snapshot.recentEvidence.map(evidenceFromDto),
-            judgment: snapshot.currentJudgment !== undefined ? judgmentFromDto(snapshot.currentJudgment) : undefined,
+            judgment: (() => { const current = judgmentBelongsToCurrentRun(snapshot); return current !== undefined ? judgmentFromDto(current) : undefined; })(),
             thesis: undefined,
             snapshot,
             loadError: undefined,

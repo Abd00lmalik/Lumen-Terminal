@@ -1065,11 +1065,14 @@ describe("research context (M3 §9); epistemic distinctions preserved", () => {
     expect(ctx.contradictions).toHaveLength(0);
   });
 
-  it("thesis reaches the model context labeled as the trader's own position", async () => {
+  it("thesis reaches the model context only for thesis-facing work", async () => {
     const { buildResearchContext } = await import("../../src/research/context.js");
     const workspace = new Workspace();
     workspace.addThesis({ statement: "my thesis", objective: "o", claims: [{ statement: "c", importance: "CORE", invalidationConditions: [] }] }, trader);
-    const ctx = buildResearchContext(workspace);
+    // An independent question must not inherit an unrelated active thesis.
+    expect(buildResearchContext(workspace).thesis).toBeUndefined();
+    // A thesis-facing flow earns it, labeled as the trader's own position.
+    const ctx = buildResearchContext(workspace, { includeThesis: true });
     expect(ctx.thesis?.statement).toBe("my thesis");
     expect(ctx.thesis?.claims).toEqual(["c"]);
   });
@@ -1120,6 +1123,10 @@ describe("research context (M3 §9); epistemic distinctions preserved", () => {
       system,
     );
     const current = workspace.addResearch({ objective: "Gather current TSLA trading data", question: "TSLA this week", flow: "WHAT_HAPPENED" }, system);
+    // The TSLA observation belongs to the current run; the two crypto observations belong to
+    // the earlier run. Ownership, not wording, decides what the current question can see.
+    const tsla = workspace.listEvidence().find((e) => e.observation.includes("TSLA"))!;
+    workspace.ingestEvidence(tsla, current.id);
 
     const ctx = buildResearchContext(workspace, { researchRef: current.id, relevantTo: "Gather current TSLA trading data and historical data from last week for comparison" });
     const texts = ctx.items.map((i) => i.text).join(" ");
@@ -1129,8 +1136,7 @@ describe("research context (M3 §9); epistemic distinctions preserved", () => {
     // The exclusion is auditable, never silent: count + samples in the render.
     expect(ctx.archiveBackground?.count).toBe(2);
     const rendered = renderResearchContext(ctx);
-    expect(rendered).toContain("RELEVANCE GATE: 2 archived evidence object(s)");
-    expect(rendered).toContain("do not treat the exclusion as evidence of absence");
+    expect(rendered).toContain("belonging to OTHER research runs are EXCLUDED");
   });
 
   it("run-scoped tier: evidence ingested by THIS research stays in scope even when lexically unrelated (Flow 4 thesis law)", async () => {
@@ -1154,17 +1160,25 @@ describe("research context (M3 §9); epistemic distinctions preserved", () => {
     expect(ctx.items.some((i) => i.text.includes("Zcash"))).toBe(false);
   });
 
-  it("relevance gate keeps nothing out when the question genuinely spans the archive's subjects", async () => {
+  it("another run's evidence never enters the current context, however well it matches", async () => {
+    // This is the production failure in its purest form: a fresh run retrieved a new BTC
+    // observation while an older run's BTC observation sat in the same workspace. Admission
+    // is decided by RUN OWNERSHIP, never by how well the older text matches the question.
     const { buildResearchContext } = await import("../../src/research/context.js");
     const workspace = new Workspace();
+    const earlier = workspace.addResearch({ objective: "BTC move", question: "Why did BTC move", flow: "WHY_IT_HAPPENED" }, system);
     workspace.addEvidence(
-      { observation: "BTC ETF outflows accelerated as the Clarity Act failed", evidenceType: "news", evidenceClass: "OBSERVATION" },
+      { observation: "BTC ETF outflows accelerated as the Clarity Act failed", evidenceType: "news", evidenceClass: "OBSERVATION", researchRef: earlier.id },
       system,
     );
-    const current = workspace.addResearch({ objective: "Why did BTC move", question: "q", flow: "WHY_IT_HAPPENED" }, system);
+    const current = workspace.addResearch({ objective: "BTC price", question: "Why did BTC move", flow: "WHY_IT_HAPPENED" }, system);
+    const freshId = workspace.addEvidence(
+      { observation: "BTC closed at 61200 on 2026-01-05", evidenceType: "price", evidenceClass: "OBSERVATION", researchRef: current.id },
+      system,
+    ).id;
     const ctx = buildResearchContext(workspace, { researchRef: current.id, relevantTo: "Why did BTC move recently" });
-    expect(ctx.items).toHaveLength(1);
-    expect(ctx.archiveBackground).toBeUndefined();
+    expect(ctx.items.map((i) => i.ref)).toEqual([freshId]);
+    expect(ctx.runEvidenceRefs).toEqual([freshId]);
   });
 });
 

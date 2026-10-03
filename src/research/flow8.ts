@@ -258,6 +258,8 @@ export interface Flow8Options {
   readonly target?: string;
   readonly asset?: string;
   readonly constraints?: readonly string[];
+  /** CAPABILITY ISOLATION: the trader's explicit capability boundary ("use X only"); a hard filter on the plan, the engine floor and gap recovery. */
+  readonly capabilityConstraint?: { readonly allowed?: readonly string[]; readonly forbidden?: readonly string[] };
   readonly maxRounds?: number;
   /**
    * Wall-clock deadline for the whole run (epoch ms); forwarded to the shared flow runner's
@@ -309,6 +311,7 @@ export async function runFlow8(objective: string, options: Flow8Options): Promis
     workspace,
     store: options.store,
     ...(options.constraints !== undefined ? { constraints: options.constraints } : {}),
+    ...(options.capabilityConstraint !== undefined ? { capabilityConstraint: options.capabilityConstraint } : {}),
     capabilityParams: (options.asset ?? options.target) !== undefined ? { asset: options.asset ?? options.target } : {},
     ...(options.maxRounds !== undefined ? { maxRounds: options.maxRounds } : {}),
     ...(options.deadlineMs !== undefined ? { deadlineMs: options.deadlineMs } : {}),
@@ -447,7 +450,7 @@ function emptyOutcome(objective: string, failure: ModelFailure): FlowOutcome {
     finalDecision: { decision: "INSUFFICIENT_EVIDENCE", rationale: failure.message, nextTasks: [] },
     stoppedBecause: "MODEL_FAILURE",
     ...(failure !== undefined ? { modelFailure: failure } : {}),
-    context: { items: [], claims: [], hypotheses: [], limitations: [], contradictions: [] },
+    context: { items: [], runEvidenceRefs: [], claims: [], hypotheses: [], limitations: [], contradictions: [] },
   };
 }
 

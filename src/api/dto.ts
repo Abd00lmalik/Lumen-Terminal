@@ -67,6 +67,8 @@ function idRefs(refs: readonly string[]): string[] {
 
 export interface EvidenceDTO {
   readonly ref: string;
+  /** The research run that retrieved this observation (explicit ownership; never inferred). */
+  readonly researchRunId?: string;
   readonly observation: string;
   readonly evidenceType: string;
   /** Epistemic status AS DATA; the frontend badges this verbatim. */
@@ -91,6 +93,9 @@ export interface EvidenceDTO {
 export function evidenceToDTO(e: Evidence): EvidenceDTO {
   return {
     ref: e.id,
+    // PROVENANCE CONTRACT: the owning research run travels with every evidence object, so a
+    // client can verify `evidence.researchRunId === currentResearchRunId` without inferring it.
+    ...(e.researchRef !== undefined ? { researchRunId: e.researchRef } : {}),
     observation: e.observation,
     evidenceType: e.evidenceType,
     evidenceClass: e.evidenceClass,
@@ -172,6 +177,8 @@ export function hypothesisToDTO(h: Hypothesis): HypothesisDTO {
 
 export interface JudgmentDTO {
   readonly ref: string;
+  /** The research run that produced this judgment; Current Judgment is resolved through it. */
+  readonly researchRunId: string;
   readonly statement: string;
   readonly confidence?: "HIGH" | "MODERATE" | "LOW";
   readonly uncertainty: readonly string[];
@@ -187,6 +194,8 @@ export interface JudgmentDTO {
 export function judgmentToDTO(j: Judgment): JudgmentDTO {
   return {
     ref: j.id,
+    // PROVENANCE CONTRACT: the run that produced this judgment, never a global "latest".
+    researchRunId: j.researchRef,
     statement: j.statement,
     ...(j.confidence !== undefined ? { confidence: j.confidence } : {}),
     uncertainty: idRefs(j.uncertainty),
@@ -811,7 +820,14 @@ export function monitorNotificationToDTO(n: MonitorNotification): MonitorNotific
 
 export interface ContinuitySnapshotDTO {
   readonly activeResearch?: ResearchDTO;
+  /**
+   * The authoritative CURRENT research run. Evidence, judgment, answer and traceability in
+   * this snapshot all belong to this run; a client binds its panels to it and discards any
+   * response whose researchRunId differs.
+   */
+  readonly currentResearchRunId?: string;
   readonly activeBranchRef?: string;
+  /** The CURRENT research run's evidence (never another run's observations). */
   readonly recentEvidence: readonly EvidenceDTO[];
   readonly currentClaims: readonly ClaimDTO[];
   readonly currentHypotheses: readonly HypothesisDTO[];
@@ -834,6 +850,7 @@ export interface BranchLite {
 /** Map the domain continuity snapshot into the safe DTO (pure; no re-derivation). */
 export function continuitySnapshotToDTO(s: {
   activeResearchTarget: Research | undefined;
+  currentResearchRunId?: string | undefined;
   activeBranch: { readonly id: string } | undefined;
   recentEvidence: readonly Evidence[];
   currentClaims: readonly Claim[];
@@ -851,6 +868,8 @@ export function continuitySnapshotToDTO(s: {
 }): ContinuitySnapshotDTO {
   return {
     ...(s.activeResearchTarget !== undefined ? { activeResearch: researchToDTO(s.activeResearchTarget) } : {}),
+    // CURRENT POINTER: the authoritative research run every dependent panel binds to.
+    ...(s.currentResearchRunId !== undefined ? { currentResearchRunId: s.currentResearchRunId } : {}),
     ...(s.activeBranch !== undefined ? { activeBranchRef: s.activeBranch.id } : {}),
     recentEvidence: s.recentEvidence.map(evidenceToDTO),
     currentClaims: s.currentClaims.map(claimToDTO),
@@ -931,7 +950,11 @@ export interface AnswerDTO {
   readonly confidence: ResponseConfidenceDTO;
   readonly keyUncertainty: string;
   readonly implication: string;
-  /** Validated refs only (the LUI already drops invented citations). */
+  /**
+   * Object ids the answer is grounded in. FILTERED to the run's own evidence at the engine
+   * boundary (provenance contract): a cross-run or invented citation cannot survive into the
+   * record, so every id here belongs to the same research run as the answer.
+   */
   readonly citedObjectRefs: readonly string[];
 }
 
@@ -1060,6 +1083,12 @@ export interface ResearchResponseDTO {
   readonly researchDiagnostics?: ResearchDiagnosticsDTO;
   /** The research object created by this request, when research ran. */
   readonly researchRef?: string;
+  /**
+   * The authoritative research run for this response. Async integrity: a client compares this
+   * against its current run id and DISCARDS a response whose run differs, so a late
+   * completion from an earlier submission can never overwrite the current workspace.
+   */
+  readonly researchRunId?: string;
   readonly evidenceRefs: readonly string[];
   readonly judgmentRef?: string;
   /** Epistemic view of the evidence this request produced (classes preserved). */

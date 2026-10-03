@@ -274,7 +274,12 @@ export function registerRoutes(app: FastifyInstance, context: RouteContext): voi
     });
   });
 
-  app.get("/api/workspace", { handler: withErrors(async (req) => (await appForRequest(req)).continuity()) });
+  // READ FRESHNESS (research-integrity): the continuity snapshot is the client's CURRENT
+  // pointer (active research run, its evidence, its Current Judgment). Served from a warm
+  // instance's in-memory graph it could predate another instance's completed run, which is
+  // how the visible Current Judgment stayed on an older run after a refresh. Absorption runs
+  // first so every panel is resolved from the CURRENT run as persisted.
+  app.get("/api/workspace", { handler: withErrors(async (req) => (await appForRequest(req)).continuityFresh()) });
   // READ-ONLY storage audit (Phase E): byte-level breakdown of the persisted snapshot for the
   // storage runbook and compaction decisions. Mutates nothing; see docs/runbooks/blob-storage.md.
   app.get("/api/storage/audit", { handler: withErrors(async (req) => { requireAdmin(req); return (await appForRequest(req)).storageAudit(); }) });

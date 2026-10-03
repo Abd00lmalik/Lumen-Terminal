@@ -211,6 +211,7 @@ export async function reassessThesis(options: ReassessOptions): Promise<Reassess
       sourceRefs: e.sourceRefs,
     })),
     claims: [], hypotheses: [], limitations: [], contradictions: [],
+    runEvidenceRefs: options.newEvidence.map((e) => e.id),
   };
   const historyText = priorAssessments.length > 0
     ? priorAssessments.map((a) => `- [v${a.thesisVersion}] ${a.assessment} (confidence ${a.confidence}, quality ${a.researchQuality ?? "n/a"}): ${a.rationale.slice(0, 140)}`).join("\n")

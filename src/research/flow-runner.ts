@@ -48,6 +48,7 @@ import {
   type ResearchRequirement,
 } from "./requirements.js";
 import { buildResearchContext, renderResearchContext, type ResearchContext } from "./context.js";
+import { permittedCapabilities } from "../lui/capability-constraints.js";
 
 export const MAX_RESEARCH_ROUNDS = 3;
 /** Bounded concurrency for independent capability calls (M4 §32: no uncontrolled parallelism). */
@@ -239,6 +240,13 @@ export interface FlowRunnerOptions {
   readonly workspace: Workspace;
   readonly store: WorkspaceStore;
   readonly constraints?: readonly string[];
+  /**
+   * CAPABILITY ISOLATION: the trader's explicit capability boundary ("use
+   * CRYPTO_MARKET_DATA only"). A HARD boundary applied to the model's plan, the engine's
+   * capability floor and every gap-recovery round; provider fallback inside an allowed
+   * capability remains legal.
+   */
+  readonly capabilityConstraint?: { readonly allowed?: readonly string[]; readonly forbidden?: readonly string[] };
   readonly capabilityParams?: Readonly<Record<string, unknown>>;
   readonly maxRounds?: number;
   /**
@@ -344,11 +352,20 @@ export async function runFlow(
   let recoveryRoundsUsed = 0;
 
   for (let round = 1; round <= maxRounds; round += 1) {
-    const roundTasks: { objective: string; capabilities: readonly string[]; completion: string }[] = recoveryRoundCapabilities !== undefined
-      ? [{ objective: recoveryRoundObjective ?? objective, capabilities: [...recoveryRoundCapabilities], completion: "recover the uncovered research requirements" }]
-      : round === 1
-        ? [...plan.tasks.map((t) => ({ objective: t.objective, capabilities: t.capabilities, completion: t.completion }))]
-        : [...(rounds[rounds.length - 1]?.decision.nextTasks ?? [])];
+    const roundTasks: { objective: string; capabilities: readonly string[]; completion: string }[] = (
+      recoveryRoundCapabilities !== undefined
+        ? [{ objective: recoveryRoundObjective ?? objective, capabilities: [...recoveryRoundCapabilities], completion: "recover the uncovered research requirements" }]
+        : round === 1
+          ? [...plan.tasks.map((t) => ({ objective: t.objective, capabilities: t.capabilities, completion: t.completion }))]
+          : [...(rounds[rounds.length - 1]?.decision.nextTasks ?? [])]
+    )
+      // CAPABILITY ISOLATION: the trader's explicit boundary is a hard filter on every task
+      // set this runner executes — the model's plan, the engine's gap-recovery round, and any
+      // follow-up the decision model proposes. A capability outside an explicit allowlist
+      // cannot run here even when the plan asks for it; provider fallback inside an allowed
+      // capability is unaffected (the registry owns providers, this gate owns capabilities).
+      .map((t) => ({ ...t, capabilities: permittedCapabilities(t.capabilities, options.capabilityConstraint ?? {}) }))
+      .filter((t) => t.capabilities.length > 0);
 
     // CAPABILITY FLOOR: the flow runner does NOT add a floor — the model's plan is the
     // execution set. The floor belongs in the adaptive loop where the engine closes gaps the

@@ -41,6 +41,22 @@ import { runAdaptiveResearch, type AdaptiveLoopOutcome, MAX_RESEARCH_ROUNDS } fr
 import { progressEvent, type ProgressListener } from "../research/progress.js";
 import { buildResearchContext, renderResearchContext, type ResearchContext } from "../research/context.js";
 import { guardFlow, type FlowGuardResult } from "./flow-guard.js";
+import { capabilityConstraintOf } from "./capability-constraints.js";
+
+/**
+ * Canonical flows whose methodology is thesis-facing: the trader's own thesis is legitimate
+ * context for them and only for them.
+ */
+const THESIS_CONTEXT_FLOWS = new Set(["DOES_MY_THESIS_HOLD", "EVALUATE_WITH_MY_FRAMEWORK"]);
+/** Message-level phrasing that names the trader's own material explicitly. */
+const THESIS_CONTEXT_PHRASE =
+  /\b(my|our)\s+(thesis|view|position|setup|case|framework)\b|\baccording to (my|this|the following) framework\b|\bchallenge my\b/i;
+/**
+ * The flow recorded for a research request that resolved to NONE of the eight canonical
+ * methodologies. It is deliberately not one of them: an unidentified methodology must not be
+ * stored under a canonical flow's identity.
+ */
+const INDEPENDENT_RESEARCH_FLOW = "INDEPENDENT_RESEARCH";
 
 export { MAX_RESEARCH_ROUNDS };
 
@@ -377,6 +393,15 @@ export class Lui {
   private currentMessage: string | undefined;
   /** The deterministic flow guard's verdict for the CURRENT message (reset every handle()). */
   private flowGuard: FlowGuardResult | undefined;
+  /**
+   * THESIS-CONTEXT GATE (contamination defense): true only when the trader's thesis belongs
+   * in this request's research context — the thesis/framework canonical flows, or a message
+   * that explicitly names the thesis. Reset every handle(); an active thesis is never global
+   * context for an unrelated question.
+   */
+  private thesisContextRequired = false;
+  /** The explicit capability constraint for this message ("use CRYPTO_MARKET_DATA only"). */
+  private capabilityConstraint: { readonly allowed?: readonly string[]; readonly forbidden: readonly string[] } = { forbidden: [] };
 
   constructor(private readonly options: LuiOptions) {}
 
@@ -395,6 +420,10 @@ export class Lui {
     // question's target when the QUESTION ITSELF names it).
     this.currentMessage = userMessage;
     this.flowGuard = undefined;
+    // THESIS + CAPABILITY GATES are decided from the trader's OWN words before any model
+    // call, so they are inputs to the pipeline rather than a consequence of it.
+    this.thesisContextRequired = THESIS_CONTEXT_PHRASE.test(userMessage);
+    this.capabilityConstraint = capabilityConstraintOf(userMessage);
 
     // 1–2. INPUT NORMALIZATION + INTENT DETECTION (validated; model failure aborts honestly).
     progress?.(progressEvent("request_accepted", new Date(), "request accepted", { messageLength: userMessage.length }));
@@ -436,6 +465,9 @@ export class Lui {
       // any plan is built, so the wrong methodology never executes.
       const guarded = guardFlow({ message: userMessage, ...(target.flow !== undefined ? { classified: target.flow } : {}) });
       this.flowGuard = guarded;
+      // THESIS-CONTEXT GATE: a thesis-facing canonical flow earns thesis context even when
+      // the message does not use the word "thesis" (e.g. "does my position still work?").
+      if (THESIS_CONTEXT_FLOWS.has(guarded.flow ?? "")) this.thesisContextRequired = true;
       if (guarded.flow !== target.flow) {
         target = {
           ...target,
@@ -615,11 +647,14 @@ export class Lui {
           const flow = plan.steps.length === 1
             ? (guardHadSay ? this.flowGuard?.flow : (step.params["flow"] ?? target.flow))
             : (step.params["flow"] ?? target.flow);
+          // CANONICAL FLOW ISOLATION: the canonical flow is decided here, from the structured
+          // request/router, and is carried into the research record (see dispatchResearch).
+          // A generic fallback must never OVERWRITE it with another flow's identity.
           if (flow === "WHY_IT_HAPPENED" || flow === "WHAT_DOES_ALL_INFORMATION_SAY" || flow === "WHAT_COULD_AFFECT_IT" || flow === "DOES_MY_THESIS_HOLD" || flow === "EVALUATE_WITH_MY_FRAMEWORK" || flow === "HAS_THIS_HAPPENED_BEFORE") {
             await this.dispatchM4Flow(flow, step, result, origin, progress, deadlineMs);
             break;
           }
-          const research = await this.dispatchResearch(step, origin, progress, deadlineMs, target.asset);
+          const research = await this.dispatchResearch(step, origin, progress, deadlineMs, target.asset, flow);
           result.research = research.outcome;
           if (research.modelFailure !== undefined) result.modelFailure = research.modelFailure;
           break;
@@ -756,6 +791,9 @@ export class Lui {
         store: this.options.store,
         ...(asset !== undefined ? { asset } : {}),
         ...(constraints !== undefined ? { constraints } : {}),
+        ...(this.capabilityConstraint.allowed !== undefined || this.capabilityConstraint.forbidden.length > 0
+          ? { capabilityConstraint: this.capabilityConstraint }
+          : {}),
         ...(now !== undefined ? { now } : {}),
         ...(onProgress !== undefined ? { onProgress } : {}),
       });
@@ -771,6 +809,9 @@ export class Lui {
         ...(asset !== undefined ? { asset } : {}),
         ...(step.params["horizon"] !== undefined ? { horizon: step.params["horizon"] } : {}),
         ...(constraints !== undefined ? { constraints } : {}),
+        ...(this.capabilityConstraint.allowed !== undefined || this.capabilityConstraint.forbidden.length > 0
+          ? { capabilityConstraint: this.capabilityConstraint }
+          : {}),
         ...(now !== undefined ? { now } : {}),
         ...(onProgress !== undefined ? { onProgress } : {}),
       });
@@ -786,6 +827,9 @@ export class Lui {
         ...(step.params["thesisRef"] !== undefined ? { thesisRef: step.params["thesisRef"] } : {}),
         ...(asset !== undefined ? { asset } : {}),
         ...(constraints !== undefined ? { constraints } : {}),
+        ...(this.capabilityConstraint.allowed !== undefined || this.capabilityConstraint.forbidden.length > 0
+          ? { capabilityConstraint: this.capabilityConstraint }
+          : {}),
         ...(now !== undefined ? { now } : {}),
         ...(onProgress !== undefined ? { onProgress } : {}),
       });
@@ -800,6 +844,9 @@ export class Lui {
         store: this.options.store,
         ...(asset !== undefined ? { asset } : {}),
         ...(constraints !== undefined ? { constraints } : {}),
+        ...(this.capabilityConstraint.allowed !== undefined || this.capabilityConstraint.forbidden.length > 0
+          ? { capabilityConstraint: this.capabilityConstraint }
+          : {}),
         ...(now !== undefined ? { now } : {}),
         ...(deadlineMs !== undefined ? { deadlineMs } : {}),
         ...(onProgress !== undefined ? { onProgress } : {}),
@@ -816,6 +863,9 @@ export class Lui {
         ...(step.params["frameworkRef"] !== undefined ? { frameworkRef: step.params["frameworkRef"] } : {}),
         ...(asset !== undefined ? { target: asset } : {}),
         ...(constraints !== undefined ? { constraints } : {}),
+        ...(this.capabilityConstraint.allowed !== undefined || this.capabilityConstraint.forbidden.length > 0
+          ? { capabilityConstraint: this.capabilityConstraint }
+          : {}),
         ...(now !== undefined ? { now } : {}),
         ...(onProgress !== undefined ? { onProgress } : {}),
       });
@@ -830,6 +880,9 @@ export class Lui {
         store: this.options.store,
         ...(asset !== undefined ? { asset } : {}),
         ...(constraints !== undefined ? { constraints } : {}),
+        ...(this.capabilityConstraint.allowed !== undefined || this.capabilityConstraint.forbidden.length > 0
+          ? { capabilityConstraint: this.capabilityConstraint }
+          : {}),
         ...(now !== undefined ? { now } : {}),
         ...(onProgress !== undefined ? { onProgress } : {}),
       });
@@ -870,6 +923,7 @@ export class Lui {
     onProgress?: ProgressListener,
     deadlineMs?: number,
     resolvedAsset?: string,
+    resolvedFlow?: string,
   ): Promise<{ outcome: AdaptiveLoopOutcome; modelFailure?: ModelFailure }> {
     const workspace = this.options.workspace;
     const objective = step.params["objective"] ?? step.description;
@@ -884,8 +938,15 @@ export class Lui {
         ? resolvedAsset
         : undefined;
     const capabilityAsset = earnedCapabilityAsset(this.currentMessage, objective, step.params["asset"] ?? earnedResolvedAsset);
+    // CANONICAL FLOW ISOLATION: the research record carries the flow the request actually
+    // resolved to — never a default. The previous fallback stamped every generic research
+    // step "WHAT_DOES_ALL_INFORMATION_SAY", so Flow 1 ("what happened"), Flow 3 ("what could
+    // affect it") and Flow 7 requests were all PERSISTED as Flow 6 ("what does all the
+    // information say"). A request that resolves no canonical flow is recorded honestly as
+    // INDEPENDENT_RESEARCH rather than borrowing another flow's identity.
+    const canonicalFlow = resolvedFlow ?? step.params["flow"] ?? this.flowGuard?.flow ?? INDEPENDENT_RESEARCH_FLOW;
     const research = workspace.addResearch(
-      { objective, question: objective, flow: step.params["flow"] ?? "WHAT_DOES_ALL_INFORMATION_SAY" },
+      { objective, question: objective, flow: canonicalFlow },
       origin,
       this.options.now?.(),
     );
@@ -897,6 +958,9 @@ export class Lui {
         registry: this.options.registry,
         workspace,
         store: this.options.store,
+        ...(this.capabilityConstraint.allowed !== undefined || this.capabilityConstraint.forbidden.length > 0
+          ? { capabilityConstraint: this.capabilityConstraint }
+          : {}),
         constraints: step.params["constraints"] !== undefined ? step.params["constraints"].split(";").map((s) => s.trim()).filter((s) => s !== "") : [],
         capabilityParams: {
           // Same deterministic backstop as dispatchM4Flow: the resolved target, a canonical
@@ -1043,7 +1107,11 @@ export class Lui {
   }
 
   private async dispatchManageState(step: ActionPlan["steps"][number], result: LuiResult, origin: ProvenanceOrigin): Promise<void> {
-    const ctx = this.researchContext();
+    // MANAGE_STATE is a state-SELECTION surface, not a research one: it must see which theses
+    // exist in order to resolve WHICH one the trader means ("make the halving thesis active").
+    // The thesis gate applies to research context; it must not hide the workspace's own object
+    // inventory from the action that exists to select from it.
+    const ctx = this.researchContext({ includeThesis: true });
     try {
       const res = await this.options.provider.structured<string>({
         schemaName: "state.change_proposal",
@@ -1488,9 +1556,14 @@ export class Lui {
 
   // ----- helpers ----------------------------------------------------------------
 
-  private researchContext(opts: { researchRef?: string } = {}): ResearchContext {
+  private researchContext(opts: { researchRef?: string; includeThesis?: boolean; historical?: "none" | "reference" } = {}): ResearchContext {
     return buildResearchContext(this.options.workspace, {
       ...(opts.researchRef !== undefined ? { researchRef: opts.researchRef } : {}),
+      // THESIS GATE: the trader's thesis is research context only for thesis-facing work —
+      // the thesis/framework flows, or a request that explicitly names the thesis. An
+      // independent question must never inherit an unrelated active thesis.
+      ...(opts.includeThesis ?? this.thesisContextRequired ? { includeThesis: true } : {}),
+      ...(opts.historical !== undefined ? { historical: opts.historical } : {}),
     });
   }
 

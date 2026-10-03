@@ -65,6 +65,7 @@ import { progressEvent, type ProgressListener } from "./progress.js";
 import type { WorkspaceStore } from "../persistence/index.js";
 import type { ToolResult } from "../domain/tool-result.js";
 import { buildResearchContext, renderResearchContext, type ResearchContext } from "./context.js";
+import { capabilityPermitted, permittedCapabilities } from "../lui/capability-constraints.js";
 
 export const MAX_RESEARCH_ROUNDS = 3;
 
@@ -334,6 +335,15 @@ export interface AdaptiveLoopOptions {
   readonly store: WorkspaceStore;
   /** Trader constraints from the LUI (e.g. ["ignore social sentiment"]). */
   readonly constraints?: readonly string[];
+  /**
+   * CAPABILITY ISOLATION: the trader's explicit capability boundary ("use
+   * CRYPTO_MARKET_DATA only"). A HARD boundary, not a hint: the planner's capabilities, the
+   * engine's capability floor, the counterevidence floor and gap-recovery rounds are all
+   * filtered through it, so an unrelated capability cannot execute even when the engine
+   * thinks it would close a gap. Provider fallback INSIDE an allowed capability is
+   * unaffected — the registry owns providers, this gate owns capabilities.
+   */
+  readonly capabilityConstraint?: { readonly allowed?: readonly string[]; readonly forbidden?: readonly string[] };
   /** Fixed news-style capability params (asset etc.) merged into every capability call. */
   readonly capabilityParams?: Readonly<Record<string, unknown>>;
   readonly maxRounds?: number;
@@ -459,8 +469,21 @@ export async function runAdaptiveResearch(
    * schedule a guaranteed SCHEMA_ERROR (observed live on the macro-regime question).
    */
   const capabilityUsable = (cap: string): boolean =>
+    // CAPABILITY ISOLATION (hard boundary): the trader's explicit "X only" constraint is
+    // checked FIRST, before availability. An unavailable capability is dropped; a FORBIDDEN
+    // one must never run even though a provider could serve it.
+    capabilityPermitted(cap, options.capabilityConstraint ?? {}) &&
     options.registry.resolve(cap as Parameters<typeof options.registry.resolve>[0]).length > 0 &&
     (resolvedAsset !== undefined || !SUBJECT_REQUIRED_CAPABILITIES.includes(cap));
+  /**
+   * The plan's capabilities, filtered through the isolation gate. The model proposes
+   * capabilities; when the trader restricted them, the restriction is authoritative and the
+   * out-of-scope steps are dropped rather than executed.
+   */
+  const permittedTasks = (tasks: readonly { objective: string; capabilities: readonly string[]; completion: string }[]) =>
+    tasks
+      .map((t) => ({ ...t, capabilities: permittedCapabilities(t.capabilities, options.capabilityConstraint ?? {}) }))
+      .filter((t) => t.capabilities.length > 0);
   // CHALLENGE ROUTE: when this deployment registers no disconfirmation-capable provider, the
   // challenge requirement becomes UNAVAILABLE (recorded blocker) instead of an unresolvable gap.
   requirements = markUnattemptableChallenges(requirements, capabilityUsable);
@@ -471,11 +494,13 @@ export async function runAdaptiveResearch(
     // Determine this round's tasks: round 1 = the plan; a gap-recovery round = the engine's
     // recovery capabilities; later rounds = the decision's nextTasks.
     const roundTasks: { objective: string; capabilities: readonly string[]; completion: string }[] =
-      recoveryRoundCapabilities !== undefined
-        ? [{ objective: recoveryRoundObjective ?? objective, capabilities: [...recoveryRoundCapabilities], completion: "recover the uncovered research requirements" }]
-        : round === 1
-          ? plan.tasks.map((t) => ({ objective: t.objective, capabilities: t.capabilities, completion: t.completion }))
-          : [...(rounds[rounds.length - 1]?.decision.nextTasks ?? [])];
+      permittedTasks(
+        recoveryRoundCapabilities !== undefined
+          ? [{ objective: recoveryRoundObjective ?? objective, capabilities: [...recoveryRoundCapabilities], completion: "recover the uncovered research requirements" }]
+          : round === 1
+            ? plan.tasks.map((t) => ({ objective: t.objective, capabilities: t.capabilities, completion: t.completion }))
+            : [...(rounds[rounds.length - 1]?.decision.nextTasks ?? [])],
+      );
     // CAPABILITY FLOOR (engine-owned, round 1): the model proposes capabilities, but it may
     // not omit one that an engine-derived CRITICAL requirement depends on. Live failure this
     // prevents: a yields question whose plan named no direct market capability, so no yield

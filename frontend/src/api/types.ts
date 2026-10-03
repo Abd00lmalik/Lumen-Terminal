@@ -33,6 +33,8 @@ export interface ProvenanceEntryDto {
 
 export interface EvidenceDto {
   readonly ref: string;
+  /** The research run that retrieved this observation; the client never infers ownership. */
+  readonly researchRunId?: string;
   readonly observation: string;
   readonly evidenceType: string;
   readonly evidenceClass: EvidenceClassDto;
@@ -76,6 +78,8 @@ export interface HypothesisDto {
 
 export interface JudgmentDto {
   readonly ref: string;
+  /** The research run that produced this judgment; Current Judgment is resolved through it. */
+  readonly researchRunId: string;
   readonly statement: string;
   readonly confidence?: ConfidenceDto;
   readonly uncertainty: readonly string[];
@@ -461,7 +465,10 @@ export interface MonitorDto {
 
 export interface ContinuitySnapshotDto {
   readonly activeResearch?: ResearchDto;
+  /** The authoritative CURRENT research run every panel in this snapshot belongs to. */
+  readonly currentResearchRunId?: string;
   readonly activeBranchRef?: string;
+  /** The CURRENT research run's evidence (never another run's observations). */
   readonly recentEvidence: readonly EvidenceDto[];
   readonly currentClaims: readonly ClaimDto[];
   readonly currentHypotheses: readonly HypothesisDto[];
@@ -568,6 +575,12 @@ export interface ResearchResponseDto {
   /** Material research gaps (engine-assessed); the only user-facing coverage items. */
   readonly researchGaps?: readonly string[];
   readonly researchRef?: string;
+  /**
+   * The research run this response belongs to. ASYNC INTEGRITY: a response whose
+   * researchRunId is not the client's current run is stale and must not be rendered or
+   * saved as CURRENT.
+   */
+  readonly researchRunId?: string;
   readonly evidenceRefs: readonly string[];
   readonly judgmentRef?: string;
   readonly evidence: readonly EvidenceDto[];

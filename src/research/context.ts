@@ -22,6 +22,13 @@ import { matchRequirement, domainsOfRequirement, isDiscriminatingRequirement, co
 /** One context item; every item keeps its architecture object type and epistemic class. */
 export interface ContextItem {
   readonly ref: string;
+  /**
+   * TRUE when the object belongs to an EARLIER run and was admitted as an explicit
+   * reference (historical analogue research, analysis over stored material). Reference items
+   * are labeled as such, are excluded from `runEvidenceRefs`, and can never satisfy a
+   * requirement or stand in for current-run evidence.
+   */
+  readonly historical?: boolean;
   readonly kind:
     | "observation"
     | "quantitative_observation"
@@ -82,6 +89,13 @@ export interface ResearchContext {
   readonly scope?: "single_research" | "workspace_archive";
   /** Evidence, epistemically bucketed; the model receives classes, not a "facts" list. */
   readonly items: readonly ContextItem[];
+  /**
+   * PROVENANCE CONTRACT: the authoritative evidence set of THIS run — the only objects a
+   * current answer and its judgment may cite. Answer and judgment resolvers filter against
+   * this set; `items` may contain more (explicitly-labeled reference objects), but never
+   * unlabeled evidence from another run.
+   */
+  readonly runEvidenceRefs: readonly string[];
   readonly claims: readonly { ref: string; statement: string; status: string }[];
   readonly hypotheses: readonly { ref: string; statement: string; status: string; ranking: number }[];
   readonly judgment?: { ref: string; statement: string; confidence?: string; uncertainty: readonly string[] };
@@ -286,6 +300,23 @@ export function buildResearchContext(
      *  like thesis hold / framework evaluation collect evidence against their own objective, which
      *  legitimately does not match the upstream requirements). */
     readonly continuationFlow?: boolean;
+    /**
+     * HISTORICAL REFERENCE (explicit relationship law): "none" (the default) admits ONLY this
+     * run's evidence. "reference" additionally admits relevant evidence from earlier runs as
+     * clearly-labeled historical context — the caller must have determined that the request
+     * explicitly asks for a historical/reference relationship (Flow 5 analogue research,
+     * ANALYZE over stored material). Reference objects are never allowed to satisfy a
+     * requirement, never enter the citable current-run evidence set, and never silently
+     * replace a current observation.
+     */
+    readonly historical?: "none" | "reference";
+    /**
+     * THESIS CONTEXT GATE: the trader's thesis enters research context only when the canonical
+     * flow requires it (Flow 4 thesis-hold, Flow 8 framework evaluation) or the request
+     * explicitly names the thesis. An independent question must not inherit an unrelated
+     * active thesis.
+     */
+    readonly includeThesis?: boolean;
   } = {},
 ): ResearchContext {
   const items: ContextItem[] = [];
@@ -310,11 +341,19 @@ export function buildResearchContext(
   const gateTerms = options.subjectTerms !== undefined && options.subjectTerms.length > 0
     ? new Set(options.subjectTerms.map((t) => t.toUpperCase()))
     : undefined;
-  const runEvidenceRefs = new Set<string>(
-    options.researchRef !== undefined
-      ? (workspace.getResearch(options.researchRef)?.evidenceRefs ?? [])
-      : [],
-  );
+  const runResearch = options.researchRef !== undefined ? workspace.getResearch(options.researchRef) : undefined;
+  // RUN SCOPE (provenance contract): the candidate pool for a current run is THIS run's
+  // evidence. Evidence from other runs is not merely filtered by relevance — it is a
+  // different set, admitted only as an explicitly-requested historical reference and then
+  // labeled. The previous pool was the whole workspace with a lexical gate, which is how a
+  // fresh 09:xx observation was presented next to a 07:xx observation from an earlier run
+  // and the answer cited the older one.
+  const candidateEvidence: readonly Evidence[] =
+    runResearch !== undefined
+      ? workspace.evidenceForRun(runResearch)
+      : workspace.listEvidence(); // no run scope (explicit workspace-archive analysis)
+  const runEvidenceRefs = new Set<string>(candidateEvidence.map((e) => e.id));
+  const allowHistorical = options.historical === "reference";
   const archiveBackground = { count: 0, sampleRefs: [] as string[] };
   let rejectedWrongTarget = 0;
   // SYNTHESIS-ADMISSION LAW (VALID ≠ RELEVANT, second line of defense): when the engine
@@ -352,9 +391,11 @@ export function buildResearchContext(
     })
     .filter((r) => isDiscriminatingRequirement(r));
   let rejectedNoRequirement = 0;
-  for (const e of workspace.listEvidence()) {
+  for (const e of candidateEvidence) {
+    const isRunEvidence = runEvidenceRefs.has(e.id);
     const item: ContextItem = {
       ref: e.id,
+      ...(isRunEvidence ? {} : { historical: true }),
       kind: e.evidenceClass === "PROXY_EVIDENCE" ? "proxy_observation" : contextKindForEvidence(e),
       text: evidenceText(e),
       evidenceClass: e.evidenceClass,
@@ -363,7 +404,6 @@ export function buildResearchContext(
       ...(e.proxyBasis !== undefined ? { proxyBasis: e.proxyBasis } : {}),
       ...(e.timestamp !== undefined ? { timestamp: e.timestamp } : {}),
     };
-    const isRunEvidence = runEvidenceRefs.has(e.id);
     // Tier 1.5 (subject gate, run evidence): when the question's subject resolved, even
     // THIS run's evidence must concern that subject to enter synthesis. Provider results
     // are not evidence of the question's subject merely because the run requested them.
@@ -414,30 +454,59 @@ export function buildResearchContext(
       rejectedNoRequirement += 1;
       continue;
     }
-    // Tier 2 (archive gate): evidence from OTHER runs is scoped by SUBJECT when the
-    // question's subject resolved, and by key terms otherwise. Subject scoping is the
-    // target-relevance law applied to the archive: a DeFi/TVL evidence object from an
-    // earlier crypto run must not enter an oil question merely because it shares a generic
-    // token ("this", "driving") with the question text — the live contamination where the
-    // oil synthesis cited ev_000326 (a DeFi run's evidence) as an oil-phase observation.
-    const archiveOk =
-      gateTerms !== undefined
-        ? isSubjectRelevant(item.text, gateTerms) ||
-          (e.subject !== undefined && isSubjectRelevant(e.subject, gateTerms))
-        : relevantTerms === undefined || isRelevant(item.text, relevantTerms);
-    if (!isRunEvidence && !archiveOk) {
-      archiveBackground.count += 1;
-      if (archiveBackground.sampleRefs.length < 5) archiveBackground.sampleRefs.push(e.id);
-      continue;
+    // Tier 2 (ownership gate): evidence from ANOTHER run is excluded outright unless the
+    // caller explicitly requested a historical/reference relationship, in which case it is
+    // admitted only when it is topically relevant AND it is labeled as historical. It can
+    // never be presented as current research and never enters the citable evidence set.
+    if (!isRunEvidence) {
+      // No run scope at all (explicit workspace-archive analysis): the whole archive IS the
+      // requested material, so it stays available — labeled as archive scope by the renderer.
+      if (runResearch === undefined) {
+        items.push(item);
+        continue;
+      }
+      const relevant =
+        gateTerms !== undefined
+          ? isSubjectRelevant(item.text, gateTerms) ||
+            (e.subject !== undefined && isSubjectRelevant(e.subject, gateTerms))
+          : relevantTerms === undefined || isRelevant(item.text, relevantTerms);
+      if (!allowHistorical || !relevant) {
+        archiveBackground.count += 1;
+        if (archiveBackground.sampleRefs.length < 5) archiveBackground.sampleRefs.push(e.id);
+        continue;
+      }
     }
     items.push(item);
   }
 
-  // --- claims ---
-  const claims = workspace.listClaims().map((c: Claim) => ({ ref: c.id, statement: c.statement, status: c.status }));
+  // Exclusion audit (never silent): the run-boundary line reports how many evidence objects in
+  // the workspace are NOT this run's, so a reader can see that the context is bounded rather
+  // than accidentally narrow. Admission itself was decided by ownership, not relevance.
+  if (runResearch !== undefined && archiveBackground.count === 0) {
+    const foreign = workspace.listEvidence().filter((e) => !runEvidenceRefs.has(e.id));
+    if (foreign.length > 0) {
+      archiveBackground.count = foreign.length;
+      archiveBackground.sampleRefs = foreign.slice(0, 5).map((e) => e.id);
+    }
+  }
 
-  // --- hypotheses ---
-  const hypotheses = workspace.listHypotheses().map((h: Hypothesis) => ({
+  // --- claims: THIS RUN's claims (a global claim list leaked earlier runs' propositions) ---
+  const runClaimRefs = runResearch === undefined
+    ? undefined
+    : new Set(runResearch.claimRefs);
+  const claims = workspace
+    .listClaims()
+    .filter((c: Claim) => runClaimRefs === undefined || runClaimRefs.has(c.id))
+    .map((c: Claim) => ({ ref: c.id, statement: c.statement, status: c.status }));
+
+  // --- hypotheses: THIS RUN's hypotheses ---
+  const runHypothesisRefs = runResearch === undefined
+    ? undefined
+    : new Set(runResearch.hypothesisRefs);
+  const hypotheses = workspace
+    .listHypotheses()
+    .filter((h: Hypothesis) => runHypothesisRefs === undefined || runHypothesisRefs.has(h.id))
+    .map((h: Hypothesis) => ({
     ref: h.id,
     statement: h.statement,
     status: h.status,
@@ -492,7 +561,11 @@ export function buildResearchContext(
   }
 
   // --- thesis: presented as the trader's own position, never the system's ---
-  const activeThesis = workspace.getActiveThesis();
+  // THESIS GATE (contamination defense): the existence of an active thesis must not make it
+  // context for an unrelated question ("what is Bitcoin's spot price?" must not be answered
+  // through an Ethereum thesis). Thesis state enters research context only when the canonical
+  // flow requires it or the request explicitly names the thesis.
+  const activeThesis = options.includeThesis === true ? workspace.getActiveThesis() : undefined;
   const thesis: ResearchContext["thesis"] = activeThesis !== undefined
     ? {
         ref: activeThesis.id,
@@ -504,13 +577,17 @@ export function buildResearchContext(
       }
     : undefined;
   // M6 (audit D1): the theses inventory; the model cannot resolve "make the halving thesis
-  // active" without knowing which theses exist. The currently-active one is flagged.
-  const activeId = workspace.getActiveThesis()?.id;
-  const theses: ResearchContext["theses"] = workspace
-    .listTheses()
-    .filter((t) => t.status !== "ARCHIVED" && t.status !== "SUPERSEDED")
-    .slice(0, 20)
-    .map((t) => ({ ref: t.id, statement: t.statement, status: t.status, active: t.id === activeId }));
+  // active" without knowing which theses exist. The currently-active one is flagged. The
+  // inventory carries thesis STATEMENTS, so it is gated by the same thesis rule: an unrelated
+  // question must not be handed the trader's other positions.
+  const activeId = activeThesis?.id;
+  const theses: ResearchContext["theses"] = options.includeThesis === true
+    ? workspace
+        .listTheses()
+        .filter((t) => t.status !== "ARCHIVED" && t.status !== "SUPERSEDED")
+        .slice(0, 20)
+        .map((t) => ({ ref: t.id, statement: t.statement, status: t.status, active: t.id === activeId }))
+    : undefined;
 
   const research = researchRef !== undefined ? workspace.getResearch(researchRef) : undefined;
   // Provenance of the context itself: without a researchRef the items below are the
@@ -528,13 +605,14 @@ export function buildResearchContext(
     ...(rejectedNoRequirement > 0 ? { rejectedNoRequirement } : {}),
     ...(options.requirements !== undefined && options.requirements.length > 0 ? { requirementCoverage: renderRequirementCoverage(options.requirements) } : {}),
     items,
+    runEvidenceRefs: [...runEvidenceRefs],
     claims,
     hypotheses,
     ...(judgment !== undefined ? { judgment } : {}),
     limitations,
     contradictions,
     ...(thesis !== undefined ? { thesis } : {}),
-    ...(theses.length > 0 ? { theses } : {}),
+    ...(theses !== undefined && theses.length > 0 ? { theses } : {}),
   };
 }
 
@@ -605,7 +683,11 @@ export function renderResearchContext(ctx: ResearchContext): string {
     lines.push(`REQUIREMENT GATE: ${ctx.rejectedNoRequirement} item(s) collected during THIS run satisfy none of the question's requirements and are EXCLUDED from synthesis. A provider returning data during this run does not make that data evidence for this question.`);
   }
   if (ctx.archiveBackground !== undefined) {
-    lines.push(`RELEVANCE GATE: ${ctx.archiveBackground.count} archived evidence object(s) from unrelated past questions are EXCLUDED from this context (sample: ${ctx.archiveBackground.sampleRefs.join(", ")}). If this question needs them, research the question directly; do not treat the exclusion as evidence of absence.`);
+    lines.push(`RUN BOUNDARY: ${ctx.archiveBackground.count} evidence object(s) belonging to OTHER research runs are EXCLUDED from this context (sample: ${ctx.archiveBackground.sampleRefs.join(", ")}). Evidence from a previous run can never answer the current question unless the request explicitly asks for a historical comparison, and then it is labeled HISTORICAL REFERENCE.`);
+  }
+  const runEvidenceRefs = ctx.runEvidenceRefs ?? [];
+  if (runEvidenceRefs.length > 0) {
+    lines.push(`CURRENT RUN EVIDENCE (the only objects a current conclusion may cite): ${runEvidenceRefs.join(", ")}`);
   }
   if (ctx.objective !== undefined) lines.push(`RESEARCH OBJECTIVE: ${ctx.objective}`);
   if (ctx.requirementCoverage !== undefined) lines.push(ctx.requirementCoverage);
@@ -623,7 +705,8 @@ export function renderResearchContext(ctx: ResearchContext): string {
       const freshness = item.freshness !== undefined ? ` [${item.freshness}]` : "";
       const proxy = item.proxyBasis !== undefined ? ` (proxy: ${item.proxyBasis})` : "";
       const ts = item.timestamp !== undefined ? ` @${item.timestamp}` : "";
-      lines.push(`    ${item.ref}: ${item.text.slice(0, 300)}${freshness}${proxy}${ts}`);
+      const historical = item.historical === true ? " [HISTORICAL REFERENCE - another run; never cite it as a current observation]" : "";
+      lines.push(`    ${item.ref}: ${item.text.slice(0, 300)}${freshness}${proxy}${ts}${historical}`);
     }
     if (list.length > 40) lines.push(`    … ${list.length - 40} more (${list.map((i) => i.ref).slice(40).join(", ")})`);
   }

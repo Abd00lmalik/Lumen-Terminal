@@ -108,6 +108,17 @@ export interface Evidence {
    * underlying report, not independent corroboration.
    */
   readonly duplicateContent?: boolean;
+  /**
+   * RUN OWNERSHIP (provenance contract): the research object whose run retrieved this
+   * observation. This is the AUTHORITATIVE relational owner — never inferred from a timestamp,
+   * an id's numeric prefix, a capability name, or a source. Undefined only for evidence that
+   * was never attached to a run (legacy records, tests, direct domain construction).
+   *
+   * Immutable once set: a later retrieval creates a NEW evidence record, it never re-parents
+   * or overwrites an existing one. Answers, judgments and traceability are validated against
+   * this field, so a run can only ever consume evidence it actually retrieved.
+   */
+  readonly researchRef?: string;
   readonly provenance: Provenance;
 }
 
@@ -123,6 +134,8 @@ export function createEvidence(
     freshness?: Freshness;
     proxyBasis?: string;
     toolResultRef?: string;
+    /** Owning research object (see Evidence.researchRef); stamped by the workspace boundary. */
+    researchRef?: string;
     subject?: string;
     sourceProvider?: string;
     sourceType?: "PRIMARY" | "SECONDARY" | "COMMUNITY" | "ANALYSIS";
@@ -152,6 +165,7 @@ export function createEvidence(
     ...(input.sourceType !== undefined ? { sourceType: input.sourceType } : {}),
     ...(input.duplicateContent !== undefined ? { duplicateContent: input.duplicateContent } : {}),
     ...(input.subject !== undefined ? { subject: input.subject } : {}),
+    ...(input.researchRef !== undefined ? { researchRef: input.researchRef } : {}),
     provenance: createProvenance(origin, `evidence classified as ${input.evidenceClass}`, at),
   });
 }
@@ -280,6 +294,13 @@ export interface JudgmentBasis {
 export interface Judgment {
   readonly id: string;
   readonly statement: string;
+  /**
+   * RUN OWNERSHIP (provenance contract): the research object whose run produced this
+   * judgment. Stamped at creation and immutable — a judgment may never be re-parented to
+   * another run, and Current Judgment is resolved through this field rather than through a
+   * global "latest judgment" query. A judgment without an owner can never become current.
+   */
+  readonly researchRef: string;
   readonly basis: JudgmentBasis;
   readonly confidence?: "HIGH" | "MODERATE" | "LOW";
   readonly uncertainty: readonly string[];
@@ -292,6 +313,8 @@ export interface Judgment {
 export function createJudgment(
   input: {
     statement: string;
+    /** Owning research object (see Judgment.researchRef). Required: an unowned judgment is not a conclusion of anything. */
+    researchRef: string;
     basis: JudgmentBasis;
     confidence?: "HIGH" | "MODERATE" | "LOW";
     uncertainty?: readonly string[];
@@ -304,6 +327,7 @@ export function createJudgment(
   return Object.freeze({
     id: newId(idPrefixes.judgment),
     statement: input.statement,
+    researchRef: input.researchRef,
     basis: input.basis,
     ...(input.confidence !== undefined ? { confidence: input.confidence } : {}),
     uncertainty: Object.freeze([...(input.uncertainty ?? [])]),

@@ -444,7 +444,7 @@ export function buildRequirements(seeds: readonly RequirementSeed[]): readonly R
 }
 
 export type QuestionType =
-  | "COMPARISON" | "CAUSAL" | "EVENT" | "MACRO_REGIME" | "THESIS" | "FALSIFICATION" | "HISTORICAL" | "SYNTHESIS";
+  | "COMPARISON" | "CAUSAL" | "EVENT" | "MACRO_REGIME" | "THESIS" | "FALSIFICATION" | "HISTORICAL" | "OBSERVATION" | "SYNTHESIS";
 
 /**
  * The question's decision type, read from its own wording. Deterministic and generic: these
@@ -490,6 +490,13 @@ export function subjectClassOfKind(kind: string | undefined): SubjectMarketClass
 export function questionTypeOf(question: string): QuestionType {
   const q = question.toLowerCase();
   if (/\bprove\b.*\bwrong\b|\binvalidate\b|\bfalsif\w*|\bwhat would change\b|\bdisconfirm\w*/.test(q)) return "FALSIFICATION";
+  // RAW OBSERVATION (question-type integrity): "what is Bitcoin's current spot price?",
+  // "retrieve one fresh observation", "what is the latest quote" ask for a measurement, not
+  // for a conclusion. This type exists because the classifier previously fell through to the
+  // catch-all SYNTHESIS, which made every market-data retrieval acquire the analytic
+  // dimensions — a counterevidence requirement, a FALSIFICATION round, thesis implications —
+  // that the request never asked for.
+  if (/\b(spot price|current price|price (?:right )?now|latest price|current (?:quote|spot|price|value|level)|what(?:'s| is) the (?:price|quote|spot price)|retrieve|fetch|pull|observe|observation|quote|reading)\b/.test(q)) return "OBSERVATION";
   if (/\bhas (this|it|that|the .*? setup)\b.*\bhappened\b|\bhistor\w*|\bsimilar setup\b|\bhappened before\b|\banalog\w*|\bcomparable episodes?\b/.test(q)) return "HISTORICAL";
   if (/\bmy thesis\b|\bthesis\b|\bmy (view|framework|position|read|call)\b|\baccording to my\b|\bdoes (this|the) (hold|still hold)\b/.test(q)) return "THESIS";
   if (/\bcompare\w*|\bcompared (with|to)\b|\bversus\b|\bvs\.?\b|\bweek over week\b|\bweek[- ]over[- ]week\b|\bmonth over month\b|\bbetter than\b|\bperformance (vs|versus)\b/.test(q)) return "COMPARISON";
@@ -497,6 +504,20 @@ export function questionTypeOf(question: string): QuestionType {
   if (/\bmacro\b|\brisk assets\b|\brisk[- ]on\b|\brisk appetite\b|\bregime\b|\bconditions?\b|\bfinancial conditions\b|\bliquidity\b/.test(q)) return "MACRO_REGIME";
   if (/\bdriv\w*|\bdriving\b|\bwhy\b|\bwhat happened\b|\bwhat(?:'s| is|s) (behind|pushing|pressuring|moving)\b|\bpressur\w*|\bcaus\w*|\bexplain\w*|\b(?:is|are|was|were)\b[^.?!]{0,60}\baffect\w*\b/.test(q)) return "CAUSAL";
   return "SYNTHESIS";
+}
+
+/**
+ * Does THIS question type ask for a conclusion to be challenged?
+ *
+ * A raw observation ("what is Bitcoin's current spot price?") and a historical analogue
+ * ("has this happened before?") do NOT: there is no leading conclusion to weaken, so a
+ * counterevidence requirement is scope contamination, not rigor. Causal, comparison,
+ * thesis and falsification questions DO earn one.
+ */
+export function challengeEarnedBy(questionType: QuestionType): boolean {
+  // A raw measurement has no leading conclusion to weaken, so it earns no challenge
+  // dimension. Every analytic type keeps its counterevidence requirement.
+  return questionType !== "OBSERVATION";
 }
 
 /**
@@ -678,18 +699,45 @@ const ENGINE_REQUIRED: Readonly<Record<QuestionType, readonly EngineRequirementS
     },
   ],
   SYNTHESIS: [],
+  /**
+   * RAW OBSERVATION: the single dimension the request actually asks for — the current
+   * measurement itself. It carries no counterevidence row (there is no conclusion to weaken),
+   * no thesis dimension, and no historical row.
+   */
+  OBSERVATION: [
+    {
+      description: (s) => `the current observed value or level for ${s} (a fresh measurement, not an interpretation)`,
+      role: "CORE", importance: "CRITICAL", timeSensitivity: "CURRENT",
+      evidenceClasses: ["PRICE", "QUOTE", "MARKET_DATA", "OHLCV", "RAW_DATA", "OBSERVATION"],
+      covers: /current|spot|quote|observation|reading|level|value/i,
+    },
+  ],
 };
 
 /**
  * Complete the ledger against the question's decision type: every missing engine-required
- * dimension is ADDED (never downgraded, never silently dropped), and every question gets a
- * CHALLENGE requirement so disconfirmation cannot be skipped. Returns the ledger in a stable
- * order: model requirements first, then engine-added dimensions.
+ * dimension is ADDED (never downgraded, never silently dropped), and every ANALYTIC question
+ * gets a CHALLENGE requirement so disconfirmation cannot be skipped. A raw observation request
+ * gets its measurement dimension only. Returns the ledger in a stable order: model
+ * requirements first, then engine-added dimensions.
  */
 export function completeRequirements(
   question: string,
   requirements: readonly ResearchRequirement[],
-  opts: { readonly subject?: string; readonly marketClass?: SubjectMarketClass } = {},
+  opts: {
+    readonly subject?: string;
+    readonly marketClass?: SubjectMarketClass;
+    /**
+     * CHALLENGE SCOPE (question-type integrity): disconfirmation is required for a question
+     * that ASKS for a conclusion to be tested (falsification, thesis hold, causal explanation,
+     * comparison, synthesis of a view) and must NOT be injected into a raw observation or
+     * historical-analogue request. It previously attached a CRITICAL counterevidence row to
+     * EVERY question, which is what made "retrieve one fresh Bitcoin spot-price observation"
+     * acquire falsification requirements and a FALSIFICATION round. Defaults to the earned
+     * rule; pass an explicit boolean only when the caller knows better.
+     */
+    readonly challengeRequired?: boolean;
+  } = {},
 ): readonly ResearchRequirement[] {
   const subject = (opts.subject ?? "the subject").trim();
   const marketClass = opts.marketClass ?? "UNKNOWN";
@@ -697,14 +745,16 @@ export function completeRequirements(
   const specs: EngineRequirementSpec[] = [...ENGINE_REQUIRED[questionType]].filter(
     (spec) => spec.markets === undefined || spec.markets.includes(marketClass),
   );
-  // CHALLENGE IS ALWAYS REQUIRED for a completed judgment (question type adds its own when it
-  // has a more specific one).
-  specs.push({
-    description: () => "evidence that weakens or contradicts the leading conclusion (counterevidence)",
-    role: "CHALLENGE", importance: "CRITICAL", timeSensitivity: "CURRENT",
-    evidenceClasses: ["COUNTEREVIDENCE", "DISCONFIRMING", "RISK", "NEWS"],
-    covers: /contradict|weaken|oppos|counter.?evidence|disconfirm|falsif|downside|against/i,
-  });
+  // CHALLENGE is required only where the question asks for a conclusion to be tested.
+  const challengeRequired = opts.challengeRequired ?? challengeEarnedBy(questionType);
+  if (challengeRequired) {
+    specs.push({
+      description: () => "evidence that weakens or contradicts the leading conclusion (counterevidence)",
+      role: "CHALLENGE", importance: "CRITICAL", timeSensitivity: "CURRENT",
+      evidenceClasses: ["COUNTEREVIDENCE", "DISCONFIRMING", "RISK", "NEWS"],
+      covers: /contradict|weaken|oppos|counter.?evidence|disconfirm|falsif|downside|against/i,
+    });
+  }
 
   const out: ResearchRequirement[] = [...requirements];
   for (const spec of specs) {

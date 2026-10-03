@@ -324,10 +324,11 @@ describe("declared subject semantics (target-relevance law)", () => {
     expect(ctx.rejectedWrongTarget).toBe(1);
   });
 
-  it("archive evidence is scoped by SUBJECT, not by generic question words", () => {
+  it("another run's evidence is excluded outright, whatever its wording", () => {
     // Live failure: an oil run's synthesis cited ev_000326 — a DeFi/TVL observation from an
     // earlier crypto run — because the archive tier matched generic tokens ("this",
-    // "driving") in headline prose. Archive reuse is subject-scoped, not stopword-scoped.
+    // "driving") in headline prose. Run ownership now decides admission, not word overlap:
+    // another run's evidence is never a candidate for this run's synthesis at all.
     const ws = new Workspace();
     const defi = ws.addResearch({ objective: "defi tvl", question: "Research the current total value locked (TVL) in decentralized finance (DeFi).", flow: "WHAT_DID_YOU_FIND" }, origin);
     ws.transitionResearch(defi.id, "ACTIVE", origin, "activated");
@@ -340,7 +341,7 @@ describe("declared subject semantics (target-relevance law)", () => {
 
     const oil = ws.addResearch({ objective: "oil drivers", question: "What is driving oil prices this week?", flow: "WHAT_COULD_AFFECT_IT" }, origin);
     ws.transitionResearch(oil.id, "ACTIVE", origin, "activated");
-    ingest(ws, oil.id, JSON.stringify({ title: "Crude oil slips as OPEC+ weighs output", symbol: "CL=F", publisher: "Reuters" }));
+    const oilId = ingest(ws, oil.id, JSON.stringify({ title: "Crude oil slips as OPEC+ weighs output", symbol: "CL=F", publisher: "Reuters" }));
 
     const ctx = buildResearchContext(ws, {
       researchRef: oil.id,
@@ -349,6 +350,8 @@ describe("declared subject semantics (target-relevance law)", () => {
     });
     expect(ctx.items.some((i) => i.ref === staleId)).toBe(false);
     expect(ctx.items.some((i) => i.text.includes("DeFi"))).toBe(false);
-    expect(ctx.archiveBackground?.count).toBe(1);
+    // The foreign observation is not even a candidate: the context is the run's own evidence.
+    expect(ctx.runEvidenceRefs).toEqual([oilId]);
+    expect(ctx.items.every((i) => i.ref === oilId)).toBe(true);
   });
 });

@@ -33,7 +33,16 @@ export function currentRun(): ResearchRun | undefined {
   return active;
 }
 
-/** Clear the context; safe to call in a finally even when no run was begun. */
-export function endRun(): void {
+/**
+ * Clear the context; safe to call in a finally even when no run was begun.
+ *
+ * RACE SAFETY (async integrity): the clear is SCOPED to the run that began it. Two
+ * overlapping submissions in one process would otherwise let the first request's `finally`
+ * clear the SECOND request's active run, so every Research object the second run creates
+ * after that moment would be stamped with no run id at all — an ungroupable, unowned object.
+ * Ending a run that is no longer the active one is a no-op.
+ */
+export function endRun(runId?: string): void {
+  if (runId !== undefined && active !== undefined && active.runId !== runId) return;
   active = undefined;
 }

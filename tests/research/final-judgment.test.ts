@@ -52,6 +52,7 @@ function scriptedProvider(raws: string[]): ModelProvider {
 const ctx: ResearchContext = {
   scope: "run",
   items: [{ ref: "ev_1", kind: "evidence", text: "The 10-year Treasury yield is 4.998 percent, a headwind for equity valuations.", freshness: "CURRENT" }],
+  runEvidenceRefs: ["ev_1"],
   claims: [],
   hypotheses: [],
   limitations: [],

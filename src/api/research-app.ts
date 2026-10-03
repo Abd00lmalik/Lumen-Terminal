@@ -30,6 +30,7 @@ import {
   thesisToDTO, thesisAssessmentToDTO, artifactToDTO, memoryToDTO,
   provenanceToDTO, toHistoricalAnalysisDTO, uiText, savedArtifactToDTO, savedArtifactToSummaryDTO,
   challengeToDTO, monitorToDTO, monitoringAssessmentToDTO, monitorNotificationToDTO,
+  type ContinuitySnapshotDTO,
   type ResearchResponseDTO, type ResearchDiagnosticsDTO, type RequirementDiagnosticDTO, type AnswerDTO, type EvidenceDTO, type JudgmentDTO,
   type ResearchRunSummaryDTO, type ResearchRunAggregateDTO, type ResearchRecordTierDTO,
   type SavedItemDTO, type SavedItemSummaryDTO, type SavedOriginDTO, type ChallengeRunDTO,
@@ -253,7 +254,8 @@ export class ResearchApp {
     // objects from many submissions, so a history entry could pair one submission's question
     // with another submission's answer. The per-invocation token makes a run id globally
     // unique; the readable prefix is kept for logs.
-    beginRun({ runId: `${newId(idPrefixes.run)}-${crypto.randomUUID().slice(0, 8)}`, userQuestion: submittedQuestion });
+    const runId = `${newId(idPrefixes.run)}-${crypto.randomUUID().slice(0, 8)}`;
+    beginRun({ runId, userQuestion: submittedQuestion });
     try {
       // Honest wall-clock budget: finish (and persist) before the caller's execution window
       // expires so a run always delivers its real state instead of dying mid-flight. Sized for
@@ -270,7 +272,7 @@ export class ResearchApp {
       // The engine itself failing (vs the LUI's internal typed model failures) is unexpected.
       throw new ModelFailureError({ type: "PROVIDER_UNAVAILABLE", message: cause instanceof Error ? cause.message : String(cause) });
     } finally {
-      endRun();
+      endRun(runId);
     }
 
     // Persist when the request mutated the graph. The LUI does not persist; the application
@@ -349,6 +351,19 @@ export class ResearchApp {
       const flowJudgments = judgmentsForResearch(ws, flowOutcome.researchId);
       for (const j of flowJudgments) if (!judgments.some((d) => d.ref === j.ref)) judgments.push(j);
     }
+
+    // PROVENANCE CONTRACT (provenance filter): the answer's citations are re-derived from
+    // the graph and clipped to THIS run's evidence. The model chooses which observation it
+    // is describing; only the backend knows which observations this run actually retrieved,
+    // so an id from another run can never reach the recorded answer, the minted judgment, or
+    // the UI's traceability list.
+    const runEvidenceIds = new Set<string>(evidence.map((d) => d.ref));
+    const groundedAnswer: AnswerDTO = answer.citedObjectRefs.length === 0
+      ? answer
+      : Object.freeze({
+          ...answer,
+          citedObjectRefs: answer.citedObjectRefs.filter((ref) => runEvidenceIds.has(ref)),
+        });
 
     const limitations = collectLimitations(result).map(uiText);
     // GAP SEPARATION (research contract §3): capability gaps (provider outages, fallbacks,
@@ -544,11 +559,11 @@ export class ResearchApp {
     // (flow path skipped it, or a prior instance's write was lost in a merge), the
     // run's validated answer IS the judgment — mint it deterministically. Without this
     // a completed run later hydrates as a judgmentless bare summary.
-    if (outcome === "COMPLETED" && researchRef !== undefined && answer !== undefined) {
+    if (outcome === "COMPLETED" && researchRef !== undefined) {
       const minted = ensureRunJudgment(
         ws,
         researchRef,
-        answer,
+        groundedAnswer,
         { kind: "agent", detail: "completion backstop: validated answer recorded as the run judgment" },
       );
       if (minted !== undefined && !judgments.some((d) => d.ref === minted.ref)) judgments.push(minted);
@@ -558,12 +573,16 @@ export class ResearchApp {
       requestId,
       action: result.request.primaryAction,
       outcome,
-      answer,
+      answer: groundedAnswer,
       ...(result.modelFailure !== undefined ? { modelFailure: { type: result.modelFailure.type, message: result.modelFailure.message } } : {}),
       limitations,
       researchGaps,
       ...(researchDiagnostics !== undefined ? { researchDiagnostics } : {}),
       ...(researchRef !== undefined ? { researchRef } : {}),
+      // ASYNC INTEGRITY: the run this response belongs to. A client discards a response whose
+      // researchRunId is not its current run, so a slow earlier submission can never write
+      // into the workspace the trader is now looking at.
+      ...(researchRef !== undefined ? { researchRunId: researchRef } : {}),
       evidenceRefs: evidence.map((e) => e.ref),
       ...(judgments.length > 0 ? { judgmentRef: judgments[judgments.length - 1]!.ref } : {}),
       evidence,
@@ -603,6 +622,19 @@ export class ResearchApp {
 
   continuity() {
     return continuitySnapshotToDTO(this.ws().getContinuitySnapshot());
+  }
+
+  /**
+   * Continuity with EXECUTION READ FRESHNESS (research-integrity): absorb another instance's
+   * completed runs before resolving the CURRENT pointer, so the active research run, its
+   * evidence and its Current Judgment are the persisted ones. Serving this from a warm
+   * in-memory graph is what let the UI keep showing a previous run's judgment after a
+   * refresh, and it made the CURRENT pointer disagree with the run aggregate for the same
+   * workspace at the same moment.
+   */
+  async continuityFresh(): Promise<ContinuitySnapshotDTO> {
+    await this.refreshExecutionState();
+    return this.continuity();
   }
 
   /**
@@ -1201,7 +1233,8 @@ export class ResearchApp {
     // Same convergence point as natural language: Flow 7 (which derives + persists the
     // challenge generation through the domain gates).
     const objective = `What could prove this thesis wrong: ${thesis.statement}`;
-    beginRun({ runId: `${newId(idPrefixes.run)}-${crypto.randomUUID().slice(0, 8)}`, userQuestion: objective });
+    const runId = `${newId(idPrefixes.run)}-${crypto.randomUUID().slice(0, 8)}`;
+    beginRun({ runId, userQuestion: objective });
     let flow7;
     try {
       const { runFlow7 } = await import("../research/flow7.js");
@@ -1216,7 +1249,7 @@ export class ResearchApp {
     } catch (cause) {
       throw new ModelFailureError({ type: "PROVIDER_UNAVAILABLE", message: cause instanceof Error ? cause.message : String(cause) });
     } finally {
-      endRun();
+      endRun(runId);
     }
 
     // Persist (same law as submitResearchRequest: the engine does not; the app layer does).
@@ -1359,7 +1392,8 @@ export class ResearchApp {
   async runEngineFlow7(objective: string, thesisRef: string, deadlineMs: number) {
     const workspace = this.ws();
     const { runFlow7 } = await import("../research/flow7.js");
-    beginRun({ runId: `${newId(idPrefixes.run)}-${crypto.randomUUID().slice(0, 8)}`, userQuestion: objective });
+    const runId = `${newId(idPrefixes.run)}-${crypto.randomUUID().slice(0, 8)}`;
+    beginRun({ runId, userQuestion: objective });
     try {
       return await runFlow7(objective, {
         provider: this.options.provider,
@@ -1370,7 +1404,7 @@ export class ResearchApp {
         deadlineMs,
       });
     } finally {
-      endRun();
+      endRun(runId);
     }
   }
 
@@ -2081,13 +2115,8 @@ function preview(text: string): string {
 function judgmentsForResearch(ws: Workspace, researchRef: string): ReturnType<typeof judgmentToDTO>[] {
   const research = ws.getResearch(researchRef);
   if (research === undefined) return [];
-  const refs = research.currentJudgmentRef !== undefined
-    ? [research.currentJudgmentRef]
-    : [...research.judgmentRefs];
-  return refs
-    .map((id) => ws.getJudgment(id))
-    .filter((j): j is NonNullable<typeof j> => j !== undefined)
-    .map(judgmentToDTO);
+  // OWNERSHIP LAW: only judgments this research object owns; never a workspace-wide lookup.
+  return [...ws.judgmentsForResearch(researchRef)].map(judgmentToDTO);
 }
 
 function collectLimitations(result: LuiResult): string[] {

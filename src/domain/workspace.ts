@@ -263,14 +263,87 @@ export class Workspace {
   /**
    * Register an already-created evidence object (e.g. from `evidenceFromToolResult`) without
    * re-creating it; identity, classification, and provenance are preserved exactly.
+   *
+   * EVIDENCE IMMUTABILITY (provenance contract): the observation, its timestamp, its sources
+   * and its RUN OWNERSHIP are frozen at creation. Re-ingesting the same id is idempotent; it
+   * can never re-parent an existing observation to a different run, and it can never
+   * overwrite the stored payload. A new retrieval is always a NEW evidence record.
    */
   ingestEvidence(evidence: Evidence, researchRef?: string): Evidence {
-    this.evidence.set(evidence.id, evidence);
-    if (researchRef !== undefined) {
-      const research = this.mustResearch(researchRef);
-      this.researches.set(researchRef, appendRef(research, "evidenceRefs", evidence.id));
+    const existing = this.evidence.get(evidence.id);
+    if (existing !== undefined) {
+      const owner = researchRef ?? existing.researchRef;
+      if (existing.researchRef !== undefined && owner !== undefined && existing.researchRef !== owner) {
+        throw new Error(
+          `evidence ${evidence.id} already belongs to research ${existing.researchRef}; ` +
+          `a new retrieval must create a new evidence record (refusing to re-parent to ${owner})`,
+        );
+      }
+      if (owner === undefined) return existing;
+      return this.linkEvidenceToRun(existing, owner);
     }
-    return evidence;
+    const owned = Object.freeze({
+      ...evidence,
+      ...(researchRef !== undefined ? { researchRef } : {}),
+    });
+    this.evidence.set(owned.id, owned);
+    if (researchRef !== undefined) this.linkEvidenceToRun(owned, researchRef);
+    return owned;
+  }
+
+  /** Attach an evidence object to a research object (idempotent; never re-parents). */
+  private linkEvidenceToRun(evidence: Evidence, researchRef: string): Evidence {
+    const research = this.mustResearch(researchRef);
+    if (research.evidenceRefs.includes(evidence.id)) return evidence;
+    const stamped = evidence.researchRef === researchRef
+      ? evidence
+      : Object.freeze({ ...evidence, researchRef });
+    this.evidence.set(stamped.id, stamped);
+    this.researches.set(researchRef, appendRef(research, "evidenceRefs", stamped.id));
+    return stamped;
+  }
+
+  /**
+   * EVIDENCE OWNED BY A RESEARCH OBJECT (explicit relational ownership). This is the ONLY
+   * sanctioned way to answer "which evidence belongs to this run" — never a timestamp
+   * comparison, an id-prefix heuristic, or a global latest-N scan.
+   */
+  evidenceForResearch(researchRef: string): readonly Evidence[] {
+    const research = this.getResearch(researchRef);
+    if (research === undefined) return [];
+    return research.evidenceRefs
+      .map((id) => this.evidence.get(id))
+      .filter((e): e is Evidence => e !== undefined);
+  }
+
+  /**
+   * Evidence owned by ANY member of the run `seed` belongs to (one user submission creates
+   * several research objects: plan steps, flow phases). Run membership is resolved from the
+   * shared run identity, never from similarity of question text or recency.
+   */
+  evidenceForRun(seed: Research): readonly Evidence[] {
+    const out: Evidence[] = [];
+    const seen = new Set<string>();
+    for (const member of this.runMembers(seed)) {
+      for (const e of this.evidenceForResearch(member.id)) {
+        if (seen.has(e.id)) continue;
+        seen.add(e.id);
+        out.push(e);
+      }
+    }
+    return out;
+  }
+
+  /** The set of research objects belonging to the same submission run as `seed`. */
+  runMembers(seed: Research): readonly Research[] {
+    if (seed.runId === undefined) return [seed];
+    const key = runKeyOf(seed);
+    return [...this.researches.values()].filter((m) => runKeyOf(m) === key);
+  }
+
+  /** True when the evidence belongs to the given research object's run. */
+  isRunEvidence(researchRef: string, evidenceId: string): boolean {
+    return this.evidenceForResearch(researchRef).some((e) => e.id === evidenceId);
   }
 
   listEvidence(): readonly Evidence[] {
@@ -387,6 +460,11 @@ export class Workspace {
    * Record a judgment for a research context. Enforces the architecture's versioning rule:
    * exactly one ACTIVE judgment; a new material judgment supersedes the previous one, which
    * remains fully preserved (never overwritten or deleted).
+   *
+   * PROVENANCE CONTRACT (research-integrity remediation): the judgment is stamped with its
+   * OWNING research object, and its evidence basis is FILTERED to that run. A judgment can
+   * no longer claim traceability to an observation another run retrieved, so
+   * `judgment.researchRunId === currentResearchRunId` is true by construction.
    */
   addJudgment(
     input: Parameters<typeof createJudgment>[0] & { researchRef: string },
@@ -399,7 +477,8 @@ export class Workspace {
     // Idempotent re-add (multi-instance law): the SAME statement re-arriving for the same
     // research (e.g. the completion backstop running after a merge restored the flow's
     // judgment) must reuse the existing judgment — minting a second identical judgment
-    // object would corrupt judgment counts and dedupe downstream.
+    // object would corrupt judgment counts and dedupe downstream. Scoped to THIS research
+    // object, so a similar question in a later run never reuses an earlier run's verdict.
     for (const existingId of research.judgmentRefs) {
       const existing = this.judgments.get(existingId);
       if (existing && existing.status === "ACTIVE" && existing.statement === rest.statement) return existing;
@@ -415,13 +494,43 @@ export class Workspace {
       }
     }
 
-    const judgment = createJudgment(rest, origin, at);
+    // EVIDENCE-BASIS GATE: the basis may only cite evidence THIS RUN owns. Model-chosen
+    // citation lists are re-derived from the graph, never trusted as provenance.
+    const ownedEvidence = new Set(this.evidenceForResearch(researchRef).map((e) => e.id));
+    const owned = (refs: readonly string[] | undefined): readonly string[] =>
+      [...new Set((refs ?? []).filter((ref) => ownedEvidence.has(ref)))];
+    const dropped = [
+      ...countDropped(rest.basis.supportingEvidence, ownedEvidence),
+      ...countDropped(rest.basis.opposingEvidence, ownedEvidence),
+    ];
+    const judgment = createJudgment(
+      {
+        ...rest,
+        researchRef,
+        basis: {
+          supportingEvidence: owned(rest.basis.supportingEvidence),
+          opposingEvidence: owned(rest.basis.opposingEvidence),
+          keyClaims: [...new Set(rest.basis.keyClaims)],
+          hypotheses: [...new Set(rest.basis.hypotheses)],
+        },
+      },
+      origin,
+      at,
+    );
     this.judgments.set(judgment.id, judgment);
 
     let updated = appendRef(research, "judgmentRefs", judgment.id);
     updated = Object.freeze({ ...updated, currentJudgmentRef: judgment.id });
     this.researches.set(researchRef, updated);
-    return judgment;
+    if (dropped.length > 0) {
+      // Honest record of what the engine refused to attribute to this run, so a stripped
+      // citation is auditable rather than silent.
+      this.judgments.set(
+        judgment.id,
+        withProvenance(judgment, origin, `cross-run evidence excluded from judgment basis: ${dropped.join(", ")}`, at),
+      );
+    }
+    return this.judgments.get(judgment.id)!;
   }
 
   getJudgment(id: string): Judgment | undefined {
@@ -432,12 +541,28 @@ export class Workspace {
     return [...this.judgments.values()];
   }
 
-  /** Current judgment for a research context (the single ACTIVE one), if any. */
+  /**
+   * Current judgment for a research context (the single ACTIVE one), if any.
+   * OWNERSHIP LAW: the judgment must belong to this research object. A judgment minted for
+   * another run can never satisfy this lookup, so a run without its own conclusion shows
+   * none rather than inheriting a foreign verdict.
+   */
   currentJudgment(researchRef: string): Judgment | undefined {
     const research = this.mustResearch(researchRef);
     if (!research.currentJudgmentRef) return undefined;
     const current = this.judgments.get(research.currentJudgmentRef);
-    return current && current.status === "ACTIVE" ? current : undefined;
+    if (current === undefined || current.status !== "ACTIVE") return undefined;
+    if (current.researchRef !== undefined && current.researchRef !== researchRef) return undefined;
+    return current;
+  }
+
+  /** Judgments belonging to this research object only (never a global latest lookup). */
+  judgmentsForResearch(researchRef: string): readonly Judgment[] {
+    const research = this.getResearch(researchRef);
+    if (research === undefined) return [];
+    return research.judgmentRefs
+      .map((id) => this.judgments.get(id))
+      .filter((j): j is Judgment => j !== undefined && (j.researchRef === undefined || j.researchRef === researchRef));
   }
 
   historicalJudgments(researchRef: string): readonly Judgment[] {
@@ -1198,6 +1323,12 @@ export class Workspace {
   /** The continuity view: everything a later request needs to recover research context. */
   getContinuitySnapshot(): {
     activeResearchTarget: Research | undefined;
+    /**
+     * The authoritative CURRENT research run (the active target's object id). Every dependent
+     * read — evidence, judgment, answer, traceability — is scoped from this pointer instead of
+     * being resolved by an independent global "latest" query.
+     */
+    currentResearchRunId: string | undefined;
     activeBranch: Branch | undefined;
     recentEvidence: readonly Evidence[];
     currentClaims: readonly Claim[];
@@ -1217,25 +1348,34 @@ export class Workspace {
     // CURRENT research selection (remediation D5): Map insertion order is NOT run order —
     // multi-instance merges and absorbs insert objects in arbitrary order, which left CURRENT
     // pointing at an older run after newer ones completed (observed live). The CURRENT target
-    // is the NEWEST COMPLETED research by lifecycle timestamp, falling back to the newest
+    // is the NEWEST COMPLETED research by SUBMISSION order, falling back to the newest
     // research of any status when nothing has completed yet. Opening an older history record
     // never changes this pointer (selection is a read-path concern, not workspace state).
-    // TIE LAW: two runs created/completed in the same millisecond share a provenance
-    // timestamp; the stable descending sort would keep insertion order for the tie, which
-    // leaves the OLDER inserted object first. Reversing before the sort makes the tie fall
-    // to the LATER-inserted object — in-process insertion order IS creation order, so a new
-    // run started in the same millisecond as the previous one still becomes CURRENT.
+    // SUBMISSION ORDER, NOT COMPLETION ORDER (async integrity): a long run submitted FIRST can
+    // finish LAST (gap recovery, deep research, a slow provider). Ranking by the last
+    // provenance entry made that stale run steal CURRENT when it finally landed, which is
+    // exactly the "an old COMPLETED run masquerading as the current one" failure. CURRENT is
+    // the run the trader asked for last, so ranking uses the CREATION timestamp (the head of
+    // the provenance trail), which every run records at creation and never rewrites.
+    // TIE LAW: two runs created in the same millisecond share that timestamp; the stable
+    // descending sort would keep insertion order, leaving the OLDER inserted object first.
+    // Reversing before the sort makes the tie fall to the LATER-inserted object.
     const newestBy = (rows: readonly Research[]): Research | undefined =>
-      rows.slice().reverse().sort((a, b) => researchTimestamp(b).localeCompare(researchTimestamp(a)))[0];
+      rows.slice().reverse().sort((a, b) => researchCreatedAt(b).localeCompare(researchCreatedAt(a)))[0];
     const activeResearchTarget = newestBy(researches.filter((r) => r.status === "COMPLETED"))
       ?? newestBy(researches);
     // CURRENT judgment = the ACTIVE research target's own judgment (scoped, honest).
     // The previous global-latest rule leaked the PREVIOUS run's verdict into a new run's
     // panel (observed live: a TSLA research displayed the prior BTC run's Clarity Act
     // judgment). A run with no judgment yet shows none — never a foreign verdict.
-    const latestJudgment = activeResearchTarget?.currentJudgmentRef !== undefined
-      ? this.judgments.get(activeResearchTarget.currentJudgmentRef)
-      : undefined;
+    // RUN SCOPE: the pointer is one research object, but a submission creates several; the
+    // current judgment is the run's own answer-bearing conclusion, never another run's.
+    const latestJudgment = activeResearchTarget === undefined
+      ? undefined
+      : this.runMembers(activeResearchTarget)
+          .map((m) => (m.currentJudgmentRef !== undefined ? this.judgments.get(m.currentJudgmentRef) : undefined))
+          .find((j): j is Judgment => j !== undefined && j.status === "ACTIVE" && j.researchRef !== undefined
+            && this.runMembers(activeResearchTarget).some((m) => m.id === j.researchRef));
     const activeThesis = this.getActiveThesis();
     const activeFramework = [...this.listSavedArtifacts()].reverse().find((a) => a.type === "framework");
     const latestAssessment = activeThesis !== undefined ? this.latestThesisAssessment(activeThesis.id) : undefined;
@@ -1251,8 +1391,14 @@ export class Workspace {
     for (const a of this.listAnalyses()) uncertainties.push(...a.uncertainty);
     return {
       activeResearchTarget,
+      currentResearchRunId: activeResearchTarget?.id,
       activeBranch: [...this.listBranches()].reverse()[0],
-      recentEvidence: this.listEvidence().slice(-10),
+      // CURRENT evidence = the CURRENT run's evidence (RUN SCOPE). The previous global
+      // "latest ten evidence objects in the workspace" surfaced OTHER runs' observations in
+      // the current research panel, which is how a fresh 09:xx retrieval appeared beside a
+      // 07:xx observation from an earlier run. With no current run there is no current
+      // evidence — never a global fallback.
+      recentEvidence: activeResearchTarget === undefined ? [] : [...this.evidenceForRun(activeResearchTarget)],
       currentClaims: this.listClaims(),
       currentHypotheses: this.listHypotheses(),
       currentJudgment: latestJudgment,
@@ -1389,6 +1535,31 @@ export class Workspace {
 export { createResearch, createBranch, createClaim, createEvidence, createHypothesis, createAnalysis, createJudgment, createSource, createThesis, reviseThesis, createSavedArtifact, isSavedKind };
 
 /**
+ * Identity of the RUN a research object belongs to, as a group key.
+ *
+ * A run is (runId, verbatim question): the question comes from the same submission context
+ * that stamped the run id, so members of one submission always agree on both. The question
+ * is part of the key because legacy data contains run ids that were NOT unique — the run
+ * counter restarted at 1 on every cold process (a run id is never an object id, so it was
+ * never seeded), which stamped unrelated submissions with the same `run_000001`. Grouping on
+ * the id alone merged those submissions. Legacy objects without a run id stay their own entry.
+ *
+ * The authoritative RUN for ownership purposes is the submission run; the research OBJECT id
+ * is the research run id carried on evidence and judgments.
+ */
+export function runKeyOf(r: Research): string {
+  return r.runId === undefined ? `solo:${r.id}` : `${r.runId}\u0000${r.userQuestion ?? ""}`;
+}
+
+/**
+ * Evidence refs a judgment basis named but this run does not own, reported for the audit
+ * trail (a stripped cross-run citation is recorded, never silently dropped).
+ */
+function countDropped(refs: readonly string[] | undefined, owned: ReadonlySet<string>): string[] {
+  return (refs ?? []).filter((ref) => !owned.has(ref));
+}
+
+/**
  * Recency comparison for absorbThesisState (mirrors mergeSnapshots' per-object law).
  * Provenance is append-only and every mutation appends, so MORE provenance entries = later
  * state; equal history keeps the existing side (in-flight local writes win). Ties broken by
@@ -1419,4 +1590,15 @@ function revisionsOf(o: { provenance?: readonly unknown[] }): number {
 function researchTimestamp(r: { readonly provenance?: readonly { readonly at?: string }[] }): string {
   const last = r.provenance?.[r.provenance.length - 1]?.at;
   return typeof last === "string" ? last : "";
+}
+
+/**
+ * CREATION timestamp of a research object: the head of its provenance trail, recorded when
+ * the run was created and never rewritten. This is what CURRENT selection ranks by, so a run
+ * that finishes late cannot displace the run the trader actually submitted last.
+ */
+function researchCreatedAt(r: { readonly provenance?: readonly { readonly at?: string }[] }): string {
+  const first = r.provenance?.[0]?.at;
+  if (typeof first === "string") return first;
+  return researchTimestamp(r);
 }
