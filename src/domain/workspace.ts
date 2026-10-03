@@ -207,6 +207,19 @@ export class Workspace {
   }
 
   /**
+   * LEAVE every investigation: what "New research" means.
+   *
+   * Clears only the CURRENT SELECTION. No investigation, turn, run, evidence, judgment or
+   * thesis is deleted or mutated — History still lists every thread, and reopening one sets
+   * the pointer again through `setCurrentInvestigation`. This is the difference between
+   * "start something new" and "throw the work away", and conflating them is what left the
+   * composer in follow-up mode over a thread the trader had explicitly walked away from.
+   */
+  clearCurrentInvestigation(): void {
+    this.currentInvestigationId = undefined;
+  }
+
+  /**
    * Record a conversation turn and bind it to the run it produced.
    *
    * One turn = at most one run identity. The investigation accumulates the reference; it never

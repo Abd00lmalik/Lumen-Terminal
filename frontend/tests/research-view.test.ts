@@ -31,11 +31,23 @@ describe("active research selection", () => {
     expect(isExpandedTurn(turns[1]!, active, false)).toBe(false);
   });
 
-  it("an explicit history selection wins (and only that research expands)", () => {
-    const active = selectActiveTurnRef({ turns, running: false, viewedRef: "rs_000051", liveRef: "rs_000052" });
+  it("an explicit history selection wins when nothing new has completed", () => {
+    const active = selectActiveTurnRef({ turns, running: false, viewedRef: "rs_000051" });
     expect(active).toBe("rs_000051");
     expect(isExpandedTurn(turns[0]!, active, false)).toBe(true);
     expect(isExpandedTurn(turns[1]!, active, false)).toBe(false);
+  });
+
+  it("a JUST-COMPLETED run outranks an earlier history selection", () => {
+    // Browser acceptance: the trader asked a question, the run finished, and the new report
+    // did NOT appear — the previously-selected History entry was still the expanded result,
+    // so the only way to read the answer was to go back to History and click it again.
+    // Precedence inverted deliberately: a fresh answer to a question the trader just asked is
+    // always the active view.
+    const active = selectActiveTurnRef({ turns, running: false, viewedRef: "rs_000051", liveRef: "rs_000052" });
+    expect(active).toBe("rs_000052");
+    expect(isExpandedTurn(turns[0]!, active, false)).toBe(false);
+    expect(isExpandedTurn(turns[1]!, active, false)).toBe(true);
   });
 
   it("falls back to the newest identified run when nothing is selected", () => {

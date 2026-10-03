@@ -814,6 +814,19 @@ export class ResearchApp {
   }
 
   /**
+   * NEW RESEARCH: leave every investigation (see Workspace.clearCurrentInvestigation).
+   *
+   * The selection is cleared; nothing is deleted. History keeps every thread and its runs, and
+   * the next question the trader asks opens a fresh investigation rather than appending to
+   * whatever they walked away from.
+   */
+  async startNewInvestigation(): Promise<readonly InvestigationDTO[]> {
+    this.ws().clearCurrentInvestigation();
+    await this.persist();
+    return this.listInvestigations();
+  }
+
+  /**
    * THESIS CONTINUITY (Phase 7): attach the trader's OWN thesis to the investigation.
    *
    * The thesis object must already exist (created from an explicit trader statement). This

@@ -31,6 +31,17 @@ export function enterInvestigation(ref: string): Promise<InvestigationDto> {
   return http.post<InvestigationDto>(`/api/investigations/${encodeURIComponent(ref)}/enter`, {});
 }
 
+/**
+ * NEW RESEARCH: clear the current-investigation SELECTION on the server.
+ *
+ * A client-only reset is what left the composer in follow-up mode: the next refresh read the
+ * backend's still-current investigation and put the trader back in the thread they left.
+ * Nothing is deleted — every investigation stays in History.
+ */
+export function startNewInvestigation(): Promise<readonly InvestigationDto[]> {
+  return http.post<readonly InvestigationDto[]>("/api/investigations/new", {});
+}
+
 export interface StreamCallbacks {
   readonly onProgress: (event: { stage: string; summary: string; data?: Record<string, string | number | boolean> }) => void;
   readonly onFinal: (result: ResearchResponseDto) => void;

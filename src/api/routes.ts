@@ -294,6 +294,11 @@ export function registerRoutes(app: FastifyInstance, context: RouteContext): voi
   app.post("/api/investigations/:ref/enter", {
     handler: withErrors(async (req) => (await appForRequest(req)).enterInvestigation((req.params as { ref: string }).ref)),
   });
+  // NEW RESEARCH: clear the current-investigation SELECTION only. Nothing is deleted — every
+  // investigation, turn, run and judgment stays in History and remains reopenable.
+  app.post("/api/investigations/new", {
+    handler: withErrors(async (req) => (await appForRequest(req)).startNewInvestigation()),
+  });
   // THESIS CONTINUITY: attach a thesis the trader ALREADY owns. An unknown thesis is a 404/typed
   // error, never an invented one — an ordinary sentence cannot become a thesis through this.
   app.post("/api/investigations/:ref/thesis", {

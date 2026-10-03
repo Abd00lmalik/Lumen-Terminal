@@ -18,8 +18,15 @@ import {
 } from "../components/ui.js";
 import { evidenceFromDto, judgmentFromDto, thesisFromDto } from "../data/adapters.js";
 import { isResearchRef, preferTurn, runOpenRef, turnIdentity } from "../data/identity.js";
-import { isExpandedTurn, isNewResearchRequest, railBelongsToActive, selectActiveTurnRef } from "./researchView.js";
-import { listInvestigations } from "../api/research.js";
+import {
+  followUpAllowed,
+  isExpandedTurn,
+  isNewResearchRequest,
+  railBelongsToActive,
+  selectActiveTurnRef,
+  workspaceLifecycle,
+} from "./researchView.js";
+import { listInvestigations, startNewInvestigation } from "../api/research.js";
 import type { InvestigationDto } from "../api/types.js";
 import { ApiError, getWorkspace, listResearch, getResearch, listSaved, createSaved, deleteSaved, createThesis } from "../api/index.js";
 import { savedKey, savedKindLabel } from "../data/saved.js";
@@ -221,12 +228,22 @@ export function ResearchWorkspacePage() {
   // sidebar. A failed read leaves it undefined and the page simply shows no thread — never a
   // fabricated one.
   const [investigation, setInvestigation] = useState<InvestigationDto | undefined>(undefined);
+  /**
+   * RESET PENDING: an explicit "New research" was pressed. It stays true until the backend
+   * confirms there is no current investigation, so a stale pointer can never put the trader
+   * back in the thread they just left while the clear is still in flight.
+   */
+  const [resetPending, setResetPending] = useState(false);
 
   const refreshInvestigation = useCallback(async (): Promise<void> => {
     try {
       const rows = await listInvestigations();
-      // The backend marks exactly one investigation current; that is the thread this page is in.
-      setInvestigation(rows.find((r) => r.isCurrent) ?? rows[0]);
+      // SINGLE SOURCE OF TRUTH: the backend marks exactly one investigation current. An older
+      // thread is NEVER substituted for "none" — that fallback is what left the previous
+      // investigation on screen after New research while the rest of the page read as empty.
+      const current = rows.find((r) => r.isCurrent);
+      setInvestigation(current);
+      if (current !== undefined) setResetPending(false);
     } catch {
       setInvestigation(undefined);
     }
@@ -594,6 +611,15 @@ export function ResearchWorkspacePage() {
     setInput("");
     setSubmitting(false);
     setSaveError(undefined);
+    // NEW RESEARCH (lifecycle fix): the reset used to be CLIENT-ONLY, so the backend still
+    // reported the previous investigation as current and the next refresh put the composer
+    // straight back into follow-up mode over the thread the trader had just left. Clear the
+    // SELECTION on the server too. Nothing is deleted — History keeps every thread.
+    setResetPending(true);
+    setInvestigation(undefined);
+    void startNewInvestigation()
+      .then(async () => { await refreshInvestigation(); setResetPending(false); })
+      .catch(() => { /* the UI is already clean; a failed clear is not a failed reset */ });
     navigate(location.pathname, { replace: true }); // consume the flag
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state]);
@@ -639,6 +665,20 @@ export function ResearchWorkspacePage() {
     ...(stream.result?.researchRef !== undefined ? { liveRef: stream.result.researchRef } : {}),
     running: stream.running,
   });
+  /**
+   * THE LIFECYCLE, computed once. The composer label, the CTA and the context rail all read
+   * this, so they cannot disagree with each other — the acceptance failure was two rails
+   * asserting opposite things ("No active research" beside a live investigation panel)
+   * because each re-derived "current" on its own.
+   */
+  const lifecycle = workspaceLifecycle({
+    ...(investigation?.id !== undefined ? { currentInvestigationRef: investigation.id } : {}),
+    // "Usable" means a COMPLETED run the backend actually holds, not merely a turn recorded.
+    hasCompletedRun: (investigation?.runs ?? []).some((r) => r.status === "COMPLETED"),
+    running: stream.running,
+    resetPending,
+  });
+  const inFollowUp = followUpAllowed(lifecycle);
   const railScoped = railBelongsToActive({
     running: stream.running,
     ...(ws.snapshot?.activeResearch?.ref !== undefined ? { snapshotRef: ws.snapshot.activeResearch.ref } : {}),
@@ -666,7 +706,12 @@ export function ResearchWorkspacePage() {
                 <KV k="evidence" v={String(ws.snapshot.activeResearch.evidenceRefs.length)} />
               </>
             ) : (
-              <Empty title="No active research" hint="Ask a question to start the first investigation." />
+              <Empty
+                title="No active research"
+                hint={investigation !== undefined && lifecycle !== "NO_INVESTIGATION"
+                  ? "This investigation has no completed run yet."
+                  : "Ask a question to start a new investigation."}
+              />
             )}
             <button className="btn sm ghost" style={{ marginTop: 8 }} onClick={() => void refresh()}>Refresh state ↻</button>
           </div>
@@ -695,7 +740,7 @@ export function ResearchWorkspacePage() {
               backend's DERIVED state — never assembled client-side. Sections appear only when
               the investigation actually established something, so an empty section is never
               noise. It stays a readout, not a dashboard and not advice. */}
-          {investigation !== undefined && (
+          {investigation !== undefined && lifecycle !== "NO_INVESTIGATION" && (
             <div className="rail-section">
               <div className="rail-title">Investigation</div>
               <div style={{ fontSize: 12.5, lineHeight: 1.5, color: "var(--text-2)", marginBottom: 6 }}>
@@ -748,11 +793,11 @@ export function ResearchWorkspacePage() {
           <input
             className="search"
             placeholder={
-              investigation !== undefined
+              inFollowUp && investigation !== undefined
                 ? `Ask a follow-up on ${investigation.subject}; e.g. focus on ETF flows`
                 : "Ask a research question; e.g. why did BTC drop this morning?"
             }
-            aria-label={investigation !== undefined ? "Ask a follow-up question" : "Ask a research question"}
+            aria-label={inFollowUp ? "Ask a follow-up question" : "Ask a research question"}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && ask(input)}
@@ -762,7 +807,7 @@ export function ResearchWorkspacePage() {
         <button className="btn primary" onClick={() => ask(input)} disabled={stream.running || submitting || input.trim().length === 0}>
           {stream.running || submitting
             ? `Researching… ${stream.elapsedSeconds > 0 ? `(${stream.elapsedSeconds}s)` : ""}`
-            : investigation !== undefined ? "Ask follow-up" : "Research"}
+            : inFollowUp ? "Ask follow-up" : "Research"}
         </button>
       </div>
 
