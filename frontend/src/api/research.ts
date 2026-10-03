@@ -5,10 +5,30 @@
 import { http, streamResearch } from "./client.js";
 import type {
   ResearchResponseDto, ResearchRunAggregateDto, ResearchRunSummaryDto, ResearchListQuery,
+  InvestigationDto,
 } from "./types.js";
 
 export function submitResearch(message: string, confirmed = false): Promise<ResearchResponseDto> {
   return http.post<ResearchResponseDto>("/api/research", { message, confirmed });
+}
+
+/**
+ * InvestigATIONS (conversational workbench). A thread of isolated research runs.
+ *
+ * The client names the investigation it is CONTINUING; the backend still decides, from the
+ * trader's own words, whether the turn actually continues it — a turn that switches subject
+ * opens a new investigation instead of contaminating this one.
+ */
+export function listInvestigations(): Promise<readonly InvestigationDto[]> {
+  return http.get<readonly InvestigationDto[]>("/api/investigations");
+}
+
+export function getInvestigation(ref: string): Promise<InvestigationDto> {
+  return http.get<InvestigationDto>(`/api/investigations/${encodeURIComponent(ref)}`);
+}
+
+export function enterInvestigation(ref: string): Promise<InvestigationDto> {
+  return http.post<InvestigationDto>(`/api/investigations/${encodeURIComponent(ref)}/enter`, {});
 }
 
 export interface StreamCallbacks {
@@ -19,10 +39,10 @@ export interface StreamCallbacks {
 }
 
 /** Submit over SSE: real lifecycle progress, terminal final/error. */
-export function streamResearchRequest(message: string, cb: StreamCallbacks, options?: { confirmed?: boolean; signal?: AbortSignal }): Promise<void> {
+export function streamResearchRequest(message: string, cb: StreamCallbacks, options?: { confirmed?: boolean; signal?: AbortSignal; investigationId?: string }): Promise<void> {
   return streamResearch(
     message,
-    { confirmed: options?.confirmed, signal: options?.signal },
+    { confirmed: options?.confirmed, signal: options?.signal, investigationId: options?.investigationId },
     {
       onProgress: cb.onProgress,
       onFinal: (result) => cb.onFinal(result as ResearchResponseDto),

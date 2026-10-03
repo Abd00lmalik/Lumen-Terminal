@@ -122,6 +122,32 @@ const ASSET_ALIASES: Readonly<Record<string, readonly string[]>> = {
 };
 
 /**
+ * The ASSET a sentence explicitly names, or undefined when it names none.
+ *
+ * `resolveInstrument` covers commodities/metals/FX/indices; this adds the crypto aliases, so
+ * "What is happening with Ethereum?" resolves to ETH rather than to nothing. It answers ONLY
+ * "does this sentence name an asset the trader is aware of" — deliberately not a bare
+ * uppercase-token scan, because that reads "Focus specifically on ETF flows" as naming the
+ * subject "ETF" and would make every follow-up look like a topic switch.
+ */
+export function resolveNamedAsset(text: string | undefined): string | undefined {
+  if (text === undefined || text.trim() === "") return undefined;
+  const upper = text.toUpperCase();
+  const instrument = resolveInstrument(text);
+  if (instrument !== undefined) return instrument.symbol;
+  for (const [name, ticker] of CRYPTO_ALIASES) {
+    if (new RegExp(`\\b${name}\\b`).test(upper)) return ticker;
+  }
+  // A ticker is a subject only when the trader wrote it as a standalone token with a space
+  // around it (or the whole message) — "what about BTC" is a subject, "the ETF flows" is not.
+  for (const [ticker, names] of Object.entries(ASSET_ALIASES)) {
+    if (new RegExp(`(^|[\\s(])${ticker}([\\s).,?]|$)`, "i").test(text)) return ticker;
+    void names;
+  }
+  return undefined;
+}
+
+/**
  * Expanded spelling set of a subject term (BTC <-> BITCOIN, ...): the ticker and every name a
  * question/evidence would legitimately use for the same entity. Used where a SENTENCE or a
  * vocabulary bag must recognise the subject however the counterparty spelled it, without

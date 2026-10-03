@@ -21,6 +21,13 @@ export interface ResearchRun {
   readonly runId: string;
   /** The trader's verbatim question — the only text history may show for the run. */
   readonly userQuestion: string;
+  /**
+   * INVESTIGATION CONVERSATION (conversational workbench): the conversation this submission is
+   * part of. A run is still an ISOLATED execution — this is a REFERENCE to its thread, never an
+   * ownership relationship. Two turns of one investigation get different runIds and different
+   * investigation-scoped evidence; the id says where the turn happened, not what it may consume.
+   */
+  readonly investigationId?: string;
 }
 
 let active: ResearchRun | undefined;

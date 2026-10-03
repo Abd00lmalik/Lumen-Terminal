@@ -8,7 +8,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ResearchApp, TRADER_ORIGIN, MAX_RESEARCH_LIMIT, MAX_SAVED_LIMIT, type ResearchListOptions, type SavedListOptions, type ThesisListOptions, type ThesisCreateRequest, type ThesisUpdateRequest } from "./research-app.js";
-import { ApiFailure, InvalidRequestError, mapApiError } from "./errors.js";
+import { ApiFailure, InvalidRequestError, NotFoundError, mapApiError } from "./errors.js";
 import { formatSseEvent, sseHeaders, type SseEvent } from "./sse.js";
 import type { ProgressEvent } from "../research/progress.js";
 import { SAVED_KINDS } from "../domain/thesis.js";
@@ -280,6 +280,30 @@ export function registerRoutes(app: FastifyInstance, context: RouteContext): voi
   // how the visible Current Judgment stayed on an older run after a refresh. Absorption runs
   // first so every panel is resolved from the CURRENT run as persisted.
   app.get("/api/workspace", { handler: withErrors(async (req) => (await appForRequest(req)).continuityFresh()) });
+  // INVESTIGATIONS (conversational workbench). A thread is a reference graph between isolated
+  // runs — reading one never re-parents evidence, and every run in it keeps its own ownership.
+  app.get("/api/investigations", { handler: withErrors(async (req) => (await appForRequest(req)).listInvestigations()) });
+  app.get("/api/investigations/:ref", {
+    handler: withErrors(async (req) => {
+      const dto = (await appForRequest(req)).investigation((req.params as { ref: string }).ref);
+      if (dto === undefined) throw new NotFoundError("investigation");
+      return dto;
+    }),
+  });
+  // ENTERING a thread is explicit working state (what opening an investigation in the UI does).
+  app.post("/api/investigations/:ref/enter", {
+    handler: withErrors(async (req) => (await appForRequest(req)).enterInvestigation((req.params as { ref: string }).ref)),
+  });
+  // THESIS CONTINUITY: attach a thesis the trader ALREADY owns. An unknown thesis is a 404/typed
+  // error, never an invented one — an ordinary sentence cannot become a thesis through this.
+  app.post("/api/investigations/:ref/thesis", {
+    handler: withErrors(async (req) => {
+      const body = req.body as { thesisRef?: unknown } | null;
+      const thesisRef = typeof body?.thesisRef === "string" ? body.thesisRef : "";
+      if (thesisRef.trim() === "") throw new InvalidRequestError("thesisRef is required");
+      return (await appForRequest(req)).attachThesisToInvestigation((req.params as { ref: string }).ref, thesisRef.trim());
+    }),
+  });
   // READ-ONLY storage audit (Phase E): byte-level breakdown of the persisted snapshot for the
   // storage runbook and compaction decisions. Mutates nothing; see docs/runbooks/blob-storage.md.
   app.get("/api/storage/audit", { handler: withErrors(async (req) => { requireAdmin(req); return (await appForRequest(req)).storageAudit(); }) });
@@ -334,9 +358,18 @@ export function registerRoutes(app: FastifyInstance, context: RouteContext): voi
   app.post("/api/research", async (req, reply) => {
     let message: string;
     let confirmed: boolean;
+    // CONVERSATION CONTINUITY: the client names the investigation it is continuing. Omitted
+    // means "route it" — the application decides from the trader's own words, including an
+    // explicit topic switch that starts a new investigation rather than contaminating this one.
+    let investigationId: string | undefined;
     try {
       message = requireString(req.body, "message");
       confirmed = readConfirmed(req.body);
+      const raw = (req.body as Record<string, unknown> | null)?.["investigationId"];
+      if (raw !== undefined && raw !== null) {
+        if (typeof raw !== "string" || raw.trim() === "") throw new InvalidRequestError("investigationId must be a non-empty string when present");
+        investigationId = raw.trim();
+      }
     } catch (err) {
       handleError(reply, err);
       return;
@@ -346,7 +379,7 @@ export function registerRoutes(app: FastifyInstance, context: RouteContext): voi
 
     if (!wantsStream) {
       try {
-        const dto = await (await appForRequest(req)).submitResearchRequest(message, undefined, confirmed);
+        const dto = await (await appForRequest(req)).submitResearchRequest(message, undefined, confirmed, investigationId);
         return reply.code(200).send(dto);
       } catch (err) {
         handleError(reply, err);
@@ -372,7 +405,7 @@ export function registerRoutes(app: FastifyInstance, context: RouteContext): voi
     const onProgress = (e: ProgressEvent) => send({ event: "progress", data: e });
 
     try {
-      const dto = await (await appForRequest(req)).submitResearchRequest(message, onProgress, confirmed);
+      const dto = await (await appForRequest(req)).submitResearchRequest(message, onProgress, confirmed, investigationId);
       // The terminal event is written, then a padded tail flush follows so no intermediary
       // buffer can sit on the last bytes; the client parses events, never the padding.
       raw.write(formatSseEvent({ event: "final", data: dto }));

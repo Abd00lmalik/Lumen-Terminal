@@ -292,6 +292,16 @@ export interface SynthesizeAnswerOptions {
    * recovery). The model is told what it is and the engine caps any stated level at it.
    */
   readonly computedConfidence?: string;
+  /**
+   * CONVERSATION CONTEXT: the investigation's prior state, already rendered with the run
+   * boundary stated. It is prompt material for the ANSWER only.
+   *
+   * It is deliberately NOT part of `context` (the evidence surface) and NOT part of
+   * `contract.evidenceText`, so a prior run's observation can inform the prose without ever
+   * becoming citable evidence for this run. The contract validator still rejects any claim this
+   * run's own evidence does not support.
+   */
+  readonly conversationContext?: string;
 }
 
 /**
@@ -313,6 +323,12 @@ export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promis
         ...(options.computedConfidence !== undefined
           ? [
               `ENGINE-COMPUTED CONFIDENCE for this run: ${options.computedConfidence}. It is derived from requirement coverage, evidence freshness, whether disconfirmation ran, and recovery outcomes. State at most this level; never a higher one.`,
+            ]
+          : []),
+        ...(options.conversationContext !== undefined
+          ? [
+              "PRIOR CONVERSATION CONTEXT (an earlier part of the same investigation). It tells you what has already been established and what is still open. It is NOT evidence for this turn: cite only the evidence ids in the validated context below.",
+              options.conversationContext,
             ]
           : []),
         "---",

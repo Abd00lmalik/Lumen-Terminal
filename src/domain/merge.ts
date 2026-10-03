@@ -99,6 +99,13 @@ export function mergeSnapshots(local: WorkspaceSnapshot, remote: WorkspaceSnapsh
     // across instances; checkId dedup happens at creation). Monitor objects merge like theses.
     monitoringAssessments: mergeById(local.monitoringAssessments ?? [], remote.monitoringAssessments ?? []),
     monitorNotifications: mergeById(local.monitorNotifications ?? [], remote.monitorNotifications ?? []),
+    // CONVERSATION MERGE: investigations are append-only threads (union by id, the more-revised
+    // object wins); turns are immutable records (union by id). Merging by ARRAY CONCAT would
+    // duplicate every turn on each multi-instance merge — the exact bug Phase G hit with thesis
+    // assessments. `currentInvestigationId` is deliberately NOT merged: which thread the trader
+    // is in is local working state, and one instance must not drag another into its thread.
+    investigations: mergeById(local.investigations ?? [], remote.investigations ?? []),
+    conversationTurns: mergeById(local.conversationTurns ?? [], remote.conversationTurns ?? []),
     ...(activeThesisId !== undefined ? { activeThesisId } : {}),
     ...(mergedResponses.size > 0
       ? { researchResponses: [...mergedResponses.entries()].map(([researchId, response]) => ({ researchId, response })) }

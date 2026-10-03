@@ -50,6 +50,8 @@ export function newId(prefix: string): string {
 export const idPrefixes = {
   workspace: "ws",
   run: "run", // one user submission = one history run (see run-context.ts)
+  investigation: "inv", // conversational continuity above the run (see investigation.ts)
+  turn: "tn", // one conversation turn inside an investigation
   research: "rs",
   branch: "br",
   claim: "cl",

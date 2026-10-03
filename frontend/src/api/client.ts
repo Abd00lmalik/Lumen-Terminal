@@ -196,7 +196,7 @@ export interface StreamHandlers {
  */
 export async function streamResearch(
   message: string,
-  options: { confirmed?: boolean; signal?: AbortSignal },
+  options: { confirmed?: boolean; signal?: AbortSignal; investigationId?: string },
   handlers: StreamHandlers,
 ): Promise<void> {
   const streamHeaders: Record<string, string> = { "Content-Type": "application/json", Accept: "text/event-stream" };
@@ -209,7 +209,13 @@ export async function streamResearch(
     res = await fetch(`${BASE_URL}/api/research?stream=1`, {
       method: "POST",
       headers: streamHeaders,
-      body: JSON.stringify({ message, ...(options.confirmed ? { confirmed: true } : {}) }),
+      // CONVERSATION CONTINUITY: the thread this turn belongs to is named, never inferred by the
+// client. The backend still routes — a topic switch starts a new investigation regardless.
+      body: JSON.stringify({
+        message,
+        ...(options.confirmed ? { confirmed: true } : {}),
+        ...(options.investigationId !== undefined ? { investigationId: options.investigationId } : {}),
+      }),
       signal: options.signal,
     });
   } catch (cause) {

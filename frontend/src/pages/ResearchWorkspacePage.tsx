@@ -19,6 +19,8 @@ import {
 import { evidenceFromDto, judgmentFromDto, thesisFromDto } from "../data/adapters.js";
 import { isResearchRef, preferTurn, runOpenRef, turnIdentity } from "../data/identity.js";
 import { isExpandedTurn, isNewResearchRequest, railBelongsToActive, selectActiveTurnRef } from "./researchView.js";
+import { listInvestigations } from "../api/research.js";
+import type { InvestigationDto } from "../api/types.js";
 import { ApiError, getWorkspace, listResearch, getResearch, listSaved, createSaved, deleteSaved, createThesis } from "../api/index.js";
 import { savedKey, savedKindLabel } from "../data/saved.js";
 import type { EvidenceItem, JudgmentView, ThesisView } from "../data/types.js";
@@ -214,6 +216,23 @@ export function ResearchWorkspacePage() {
   // reset — the FIRST history merge after such a mount is skipped, so "New research" lands on
   // the same empty thread whether it was pressed on this page or elsewhere.
   const mountedForNewResearch = useRef(isNewResearchRequest(location.state));
+  // INVESTIGATION (conversational workbench): the thread this page is showing. Its id is what a
+  // follow-up names, so the backend can continue it; the thread's accumulated state drives the
+  // sidebar. A failed read leaves it undefined and the page simply shows no thread — never a
+  // fabricated one.
+  const [investigation, setInvestigation] = useState<InvestigationDto | undefined>(undefined);
+
+  const refreshInvestigation = useCallback(async (): Promise<void> => {
+    try {
+      const rows = await listInvestigations();
+      // The backend marks exactly one investigation current; that is the thread this page is in.
+      setInvestigation(rows.find((r) => r.isCurrent) ?? rows[0]);
+    } catch {
+      setInvestigation(undefined);
+    }
+  }, []);
+
+  useEffect(() => { void refreshInvestigation(); }, [refreshInvestigation]);
 
   // The saved-artifact index (identity → savedId) is loaded from the backend, never inferred;
   // it drives the SAVE/SAVED/UNSAVE state on every contextual control.
@@ -296,6 +315,9 @@ export function ResearchWorkspacePage() {
         { question: stream.question, run: stream.result! },
       ]);
       void refresh();
+      // The investigation gained a turn and a run: re-read the thread so the sidebar and the
+      // next follow-up's target reflect what actually happened.
+      void refreshInvestigation();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamDone, stream.result]);
@@ -588,13 +610,18 @@ export function ResearchWorkspacePage() {
     // its row, but it can never render as the answer to the new question.
     setViewedRef(undefined);
     setSubmitting(true);
-    void submit(q, { confirmed })
+    void submit(q, {
+      confirmed,
+      // CONTINUE THE THREAD: the client names the investigation it is in; the backend still
+      // decides whether this turn actually continues it (a topic switch opens a new one).
+      ...(investigation !== undefined ? { investigationId: investigation.id } : {}),
+    })
       .catch((err: unknown) => {
         // Defensive: streamResearchRequest resolves (never rejects) on handled failures.
         console.error("research stream submission threw", err);
       })
       .finally(() => setSubmitting(false));
-  }, [stream.running, submitting, submit]);
+  }, [stream.running, submitting, submit, investigation]);
 
   const evidenceById = new Map(ws.evidence.map((e) => [e.ref, e]));
   // Active-result selection (state-isolation law): while a run is in flight NOTHING from a
@@ -664,6 +691,55 @@ export function ResearchWorkspacePage() {
               <ConfidenceMeter confidence={ws.judgment.confidence} />
             </div>
           )}
+          {/* INVESTIGATION CONTEXT (Phase 9): the accumulated thread, rendered from the
+              backend's DERIVED state — never assembled client-side. Sections appear only when
+              the investigation actually established something, so an empty section is never
+              noise. It stays a readout, not a dashboard and not advice. */}
+          {investigation !== undefined && (
+            <div className="rail-section">
+              <div className="rail-title">Investigation</div>
+              <div style={{ fontSize: 12.5, lineHeight: 1.5, color: "var(--text-2)", marginBottom: 6 }}>
+                {investigation.title}
+              </div>
+              <div className="mono" style={{ fontSize: 10.5, color: "var(--text-3)", marginBottom: 8 }}>
+                {investigation.state.runCount} research run{investigation.state.runCount === 1 ? "" : "s"}
+              </div>
+
+              {investigation.state.establishedFacts.length > 0 && (
+                <>
+                  <div className="panel-kicker">established</div>
+                  {investigation.state.establishedFacts.slice(0, 4).map((f, i) => (
+                    <div key={`ef${i}`} style={{ fontSize: 12, lineHeight: 1.5, color: "var(--text-2)", marginBottom: 4 }}>{f.statement}</div>
+                  ))}
+                </>
+              )}
+
+              {investigation.thesis !== undefined && (
+                <>
+                  <div className="panel-kicker" style={{ marginTop: 10 }}>your thesis</div>
+                  <div style={{ fontSize: 12, lineHeight: 1.5, color: "var(--text-2)" }}>{investigation.thesis.statement}</div>
+                </>
+              )}
+
+              {investigation.state.competingExplanations.length > 0 && (
+                <>
+                  <div className="panel-kicker" style={{ marginTop: 10 }}>pointing the other way</div>
+                  {investigation.state.competingExplanations.slice(0, 3).map((c, i) => (
+                    <div key={`ce${i}`} style={{ fontSize: 12, lineHeight: 1.5, color: "var(--text-3)", marginBottom: 4 }}>{c.statement}</div>
+                  ))}
+                </>
+              )}
+
+              {investigation.state.unresolvedQuestions.length > 0 && (
+                <>
+                  <div className="panel-kicker" style={{ marginTop: 10 }}>still open</div>
+                  {investigation.state.unresolvedQuestions.slice(0, 4).map((q, i) => (
+                    <div key={`uq${i}`} style={{ fontSize: 12, lineHeight: 1.5, color: "var(--text-3)", marginBottom: 4 }}>{q}</div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
         </>
       }
     >
@@ -671,8 +747,12 @@ export function ResearchWorkspacePage() {
         <div className="search-wrap" style={{ maxWidth: "none" }}>
           <input
             className="search"
-            placeholder="Ask a research question; e.g. why did BTC drop this morning?"
-            aria-label="Ask a research question"
+            placeholder={
+              investigation !== undefined
+                ? `Ask a follow-up on ${investigation.subject}; e.g. focus on ETF flows`
+                : "Ask a research question; e.g. why did BTC drop this morning?"
+            }
+            aria-label={investigation !== undefined ? "Ask a follow-up question" : "Ask a research question"}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && ask(input)}
@@ -680,7 +760,9 @@ export function ResearchWorkspacePage() {
           />
         </div>
         <button className="btn primary" onClick={() => ask(input)} disabled={stream.running || submitting || input.trim().length === 0}>
-          {stream.running || submitting ? `Researching… ${stream.elapsedSeconds > 0 ? `(${stream.elapsedSeconds}s)` : ""}` : "Research"}
+          {stream.running || submitting
+            ? `Researching… ${stream.elapsedSeconds > 0 ? `(${stream.elapsedSeconds}s)` : ""}`
+            : investigation !== undefined ? "Ask follow-up" : "Research"}
         </button>
       </div>
 

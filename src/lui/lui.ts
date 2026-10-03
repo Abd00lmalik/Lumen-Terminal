@@ -49,6 +49,14 @@ import {
   UNCONSTRAINED_RESEARCH,
   type ExecutionConstraints,
 } from "../research/execution-mode.js";
+import {
+  buildInvestigationContext,
+  renderInvestigationContext,
+  type InvestigationContext,
+} from "../research/investigation-context.js";
+import { deriveInvestigationState } from "../research/investigation-state.js";
+import type { ConversationIntent, InvestigationState } from "../domain/investigation.js";
+import { currentRun } from "../domain/run-context.js";
 
 /**
  * Canonical flows whose methodology is thesis-facing: the trader's own thesis is legitimate
@@ -66,6 +74,78 @@ const THESIS_CONTEXT_PHRASE =
 const INDEPENDENT_RESEARCH_FLOW = "INDEPENDENT_RESEARCH";
 
 export { MAX_RESEARCH_ROUNDS };
+
+/**
+ * CUMULATIVE SYNTHESIS RESPONSE (Phase 10) — the "what have we established?" answer.
+ *
+ * Built entirely from the DERIVED investigation state: real evidence, real judgments, the real
+ * competing explanations the engine recorded, the real unresolved requirements, and the trader's
+ * OWN thesis. Nothing here is generated prose about the research; it is a readout of artifacts.
+ *
+ * It ends with what is worth watching, never with a recommendation. "This suggests you should
+ * trim exposure" is not this system's output — the trader makes the decision.
+ */
+export function cumulativeSynthesisResponse(
+  state: InvestigationState,
+): FinalResponse {
+  const section = (title: string, items: readonly string[]): string[] =>
+    items.length === 0 ? [] : [`${title}:`, ...items.map((i) => `- ${i}`)];
+
+  const lines: string[] = [
+    `Across ${state.runCount} research run${state.runCount === 1 ? "" : "s"} on ${state.subject}, here is what this investigation established.`,
+  ];
+  lines.push(...section(
+    "Established",
+    state.establishedFacts.slice(0, 5).map((f) => f.statement),
+  ));
+  lines.push(...section(
+    "What the runs concluded",
+    state.findings.slice(0, 4).map((f) => `${f.statement} (confidence ${f.confidence.toLowerCase()})`),
+  ));
+  lines.push(...section(
+    "Evidence pointing the other way",
+    state.competingExplanations.slice(0, 3).map((c) => c.statement),
+  ));
+  lines.push(...section(
+    "Historical context",
+    state.historicalComparisons.slice(0, 2).map((h) => h.statement),
+  ));
+  if (state.thesis !== undefined) {
+    lines.push(`Your stated thesis: ${state.thesis.statement}`);
+  }
+  lines.push(...section("Still unresolved", state.unresolvedQuestions.slice(0, 5)));
+
+  // Watch items are the unresolved questions and open challenges — the things that would change
+  // the picture. They are NOT a position recommendation, and are phrased as such.
+  const watch = [...state.unresolvedQuestions, ...state.challenges.map((c) => `challenge under test: ${c.statement}`)];
+  lines.push(...section(
+    "What would be worth watching",
+    watch.length === 0 ? [] : watch.slice(0, 5),
+  ));
+  lines.push(
+    "This is research context, not a recommendation. The decision is yours.",
+  );
+
+  const cited = [
+    ...state.establishedFacts.flatMap((f) => [...f.evidenceRefs]),
+    ...state.findings.map((f) => f.judgmentRef),
+  ];
+  return {
+    answer: lines.join("\n"),
+    supportingReasons: state.establishedFacts.slice(0, 4).map((f) => f.statement),
+    opposingReasons: state.competingExplanations.slice(0, 3).map((c) => c.statement),
+    // Confidence about an ACCUMULATED investigation is bounded by its weakest recorded finding,
+    // never asserted: a single LOW finding does not vanish because later runs were firmer.
+    confidence: state.findings.some((f) => f.confidence === "LOW")
+      ? "LOW"
+      : state.findings.length > 0
+        ? "MODERATE"
+        : "UNKNOWN",
+    keyUncertainty: state.unresolvedQuestions[0] ?? "",
+    implication: "",
+    citedObjectRefs: [...new Set(cited)],
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Schema descriptions for the remaining prompt contracts
@@ -420,6 +500,32 @@ export class Lui {
    * a control, and a prohibition that only reaches the model as prompt text is a suggestion.
    */
   private executionConstraints: ExecutionConstraints = UNCONSTRAINED_RESEARCH;
+  /**
+   * INVESTIGATION CONTEXT for this message (Phase 3): the relevant prior turns, findings, open
+   * questions and labelled historical references of the investigation this turn belongs to.
+   *
+   * This is CONTEXT, never evidence: the run below it still retrieves its own evidence and owns
+   * it. The rendered boundary notice travels with it into the prompt, so the model reads the same
+   * distinction the engine enforces.
+   */
+  private investigationContext: InvestigationContext | undefined;
+  /** The conversation-level intent decided for THIS message (routing law). */
+  private conversationIntent: ConversationIntent | undefined;
+  /**
+   * The investigation this turn belongs to, captured while the run was active.
+   *
+   * Captured rather than re-read from run-context at response time: the application ends the run
+   * before the response is assembled, so a lookup there would find nothing and the cumulative
+   * synthesis would silently degrade to an ordinary answer.
+   */
+  private investigationIdForTurn: string | undefined;
+  /** The accumulated investigation state, derived from real artifacts when a thread exists. */
+  private investigationState(): InvestigationState | undefined {
+    if (this.investigationIdForTurn === undefined) return undefined;
+    const investigation = this.options.workspace.getInvestigation(this.investigationIdForTurn);
+    if (investigation === undefined) return undefined;
+    return deriveInvestigationState(this.options.workspace, investigation);
+  }
 
   constructor(private readonly options: LuiOptions) {}
 
@@ -447,6 +553,27 @@ export class Lui {
     // model later classifies the target as. A raw observation about Bitcoin must not inherit an
     // active Ethereum thesis from the workspace.
     if (!this.executionConstraints.allowThesisContext) this.thesisContextRequired = false;
+    // INVESTIGATION CONTEXT: build the prior-conversation context for the investigation this
+    // submission belongs to (undefined for the first turn of a thread). It is built ONCE per
+    // message, before any model call, so a follow-up is never planned as if it were the first
+    // question of the conversation.
+    const investigationId = currentRun()?.investigationId;
+    this.investigationContext = investigationId !== undefined
+      ? buildInvestigationContext({
+          workspace: this.options.workspace,
+          investigation: this.options.workspace.getInvestigation(investigationId),
+          question: userMessage,
+        })
+      : undefined;
+    this.investigationIdForTurn = investigationId;
+    // The routing decision was already made and RECORDED as a conversation turn by the
+    // application layer (a state transition, not a prompt instruction). The LUI reads the
+    // recorded intent rather than re-deciding it, so the two can never disagree.
+    this.conversationIntent = investigationId === undefined
+      ? undefined
+      : [...this.options.workspace.listTurns(investigationId)]
+          .reverse()
+          .find((t) => t.role === "TRADER" && t.content === userMessage)?.intent;
 
     // 1–2. INPUT NORMALIZATION + INTENT DETECTION (validated; model failure aborts honestly).
     progress?.(progressEvent("request_accepted", new Date(), "request accepted", { messageLength: userMessage.length }));
@@ -1006,6 +1133,12 @@ export class Lui {
         ...(this.executionConstraints !== UNCONSTRAINED_RESEARCH
           ? { executionConstraints: this.executionConstraints }
           : {}),
+        // CONVERSATION CONTEXT: the investigation's prior state reaches the research run as
+        // labelled context. The run still retrieves and owns its own evidence; the boundary
+        // notice below says so to the model exactly as the engine enforces it.
+        ...(this.investigationContext?.investigationId !== undefined
+          ? { investigationContext: renderInvestigationContext(this.investigationContext) }
+          : {}),
         constraints: step.params["constraints"] !== undefined ? step.params["constraints"].split(";").map((s) => s.trim()).filter((s) => s !== "") : [],
         capabilityParams: {
           // Same deterministic backstop as dispatchM4Flow: the resolved target, a canonical
@@ -1355,6 +1488,22 @@ export class Lui {
   // ----- response -------------------------------------------------------------
 
   private async buildResponse(result: LuiResult, userMessage: string): Promise<FinalResponse | undefined> {
+    /**
+     * SYNTHESIS TURN (Phase 10): "what have we established, and what should I still be watching?"
+     *
+     * This is the turn that proves a conversation accumulated understanding rather than seven
+     * disconnected answers, so its answer is built from the DERIVED investigation state — real
+     * evidence, real judgments, real gaps, the trader's own thesis — and not from this run's
+     * retrieval alone.
+     *
+     * It is still not advice. The wording reports what was established, what is contested, what
+     * is unresolved and what is worth watching; it never tells the trader what to do, because the
+     * decision is theirs.
+     */
+    if (this.conversationIntent === "SYNTHESIS") {
+      const state = this.investigationState();
+      if (state !== undefined) return cumulativeSynthesisResponse(state);
+    }
     /**
      * RAW-OBSERVATION RESPONSE (execution contract): the requested fields and nothing else.
      *

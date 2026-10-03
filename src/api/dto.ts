@@ -1109,6 +1109,59 @@ export interface ResearchResponseDTO {
   readonly historicalAnalysis?: HistoricalAnalysisDTO;
 }
 
+/**
+ * INVESTIGATION (conversational workbench). A thread of isolated research runs — the
+ * conversation-level read surface. The frontend renders this; it never derives thread state.
+ */
+export interface InvestigationDTO {
+  readonly id: string;
+  readonly title: string;
+  readonly subject: string;
+  readonly status: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly isCurrent: boolean;
+  /** The conversation, oldest first. */
+  readonly turns: readonly ConversationTurnDTO[];
+  /** The research runs this conversation produced, oldest first. */
+  readonly runs: readonly {
+    readonly researchRef: string;
+    readonly runId: string;
+    readonly userQuestion: string;
+    readonly flow: string;
+    readonly status: string;
+    readonly judgmentRef?: string;
+    readonly evidenceCount: number;
+  }[];
+  /** The trader's OWN thesis for this investigation, if they stated one. Never inferred. */
+  readonly thesis?: { readonly thesisRef: string; readonly statement: string };
+  /** Accumulated state DERIVED from real research artifacts (never a generated summary). */
+  readonly state: InvestigationStateDTO;
+}
+
+export interface ConversationTurnDTO {
+  readonly id: string;
+  readonly investigationId: string;
+  readonly role: string;
+  readonly content: string;
+  readonly intent: string;
+  readonly researchRunId?: string;
+  readonly continuedInvestigation: boolean;
+  readonly createdAt: string;
+}
+
+export interface InvestigationStateDTO {
+  readonly subject: string;
+  readonly establishedFacts: readonly { readonly statement: string; readonly runId?: string; readonly evidenceRefs: readonly string[] }[];
+  readonly findings: readonly { readonly statement: string; readonly runId?: string; readonly judgmentRef: string; readonly confidence: string }[];
+  readonly competingExplanations: readonly { readonly statement: string; readonly runId?: string }[];
+  readonly unresolvedQuestions: readonly string[];
+  readonly thesis?: { readonly thesisRef: string; readonly statement: string };
+  readonly challenges: readonly { readonly ref: string; readonly statement: string }[];
+  readonly historicalComparisons: readonly { readonly runId: string; readonly statement: string }[];
+  readonly runCount: number;
+}
+
 /** API view of the Flow 5 episode analysis (episode-analysis.ts shapes, transport-safe). */
 export interface HistoricalAnalysisDTO {
   readonly currentSetup?: {

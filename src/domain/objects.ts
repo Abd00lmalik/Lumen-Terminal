@@ -397,6 +397,12 @@ export interface Research {
   readonly runId?: string;
   /** The trader's verbatim question for the run — the text history is allowed to show. */
   readonly userQuestion?: string;
+  /**
+   * INVESTIGATION CONVERSATION: the conversation this run belongs to. One turn of a multi-turn
+   * investigation creates one run, and each run keeps its OWN evidence ownership — belonging to
+   * the same conversation never makes two runs' evidence interchangeable.
+   */
+  readonly investigationRef?: string;
   readonly status: ObjectStatus;
   readonly branchRefs: readonly string[];
   readonly claimRefs: readonly string[];
@@ -410,7 +416,7 @@ export interface Research {
 }
 
 export function createResearch(
-  input: { objective: string; question: string; flow: string; runId?: string; userQuestion?: string },
+  input: { objective: string; question: string; flow: string; runId?: string; userQuestion?: string; investigationRef?: string },
   origin: ProvenanceOrigin,
   at = new Date(),
 ): Research {
@@ -421,6 +427,7 @@ export function createResearch(
     flow: input.flow,
     ...(input.runId !== undefined ? { runId: input.runId } : {}),
     ...(input.userQuestion !== undefined ? { userQuestion: input.userQuestion } : {}),
+    ...(input.investigationRef !== undefined ? { investigationRef: input.investigationRef } : {}),
     status: "DRAFT",
     branchRefs: Object.freeze([]),
     claimRefs: Object.freeze([]),

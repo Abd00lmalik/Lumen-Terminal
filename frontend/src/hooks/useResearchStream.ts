@@ -91,7 +91,7 @@ export function useResearchStream() {
   const patch = useCallback((fn: (prev: StreamState) => StreamState) => setState(fn), []);
 
   const submit = useCallback(
-    (question: string, options?: { confirmed?: boolean }) => {
+    (question: string, options?: { confirmed?: boolean; investigationId?: string }) => {
       stopTimer();
       abortRef.current?.abort(); // defensive: detach any leftover stream before a new one
       runToken.current += 1;

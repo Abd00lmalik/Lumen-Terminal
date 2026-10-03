@@ -372,6 +372,17 @@ export interface AdaptiveLoopOptions {
    * `UNCONSTRAINED_RESEARCH`, so an ordinary analytical run is untouched.
    */
   readonly executionConstraints?: ExecutionConstraints;
+  /**
+   * CONVERSATION CONTEXT (investigation workbench): the rendered prior state of the investigation
+   * this turn belongs to — prior turns, prior findings, open questions, the trader's thesis and
+   * explicitly-labelled historical references.
+   *
+   * It reaches the run as CONTEXT ONLY. It never enters the candidate evidence pool, never
+   * satisfies a requirement, and never becomes this run's evidence: `buildResearchContext` is
+   * untouched and still admits only this run's own evidence. The rendered text carries the
+   * boundary notice so the model is told the same thing the engine enforces.
+   */
+  readonly investigationContext?: string;
   /** Fixed news-style capability params (asset etc.) merged into every capability call. */
   readonly capabilityParams?: Readonly<Record<string, unknown>>;
   readonly maxRounds?: number;
@@ -1112,6 +1123,10 @@ export async function runAdaptiveResearch(
           .join(" ")
           .slice(0, 40000),
         executedCapabilities: [...new Set(allExecutions.map((e) => e.capability))],
+        // CONVERSATION CONTEXT reaches the SYNTHESIZER, never the evidence pool: a prior run's
+        // finding may inform the prose, but `evidenceText` above is this run's evidence alone, so
+        // the contract validator still refuses any claim the current run cannot support.
+        ...(options.investigationContext !== undefined ? { conversationContext: options.investigationContext } : {}),
       },
     });
     if (synthesis !== undefined) {

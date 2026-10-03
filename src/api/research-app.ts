@@ -31,6 +31,7 @@ import {
   provenanceToDTO, toHistoricalAnalysisDTO, uiText, savedArtifactToDTO, savedArtifactToSummaryDTO,
   challengeToDTO, monitorToDTO, monitoringAssessmentToDTO, monitorNotificationToDTO,
   type ContinuitySnapshotDTO,
+  type InvestigationDTO,
   type ResearchResponseDTO, type ResearchDiagnosticsDTO, type RequirementDiagnosticDTO, type AnswerDTO, type EvidenceDTO, type JudgmentDTO,
   type ResearchRunSummaryDTO, type ResearchRunAggregateDTO, type ResearchRecordTierDTO,
   type SavedItemDTO, type SavedItemSummaryDTO, type SavedOriginDTO, type ChallengeRunDTO,
@@ -44,6 +45,14 @@ import {
   UNCONSTRAINED_RESEARCH,
   type ExecutionConstraints,
 } from "../research/execution-mode.js";
+import { createTurn, withTurnRun } from "../domain/investigation.js";
+import {
+  investigationSubjectFrom,
+  investigationTitleFrom,
+  routeConversation,
+} from "../lui/conversation-routing.js";
+import { investigationHasResearch } from "../research/investigation-context.js";
+import { deriveInvestigationState } from "../research/investigation-state.js";
 
 /** F0 session stub (FRONTEND_ARCHITECTURE.md §18): one local trader identity, server-side only. */
 export const TRADER_ORIGIN: ProvenanceOrigin = { kind: "trader", detail: "F0 API session (local trader identity)" };
@@ -229,6 +238,15 @@ export class ResearchApp {
     message: string,
     onProgress?: ProgressListener,
     confirmed = false,
+    /**
+     * CONVERSATION CONTINUITY: continue THIS investigation instead of routing a fresh one.
+     *
+     * Undefined = "you decide" (the router picks, from the trader's own words). An explicit id
+     * means the trader is in that thread — which the UI sends when they follow up. Either way
+     * the turn creates its OWN research run: continuity is a reference between runs, never a
+     * shared owner of their evidence.
+     */
+    investigationId?: string,
   ): Promise<ResearchResponseDTO> {
     const trimmed = typeof message === "string" ? message.trim() : "";
     if (trimmed.length === 0) {
@@ -261,7 +279,50 @@ export class ResearchApp {
     // with another submission's answer. The per-invocation token makes a run id globally
     // unique; the readable prefix is kept for logs.
     const runId = `${newId(idPrefixes.run)}-${crypto.randomUUID().slice(0, 8)}`;
-    beginRun({ runId, userQuestion: submittedQuestion });
+
+    // CONVERSATION ROUTING (Phase 2/4/6): decide, from the trader's own words, whether this
+    // turn CONTINUES the current investigation or STARTS a new one, and what it means in the
+    // context of the conversation. The decision is recorded as STRUCTURED STATE (an
+    // investigation + a turn), never as a prompt instruction, because it decides whether prior
+    // context may reach this run at all.
+    const ws0 = this.ws();
+    const requested = investigationId !== undefined ? ws0.getInvestigation(investigationId) : undefined;
+    const current = requested ?? ws0.currentInvestigation();
+    const route = routeConversation({
+      message: submittedQuestion,
+      investigation: current,
+      hasPriorResearch: current !== undefined && investigationHasResearch(ws0, current.id),
+      hasInvestigationThesis: current?.thesisRef !== undefined,
+    });
+    // A route may only continue an investigation the caller actually named. When the client
+    // sends no id the trader is wherever the UI says they are (the current one), and the router
+    // decides; when the client names one, that thread is the only candidate.
+    const continuing = route.action === "CONTINUE" && current !== undefined;
+    const investigation = continuing
+      ? current
+      : ws0.addInvestigation(
+          {
+            title: investigationTitleFrom(submittedQuestion),
+            subject: route.subject ?? current?.subject ?? investigationSubjectFrom(submittedQuestion),
+          },
+          origin,
+        );
+
+    const traderTurn = ws0.appendTurn(
+      createTurn({
+        investigationId: investigation.id,
+        role: "TRADER",
+        content: submittedQuestion,
+        intent: route.intent,
+        continuedInvestigation: continuing,
+      }),
+    );
+
+    beginRun({
+      runId,
+      userQuestion: submittedQuestion,
+      investigationId: investigation.id,
+    });
     try {
       // Honest wall-clock budget: finish (and persist) before the caller's execution window
       // expires so a run always delivers its real state instead of dying mid-flight. Sized for
@@ -290,7 +351,28 @@ export class ResearchApp {
       || result.thesisAssessment !== undefined;
     if (mutated) await this.persist();
 
-    return await this.toResponseDTO(crypto.randomUUID(), result, submittedQuestion);
+    // Bind the turn to the run it actually produced (recorded after the fact, never guessed),
+    // and record Lumen's reply so the thread reads as a conversation on the next open.
+    const response = await this.toResponseDTO(crypto.randomUUID(), result, submittedQuestion);
+    const producedRun = response.researchRef;
+    if (producedRun !== undefined) {
+      this.ws().appendTurn(withTurnRun(traderTurn, producedRun), producedRun);
+    }
+    if (producedRun !== undefined) {
+      this.ws().appendTurn(
+        createTurn({
+          investigationId: investigation.id,
+          role: "LUMEN",
+          content: response.answer.answer,
+          intent: route.intent,
+          ...(producedRun !== undefined ? { researchRunId: producedRun } : {}),
+          continuedInvestigation: continuing,
+        }),
+        producedRun,
+      );
+    }
+    await this.persist();
+    return response;
   }
 
   /** Map a LuiResult into the safe response DTO (epistemic status preserved as data). */
@@ -636,6 +718,112 @@ export class ResearchApp {
 
   continuity() {
     return continuitySnapshotToDTO(this.ws().getContinuitySnapshot());
+  }
+
+  // ------------------------------------------------------------------
+  // Investigations (conversational workbench)
+  // ------------------------------------------------------------------
+
+  /**
+   * One investigation as the trader sees it: the conversation, the runs it produced, and the
+   * accumulated state DERIVED from real research artifacts.
+   *
+   * Every read goes through the investigation's OWN run identity, so a thread can never show
+   * another thread's runs — and, more importantly, never another run's evidence as its own.
+   */
+  investigation(ref: string): InvestigationDTO | undefined {
+    const ws = this.ws();
+    const investigation = ws.getInvestigation(ref);
+    if (investigation === undefined) return undefined;
+    const runs = ws.investigationRuns(investigation.id);
+    const state = deriveInvestigationState(ws, investigation);
+    const thesis = investigation.thesisRef === undefined
+      ? undefined
+      : (() => {
+          const t = ws.getThesis(investigation.thesisRef);
+          return t === undefined ? undefined : { thesisRef: t.id, statement: t.statement };
+        })();
+    return {
+      id: investigation.id,
+      title: investigation.title,
+      subject: investigation.subject,
+      status: investigation.status,
+      createdAt: investigation.createdAt,
+      updatedAt: investigation.updatedAt,
+      isCurrent: ws.currentInvestigationIdValue === investigation.id,
+      turns: ws.listTurns(investigation.id).map((t) => ({
+        id: t.id,
+        investigationId: t.investigationId,
+        role: t.role,
+        content: t.content,
+        intent: t.intent,
+        ...(t.researchRunId !== undefined ? { researchRunId: t.researchRunId } : {}),
+        continuedInvestigation: t.continuedInvestigation,
+        createdAt: t.createdAt,
+      })),
+      runs: runs.map((r) => {
+        // Run identity from the run itself; evidence/judgment counts by OWNERSHIP, so the
+        // thread reports what each run actually owns and never what it may see.
+        const judgments = ws.judgmentsForResearch(r.id);
+        return {
+          researchRef: r.id,
+          runId: r.runId ?? r.id,
+          userQuestion: r.userQuestion ?? r.question,
+          flow: r.flow,
+          status: r.status,
+          ...(judgments[0] !== undefined ? { judgmentRef: judgments[0].id } : {}),
+          evidenceCount: ws.evidenceForResearch(r.id).length,
+        };
+      }),
+      ...(thesis !== undefined ? { thesis } : {}),
+      state: {
+        subject: state.subject,
+        establishedFacts: state.establishedFacts.map((f) => ({
+          statement: f.statement,
+          ...(f.runId !== undefined ? { runId: f.runId } : {}),
+          evidenceRefs: [...f.evidenceRefs],
+        })),
+        findings: state.findings.map((f) => ({
+          statement: f.statement, ...(f.runId !== undefined ? { runId: f.runId } : {}), judgmentRef: f.judgmentRef, confidence: f.confidence,
+        })),
+        competingExplanations: state.competingExplanations.map((c) => ({
+          statement: c.statement, ...(c.runId !== undefined ? { runId: c.runId } : {}),
+        })),
+        unresolvedQuestions: [...state.unresolvedQuestions],
+        ...(state.thesis !== undefined ? { thesis: state.thesis } : {}),
+        challenges: state.challenges.map((c) => ({ ref: c.ref, statement: c.statement })),
+        historicalComparisons: state.historicalComparisons.map((h) => ({ runId: h.runId, statement: h.statement })),
+        runCount: state.runCount,
+      },
+    };
+  }
+
+  /** The investigation list (newest first) plus which one the trader is currently in. */
+  listInvestigations(): readonly InvestigationDTO[] {
+    return this.ws()
+      .listInvestigations()
+      .map((inv) => this.investigation(inv.id))
+      .filter((inv): inv is InvestigationDTO => inv !== undefined);
+  }
+
+  /** Move the trader into a thread (what opening an investigation in the UI does). */
+  async enterInvestigation(ref: string): Promise<InvestigationDTO> {
+    this.ws().setCurrentInvestigation(ref);
+    await this.persist();
+    return this.investigation(ref)!;
+  }
+
+  /**
+   * THESIS CONTINUITY (Phase 7): attach the trader's OWN thesis to the investigation.
+   *
+   * The thesis object must already exist (created from an explicit trader statement). This
+   * method therefore cannot invent one — an ordinary sentence in a conversation never becomes a
+   * thesis here.
+   */
+  async attachThesisToInvestigation(investigationRef: string, thesisRef: string): Promise<InvestigationDTO> {
+    this.ws().attachInvestigationThesis(investigationRef, thesisRef);
+    await this.persist();
+    return this.investigation(investigationRef)!;
   }
 
   /**

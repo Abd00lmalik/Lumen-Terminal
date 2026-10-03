@@ -750,3 +750,54 @@ export interface SavedCreateRequest {
   readonly tags?: readonly string[];
   readonly rationale?: string;
 }
+
+/**
+ * INVESTIGATION (conversational workbench). A thread of ISOLATED research runs — the trader
+ * asks follow-ups without restating context, and each turn still gets its own run and its own
+ * evidence ownership. The client renders this; it never derives thread state itself.
+ */
+export interface InvestigationDto {
+  readonly id: string;
+  readonly title: string;
+  readonly subject: string;
+  readonly status: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly isCurrent: boolean;
+  readonly turns: readonly ConversationTurnDto[];
+  readonly runs: readonly {
+    readonly researchRef: string;
+    readonly runId: string;
+    readonly userQuestion: string;
+    readonly flow: string;
+    readonly status: string;
+    readonly judgmentRef?: string;
+    readonly evidenceCount: number;
+  }[];
+  readonly thesis?: { readonly thesisRef: string; readonly statement: string };
+  readonly state: InvestigationStateDto;
+}
+
+export interface ConversationTurnDto {
+  readonly id: string;
+  readonly investigationId: string;
+  readonly role: string;
+  readonly content: string;
+  readonly intent: string;
+  readonly researchRunId?: string;
+  readonly continuedInvestigation: boolean;
+  readonly createdAt: string;
+}
+
+/** Accumulated decision context, DERIVED server-side from real research artifacts. */
+export interface InvestigationStateDto {
+  readonly subject: string;
+  readonly establishedFacts: readonly { readonly statement: string; readonly runId?: string; readonly evidenceRefs: readonly string[] }[];
+  readonly findings: readonly { readonly statement: string; readonly runId?: string; readonly judgmentRef: string; readonly confidence: string }[];
+  readonly competingExplanations: readonly { readonly statement: string; readonly runId?: string }[];
+  readonly unresolvedQuestions: readonly string[];
+  readonly thesis?: { readonly thesisRef: string; readonly statement: string };
+  readonly challenges: readonly { readonly ref: string; readonly statement: string }[];
+  readonly historicalComparisons: readonly { readonly runId: string; readonly statement: string }[];
+  readonly runCount: number;
+}

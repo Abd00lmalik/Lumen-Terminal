@@ -36,6 +36,15 @@ import {
   type MonitorLifecycleStatus, type MonitorCondition,
 } from "./memory.js";
 import type { ObjectStatus } from "./lifecycle.js";
+import {
+  createInvestigation,
+  transitionInvestigation,
+  withThesis,
+  withTurn,
+  type ConversationTurn,
+  type Investigation,
+  type InvestigationStatus,
+} from "./investigation.js";
 import { appendProvenance, createProvenance, type ProvenanceOrigin } from "./provenance.js";
 import { newId, bumpIdCounterPast, bumpIdCounterPastId, idPrefixes, seedIdCountersFromIds } from "./ids.js";
 import { currentRun } from "./run-context.js";
@@ -95,6 +104,15 @@ export interface WorkspaceSnapshot {
   /** M6 (audit D1): the trader's explicit active-thesis selection (working state). */
   readonly activeThesisId?: string;
   /**
+   * Conversational workbench: durable investigations + their conversation turns. Additive and
+   * optional — a snapshot without them (every legacy workspace) loads with none, so no
+   * investigation is required for research to run.
+   */
+  readonly investigations?: readonly Investigation[];
+  readonly conversationTurns?: readonly ConversationTurn[];
+  /** The investigation the trader is currently in (working state; never inferred). */
+  readonly currentInvestigationId?: string;
+  /**
    * Run presentation records per research id (see WorkspaceSnapshot.researchResponses):
    * one slim record per completed run, retained without eviction so any historical run
    * stays fully reconstructable after a restart.
@@ -136,8 +154,137 @@ export class Workspace {
   private activeThesisId: string | undefined;
   /** Persisted final responses per research id (see WorkspaceSnapshot.researchResponses). */
   private readonly researchResponses = new Map<string, unknown>();
+  /**
+   * INVESTIGATIONS (conversational workbench). An investigation is a THREAD of research runs,
+   * never an owner of them: it references runs, and a run's evidence ownership stays with that
+   * run alone.
+   */
+  private readonly investigations = new Map<string, Investigation>();
+  private readonly conversationTurns = new Map<string, ConversationTurn>();
+  /** The investigation the trader is currently in (explicit working state, never inferred). */
+  private currentInvestigationId: string | undefined;
 
   // ----- theses (trader-owned; system never silently mutates; thesis.md) -----
+
+  // ----- investigations (conversational workbench) -----
+
+  /**
+   * Open a new investigation. The trader's subject is recorded verbatim; the system never
+   * invents one, and a question about a subject the trader named starts its own thread rather
+   * than joining an existing one (topic-switch law).
+   */
+  addInvestigation(input: { title: string; subject: string }, origin: ProvenanceOrigin, at?: Date): Investigation {
+    const investigation = createInvestigation(input, origin, at);
+    this.investigations.set(investigation.id, investigation);
+    this.currentInvestigationId = investigation.id;
+    return investigation;
+  }
+
+  getInvestigation(id: string): Investigation | undefined {
+    return this.investigations.get(id);
+  }
+
+  listInvestigations(): readonly Investigation[] {
+    // Newest first: an investigation list is a workbench, and the live thread leads.
+    return [...this.investigations.values()].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+  }
+
+  /** The investigation the trader is CURRENTLY in (explicit working state, never inferred). */
+  currentInvestigation(): Investigation | undefined {
+    return this.currentInvestigationId === undefined ? undefined : this.investigations.get(this.currentInvestigationId);
+  }
+
+  get currentInvestigationIdValue(): string | undefined {
+    return this.currentInvestigationId;
+  }
+
+  /** Move the trader into a thread (what opening an investigation in the UI does). */
+  setCurrentInvestigation(id: string): Investigation {
+    const investigation = this.investigations.get(id);
+    if (investigation === undefined) throw new Error(`cannot enter unknown investigation ${id}; no invented state`);
+    this.currentInvestigationId = id;
+    return investigation;
+  }
+
+  /**
+   * Record a conversation turn and bind it to the run it produced.
+   *
+   * One turn = at most one run identity. The investigation accumulates the reference; it never
+   * takes the run's evidence.
+   */
+  appendTurn(turn: ConversationTurn, runRef?: string, at?: Date): ConversationTurn {
+    const investigation = this.investigations.get(turn.investigationId);
+    if (investigation === undefined) {
+      throw new Error(`cannot record a turn on unknown investigation ${turn.investigationId}`);
+    }
+    this.conversationTurns.set(turn.id, turn);
+    this.investigations.set(investigation.id, withTurn(investigation, turn.id, runRef, at));
+    return turn;
+  }
+
+  getTurn(id: string): ConversationTurn | undefined {
+    return this.conversationTurns.get(id);
+  }
+
+  /** An investigation's conversation, oldest first. */
+  listTurns(investigationId: string): readonly ConversationTurn[] {
+    return [...this.conversationTurns.values()]
+      .filter((t) => t.investigationId === investigationId)
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id.localeCompare(b.id)));
+  }
+
+  listConversationTurns(): readonly ConversationTurn[] {
+    return [...this.conversationTurns.values()];
+  }
+
+  /** Every research run the conversation produced, resolved to its Research objects. */
+  investigationRuns(investigationId: string): readonly Research[] {
+    const investigation = this.investigations.get(investigationId);
+    if (investigation === undefined) return [];
+    // Ordered by the investigation's own runRefs (submission order), not by map insertion:
+    // an absorb can insert objects in arbitrary order, which would scramble the thread.
+    const ordered: Research[] = [];
+    for (const runRef of investigation.runRefs) {
+      const member = [...this.researches.values()].find((r) => r.id === runRef || r.runId === runRef);
+      if (member !== undefined && !ordered.includes(member)) ordered.push(member);
+    }
+    return ordered;
+  }
+
+  /** The run a turn produced, if any (a turn that asked a question without research has none). */
+  runForTurn(turnId: string): Research | undefined {
+    const turn = this.conversationTurns.get(turnId);
+    if (turn?.researchRunId === undefined) return undefined;
+    return this.researches.get(turn.researchRunId);
+  }
+
+  /**
+   * THESIS CONTINUITY: attach the trader's OWN thesis to the investigation.
+   *
+   * Requires a thesis that already EXISTS in the workspace — a thesis is created from an
+   * explicit trader statement or an explicit confirmation flow, never inferred from a
+   * conversation turn. This method therefore cannot invent a thesis.
+   */
+  attachInvestigationThesis(investigationId: string, thesisRef: string, at?: Date): Investigation {
+    const investigation = this.investigations.get(investigationId);
+    if (investigation === undefined) {
+      throw new Error(`cannot attach a thesis to unknown investigation ${investigationId}`);
+    }
+    if (!this.theses.has(thesisRef)) {
+      throw new Error(`cannot attach unknown thesis ${thesisRef}; no invented thesis`);
+    }
+    const next = withThesis(investigation, thesisRef, at);
+    this.investigations.set(investigationId, next);
+    return next;
+  }
+
+  transitionInvestigation(id: string, to: InvestigationStatus, origin: ProvenanceOrigin, note: string, at?: Date): Investigation {
+    const investigation = this.investigations.get(id);
+    if (investigation === undefined) throw new Error(`unknown investigation ${id}`);
+    const next = transitionInvestigation(investigation, to, origin, note, at);
+    this.investigations.set(id, next);
+    return next;
+  }
 
   addResearch(input: { objective: string; question: string; flow: string }, origin: ProvenanceOrigin, at?: Date): Research {
     // Stamp the active user submission (run-context): every Research created during one
@@ -145,7 +292,14 @@ export class Workspace {
     // entry per question instead of one per internal plan step.
     const run = currentRun();
     const research = createResearch(
-      run !== undefined ? { ...input, runId: run.runId, userQuestion: run.userQuestion } : input,
+      run !== undefined
+        ? {
+            ...input,
+            runId: run.runId,
+            userQuestion: run.userQuestion,
+            ...(run.investigationId !== undefined ? { investigationRef: run.investigationId } : {}),
+          }
+        : input,
       origin,
       at,
     );
@@ -952,6 +1106,21 @@ export class Workspace {
     for (const raw of snapshot.researchResponses ?? []) {
       if (!this.researchResponses.has(raw.researchId)) this.researchResponses.set(raw.researchId, raw.response);
     }
+    // CONVERSATION ABSORPTION: another instance may have extended the thread this instance is
+    // serving. Union by id (an investigation/turn is never deleted, only extended), and the
+    // more-revised object wins — the same law as every other collection here. The CURRENT
+    // investigation pointer is never taken from a remote snapshot: which thread the trader is in
+    // is local working state, and a warm instance must not yank the trader into a thread another
+    // instance opened.
+    for (const raw of snapshot.investigations ?? []) {
+      const existing = this.investigations.get(raw.id);
+      if (existing === undefined || revisionsOf(raw) > revisionsOf(existing)) this.investigations.set(raw.id, raw);
+      bumpIdCounterPastId(raw.id); // inv_ counter continuity
+    }
+    for (const raw of snapshot.conversationTurns ?? []) {
+      if (!this.conversationTurns.has(raw.id)) this.conversationTurns.set(raw.id, raw);
+      bumpIdCounterPastId(raw.id); // tn_ counter continuity
+    }
   }
 
   /**
@@ -1438,6 +1607,11 @@ export class Workspace {
       ...(this.savedTombstones.size > 0 ? { savedTombstones: this.listSavedTombstones() } : {}),
       // M6 (audit D1): the trader's explicit selection is working state and must round-trip.
       ...(this.activeThesisId !== undefined ? { activeThesisId: this.activeThesisId } : {}),
+      // Conversational workbench: investigations + turns round-trip so a thread survives a
+      // restart and a refresh exactly as research does.
+      ...(this.investigations.size > 0 ? { investigations: this.listInvestigations() } : {}),
+      ...(this.conversationTurns.size > 0 ? { conversationTurns: this.listConversationTurns() } : {}),
+      ...(this.currentInvestigationId !== undefined ? { currentInvestigationId: this.currentInvestigationId } : {}),
       ...(this.researchResponses.size > 0
         ? { researchResponses: [...this.researchResponses.entries()].map(([researchId, response]) => ({ researchId, response })) }
         : {}),
@@ -1484,12 +1658,18 @@ export class Workspace {
     }
     for (const r of snap.researchResponses ?? []) ws.researchResponses.set(r.researchId, r.response);
     if (snap.activeThesisId !== undefined) ws.activeThesisId = snap.activeThesisId;
+    for (const inv of snap.investigations ?? []) ws.investigations.set(inv.id, inv);
+    for (const t of snap.conversationTurns ?? []) ws.conversationTurns.set(t.id, t);
+    if (snap.currentInvestigationId !== undefined) ws.currentInvestigationId = snap.currentInvestigationId;
     // Counter continuity (persistence law): a restored graph must never re-mint existing ids.
     // Without this, a server restart OVERWROTE persisted objects (fresh process → rs_000001 again).
     seedIdCountersFromIds([
       ...snap.researches, ...snap.sources, ...snap.evidence, ...snap.claims, ...snap.hypotheses,
       ...snap.analyses, ...snap.judgments, ...snap.branches, ...(snap.theses ?? []),
       ...(snap.savedArtifacts ?? []), ...(snap.memories ?? []), ...(snap.monitors ?? []),
+      // Counter continuity for the conversational prefixes (inv_ / tn_): a cold process must
+      // never re-mint an investigation or turn id that already exists in the loaded thread.
+      ...(snap.investigations ?? []), ...(snap.conversationTurns ?? []),
     ].map((o) => o?.id).filter((id): id is string => typeof id === "string"));
     // RUN-IDENTITY CONTINUITY (audit B1): a run id is NOT an object id — it exists only as
     // `Research.runId` — so the seeding above never sees one and the run counter restarted at 1
