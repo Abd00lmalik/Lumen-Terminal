@@ -1091,6 +1091,15 @@ export interface ResearchResponseDTO {
   readonly researchRunId?: string;
   readonly evidenceRefs: readonly string[];
   readonly judgmentRef?: string;
+  /**
+   * EXECUTION MODE: how this run was executed.
+   *
+   * `RAW_OBSERVATION` means the request asked for a measurement only, and the application
+   * enforced that: no judgment, no synthesis, no challenge requirement, no actionable insight,
+   * no canonical research flow. The client uses this to present a measurement as a measurement —
+   * it is a statement about the RESPONSE SHAPE, never a hint that content may be trimmed.
+   */
+  readonly executionMode?: "RESEARCH" | "RAW_OBSERVATION";
   /** Epistemic view of the evidence this request produced (classes preserved). */
   readonly evidence: readonly EvidenceDTO[];
   readonly judgments: readonly JudgmentDTO[];

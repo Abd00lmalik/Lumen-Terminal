@@ -16,6 +16,7 @@
 
 import { sentencesOf } from "./contract-checks.js";
 import { expandSubjectTerms } from "../domain/instruments.js";
+import { withoutProhibitions } from "./execution-mode.js";
 
 export type TimeSensitivity = "CURRENT" | "RECENT" | "HISTORICAL" | "ANY";
 
@@ -488,7 +489,12 @@ export function subjectClassOfKind(kind: string | undefined): SubjectMarketClass
 }
 
 export function questionTypeOf(question: string): QuestionType {
-  const q = question.toLowerCase();
+  // NEGATION-AWARE CLASSIFICATION (execution-contract law): classify what the trader ASKED for,
+  // never what they forbade. The reproduction request said "Do not perform synthesis,
+  // falsification, counterevidence analysis" and was classified FALSIFICATION — the ban on
+  // falsification was read as a request for it, which then earned a real FALSIFICATION round and
+  // challenge requirements. Prohibition clauses are removed before any pattern below is tested.
+  const q = withoutProhibitions(question).toLowerCase();
   if (/\bprove\b.*\bwrong\b|\binvalidate\b|\bfalsif\w*|\bwhat would change\b|\bdisconfirm\w*/.test(q)) return "FALSIFICATION";
   // RAW OBSERVATION (question-type integrity): "what is Bitcoin's current spot price?",
   // "retrieve one fresh observation", "what is the latest quote" ask for a measurement, not
@@ -713,6 +719,25 @@ const ENGINE_REQUIRED: Readonly<Record<QuestionType, readonly EngineRequirementS
     },
   ],
 };
+
+/**
+ * MODE-SCOPED LEDGER (execution-contract law): drop the ledger rows whose ROLE the request's
+ * execution contract forbids.
+ *
+ * `completeRequirements` governs the rows the ENGINE adds, but the PLANNER can also propose a
+ * requirement, and a plan for "retrieve one fresh observation" happily proposes "evidence that
+ * weakens the leading view". Stripping only engine-added rows would leave the planner's
+ * counterevidence row in place, where it still drives the capability floor, the coverage
+ * assessment and the completion gate. A forbidden role is removed wherever it came from.
+ */
+export function dropForbiddenRequirementRoles(
+  requirements: readonly ResearchRequirement[],
+  forbiddenRoles: readonly RequirementRole[],
+): readonly ResearchRequirement[] {
+  if (forbiddenRoles.length === 0) return requirements;
+  const blocked = new Set(forbiddenRoles);
+  return requirements.filter((r) => !blocked.has(r.role));
+}
 
 /**
  * Complete the ledger against the question's decision type: every missing engine-required

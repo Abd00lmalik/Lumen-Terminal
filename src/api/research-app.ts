@@ -38,6 +38,12 @@ import {
 import { InvalidRequestError, ModelFailureError, PersistenceFailureError, NotFoundError } from "./errors.js";
 import { renderConfidence, type ConfidenceComponents } from "../research/confidence.js";
 import { questionTypeOf } from "../research/requirements.js";
+import {
+  judgmentPermitted,
+  OBSERVATION_ONLY_CONTRACT,
+  UNCONSTRAINED_RESEARCH,
+  type ExecutionConstraints,
+} from "../research/execution-mode.js";
 
 /** F0 session stub (FRONTEND_ARCHITECTURE.md §18): one local trader identity, server-side only. */
 export const TRADER_ORIGIN: ProvenanceOrigin = { kind: "trader", detail: "F0 API session (local trader identity)" };
@@ -565,6 +571,10 @@ export class ResearchApp {
         researchRef,
         groundedAnswer,
         { kind: "agent", detail: "completion backstop: validated answer recorded as the run judgment" },
+        // EXECUTION CONTRACT: the run's own enforced mode, not a re-parse of the trader's text.
+        result.research?.executionMode === "RAW_OBSERVATION"
+          ? OBSERVATION_ONLY_CONTRACT
+          : UNCONSTRAINED_RESEARCH,
       );
       if (minted !== undefined && !judgments.some((d) => d.ref === minted.ref)) judgments.push(minted);
     }
@@ -583,6 +593,10 @@ export class ResearchApp {
       // researchRunId is not its current run, so a slow earlier submission can never write
       // into the workspace the trader is now looking at.
       ...(researchRef !== undefined ? { researchRunId: researchRef } : {}),
+      // EXECUTION MODE: the run's enforced contract, exposed so the client presents a raw
+      // observation as a measurement (and so a test can assert the mode without re-parsing the
+      // trader's message). Absent on non-research responses.
+      ...(result.research !== undefined ? { executionMode: result.research.executionMode ?? "RESEARCH" } : {}),
       evidenceRefs: evidence.map((e) => e.ref),
       ...(judgments.length > 0 ? { judgmentRef: judgments[judgments.length - 1]!.ref } : {}),
       evidence,
@@ -1928,9 +1942,16 @@ export function ensureRunJudgment(
   researchRef: string,
   answer: AnswerDTO,
   origin: ProvenanceOrigin,
+  constraints: ExecutionConstraints = UNCONSTRAINED_RESEARCH,
 ): ReturnType<typeof judgmentToDTO> | undefined {
   const research = ws.getResearch(researchRef);
   if (research === undefined) return undefined;
+  // EXECUTION CONTRACT (no-judgment is a hard invariant): a run whose request forbade a
+  // judgment gets NO judgment — not from a flow, not from synthesis, and not from this
+  // completion backstop. The backstop's law is "a completed ANALYTICAL run must carry a
+  // conclusion"; asking it of a raw-observation run is how `jd_000144` came to exist for a
+  // request that forbade judgments in writing. Refusing here means Judgments(run) = ∅.
+  if (!judgmentPermitted(constraints)) return undefined;
   if (research.currentJudgmentRef !== undefined || research.judgmentRefs.length > 0) return undefined;
   const minted = ws.addJudgment(
     {

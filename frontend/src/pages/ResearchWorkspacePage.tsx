@@ -820,9 +820,28 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
         )}
       </div>
 
-      {/* §8A: the JUDGMENT is the visual focal point; elevated surface, larger type.
-          Failure/ambiguous states keep honest panel treatment (not a celebratory verdict). */}
-      {run.outcome === "COMPLETED" ? (
+      {/* RAW-OBSERVATION SURFACE (execution contract): the backend enforced that this run
+          retrieved a measurement and stopped — no judgment was created, none was synthesized,
+          and no insight was derived. Presenting a measurement on the judgment surface, under a
+          "Judgment" kicker with a conviction meter, would re-create analytically the very output
+          the request excluded. The observation and its provenance are shown as data, with no
+          verdict framing and no recommendation language. */}
+      {run.executionMode === "RAW_OBSERVATION" && run.outcome === "COMPLETED" ? (
+        <section className="surface-judgment" aria-label="Retrieved observation">
+          <div className="judgment-head">
+            <span className="judgment-kicker">Observation · raw retrieval</span>
+            <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+              {saveControl("RESEARCH", undefined, "this observation")}
+            </span>
+          </div>
+          <p className="verdict mono" style={{ whiteSpace: "pre-wrap", fontSize: 13 }}>{run.answer.answer}</p>
+          <p style={{ margin: "10px 0 0", fontSize: 11.5, color: "var(--text-3)" }}>
+            Retrieved as requested. No judgment, synthesis or falsification was performed.
+          </p>
+        </section>
+      ) : run.outcome === "COMPLETED" ? (
+        // §8A: the JUDGMENT is the visual focal point for an ANALYTICAL run; elevated surface,
+        // larger type. Failure/ambiguous states keep honest panel treatment.
         <section className="surface-judgment" aria-label="Research judgment">
           <div className="judgment-head">
             <span className="judgment-kicker">Judgment · {run.action.toLowerCase()}</span>

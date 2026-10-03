@@ -42,6 +42,13 @@ import { progressEvent, type ProgressListener } from "../research/progress.js";
 import { buildResearchContext, renderResearchContext, type ResearchContext } from "../research/context.js";
 import { guardFlow, type FlowGuardResult } from "./flow-guard.js";
 import { capabilityConstraintOf } from "./capability-constraints.js";
+import {
+  executionConstraintsOf,
+  isObservationMode,
+  RAW_OBSERVATION_FLOW,
+  UNCONSTRAINED_RESEARCH,
+  type ExecutionConstraints,
+} from "../research/execution-mode.js";
 
 /**
  * Canonical flows whose methodology is thesis-facing: the trader's own thesis is legitimate
@@ -402,6 +409,17 @@ export class Lui {
   private thesisContextRequired = false;
   /** The explicit capability constraint for this message ("use CRYPTO_MARKET_DATA only"). */
   private capabilityConstraint: { readonly allowed?: readonly string[]; readonly forbidden: readonly string[] } = { forbidden: [] };
+  /**
+   * EXECUTION CONTRACT for this message (execution-mode.ts): the trader's prohibitions on the
+   * analytical PIPELINE ("do not create a judgment", "do not perform synthesis, falsification
+   * or counterevidence analysis", "return only the raw observation").
+   *
+   * Decided from the trader's own words BEFORE any model call, so it is an input to the pipeline
+   * rather than a consequence of it — exactly like the capability constraint beside it, and for
+   * exactly the same reason: a prohibition the engine reads at the layer that would violate it is
+   * a control, and a prohibition that only reaches the model as prompt text is a suggestion.
+   */
+  private executionConstraints: ExecutionConstraints = UNCONSTRAINED_RESEARCH;
 
   constructor(private readonly options: LuiOptions) {}
 
@@ -424,6 +442,11 @@ export class Lui {
     // call, so they are inputs to the pipeline rather than a consequence of it.
     this.thesisContextRequired = THESIS_CONTEXT_PHRASE.test(userMessage);
     this.capabilityConstraint = capabilityConstraintOf(userMessage);
+    this.executionConstraints = executionConstraintsOf(userMessage, this.capabilityConstraint);
+    // EXECUTION CONTRACT: a request that forbids thesis context never receives it, whatever the
+    // model later classifies the target as. A raw observation about Bitcoin must not inherit an
+    // active Ethereum thesis from the workspace.
+    if (!this.executionConstraints.allowThesisContext) this.thesisContextRequired = false;
 
     // 1–2. INPUT NORMALIZATION + INTENT DETECTION (validated; model failure aborts honestly).
     progress?.(progressEvent("request_accepted", new Date(), "request accepted", { messageLength: userMessage.length }));
@@ -650,6 +673,20 @@ export class Lui {
           // CANONICAL FLOW ISOLATION: the canonical flow is decided here, from the structured
           // request/router, and is carried into the research record (see dispatchResearch).
           // A generic fallback must never OVERWRITE it with another flow's identity.
+          //
+          // EXECUTION-MODE ISOLATION: an observation-mode request has NO canonical analytical
+          // methodology. "What is Bitcoin's current spot price? Return only the raw observation"
+          // was persisted as `flow = what happened`, which is a different question with a
+          // different methodology. A raw retrieval operation is recorded under its own
+          // non-canonical marker (RAW_OBSERVATION), the same way an unidentified methodology is
+          // recorded as INDEPENDENT_RESEARCH — never by borrowing a canonical flow's identity,
+          // and never by inventing a ninth canonical flow.
+          if (isObservationMode(this.executionConstraints)) {
+            const research = await this.dispatchResearch(step, origin, progress, deadlineMs, target.asset, undefined);
+            result.research = research.outcome;
+            if (research.modelFailure !== undefined) result.modelFailure = research.modelFailure;
+            break;
+          }
           if (flow === "WHY_IT_HAPPENED" || flow === "WHAT_DOES_ALL_INFORMATION_SAY" || flow === "WHAT_COULD_AFFECT_IT" || flow === "DOES_MY_THESIS_HOLD" || flow === "EVALUATE_WITH_MY_FRAMEWORK" || flow === "HAS_THIS_HAPPENED_BEFORE") {
             await this.dispatchM4Flow(flow, step, result, origin, progress, deadlineMs);
             break;
@@ -944,7 +981,9 @@ export class Lui {
     // affect it") and Flow 7 requests were all PERSISTED as Flow 6 ("what does all the
     // information say"). A request that resolves no canonical flow is recorded honestly as
     // INDEPENDENT_RESEARCH rather than borrowing another flow's identity.
-    const canonicalFlow = resolvedFlow ?? step.params["flow"] ?? this.flowGuard?.flow ?? INDEPENDENT_RESEARCH_FLOW;
+    const canonicalFlow = isObservationMode(this.executionConstraints)
+      ? RAW_OBSERVATION_FLOW
+      : resolvedFlow ?? step.params["flow"] ?? this.flowGuard?.flow ?? INDEPENDENT_RESEARCH_FLOW;
     const research = workspace.addResearch(
       { objective, question: objective, flow: canonicalFlow },
       origin,
@@ -960,6 +999,12 @@ export class Lui {
         store: this.options.store,
         ...(this.capabilityConstraint.allowed !== undefined || this.capabilityConstraint.forbidden.length > 0
           ? { capabilityConstraint: this.capabilityConstraint }
+          : {}),
+        // EXECUTION CONTRACT: the prohibitions on the pipeline, enforced by the engine at every
+        // layer that would otherwise violate them (requirement ledger, capability floor,
+        // counterevidence floor, gap recovery, answer synthesis, response assembly).
+        ...(this.executionConstraints !== UNCONSTRAINED_RESEARCH
+          ? { executionConstraints: this.executionConstraints }
           : {}),
         constraints: step.params["constraints"] !== undefined ? step.params["constraints"].split(";").map((s) => s.trim()).filter((s) => s !== "") : [],
         capabilityParams: {
@@ -1310,6 +1355,30 @@ export class Lui {
   // ----- response -------------------------------------------------------------
 
   private async buildResponse(result: LuiResult, userMessage: string): Promise<FinalResponse | undefined> {
+    /**
+     * RAW-OBSERVATION RESPONSE (execution contract): the requested fields and nothing else.
+     *
+     * Placed ahead of every other branch because a raw observation request must not acquire a
+     * finding, an opposing reason, an implication or a model-polished narrative on the way out.
+     * The answer text is already rendered from the run's own evidence by the adaptive loop; here
+     * it is passed through with the supporting/opposing/implication fields EMPTY and the run's
+     * evidence as citations, so the response carries the measurement and its provenance and no
+     * interpretation of it.
+     */
+    if (isObservationMode(this.executionConstraints) && result.research !== undefined) {
+      const evidenceRefs = result.research.evidence.slice(0, 6).map((e) => e.id);
+      return {
+        answer: result.research.answer ?? result.research.evidence.slice(0, 1).map((e) => e.observation).join(""),
+        supportingReasons: [],
+        opposingReasons: [],
+        // Confidence about a MEASUREMENT is not a claim about its meaning; a retrieved
+        // observation is reported as observed, without a conviction level attached to it.
+        confidence: result.research.evidence.length > 0 ? "MODERATE" : "UNKNOWN",
+        keyUncertainty: "",
+        implication: "",
+        citedObjectRefs: evidenceRefs,
+      };
+    }
     // M4: flow-specific responses are already progressive-disclosure structured; convert to
     // the FinalResponse shape without re-synthesizing (the flow output IS the answer).
     const flowResult = result.flow2 ?? result.flow6 ?? result.flow7 ?? result.flow3 ?? result.flow4 ?? result.flow8 ?? result.flow5;

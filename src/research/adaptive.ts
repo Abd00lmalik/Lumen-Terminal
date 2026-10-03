@@ -26,6 +26,13 @@ import { evidenceFromToolResult } from "../domain/evidence.js";
 import { normalizedResult } from "../domain/tool-result.js";
 import { subjectTermsOf, resolveInstrument } from "../domain/instruments.js";
 import { currentRun } from "../domain/run-context.js";
+import {
+  isObservationMode,
+  renderRawObservation,
+  UNCONSTRAINED_RESEARCH,
+  type ExecutionConstraints,
+  type ExecutionMode,
+} from "./execution-mode.js";
 import { synthesizeAnswer, renderAnswerSynthesis, type AnswerSynthesis } from "./synthesis.js";
 import { boundConfidence, computeConfidence, type ConfidenceComponents } from "./confidence.js";
 import { validateContractOutcome } from "./contract-boundary.js";
@@ -41,9 +48,12 @@ import {
   CAPABILITY_SUPPORT,
   blockingRequirements,
   completeRequirements,
+  dropForbiddenRequirementRoles,
   coverageVerdict,
   mandatoryCapabilities,
   markChallengeAttempted,
+  challengeEarnedBy,
+  questionTypeOf,
   markUnattemptableChallenges,
   subjectClassOfKind,
   subjectMarketClassOf,
@@ -252,6 +262,13 @@ export interface AdaptiveLoopOutcome {
    * resolves the trader's information need — intent, required dimensions, materiality, claims.
    */
   readonly questionResolution?: QuestionResolution;
+  /**
+   * EXECUTION MODE: the contract this run was executed under. RAW_OBSERVATION means the run
+   * retrieved a measurement and stopped — no judgment, no synthesis, no challenge requirement,
+   * no actionable insight. Exposed so every downstream consumer honours the mode WITHOUT
+   * re-parsing the trader's text.
+   */
+  readonly executionMode?: ExecutionMode;
 }
 
 /** Schemas as prompt fragments; the model must answer in one of these shapes. */
@@ -344,6 +361,17 @@ export interface AdaptiveLoopOptions {
    * unaffected — the registry owns providers, this gate owns capabilities.
    */
   readonly capabilityConstraint?: { readonly allowed?: readonly string[]; readonly forbidden?: readonly string[] };
+  /**
+   * EXECUTION CONTRACT (execution-mode.ts): the trader's hard prohibitions on the PIPELINE,
+   * not just on capabilities ("do not create a judgment", "do not perform synthesis, falsification
+   * or counterevidence analysis", "return only the raw observation").
+   *
+   * Read by the requirement ledger (no challenge row), the counterevidence floor (no
+   * FALSIFICATION round), gap recovery (no extra retrieval), the answer synthesis (no synthesis,
+   * no actionable insight) and the response assembler (no recommendation language). Defaults to
+   * `UNCONSTRAINED_RESEARCH`, so an ordinary analytical run is untouched.
+   */
+  readonly executionConstraints?: ExecutionConstraints;
   /** Fixed news-style capability params (asset etc.) merged into every capability call. */
   readonly capabilityParams?: Readonly<Record<string, unknown>>;
   readonly maxRounds?: number;
@@ -377,6 +405,11 @@ export async function runAdaptiveResearch(
   options: AdaptiveLoopOptions,
 ): Promise<AdaptiveLoopOutcome> {
   const at = options.now ?? (() => new Date());
+  /**
+   * The enforced execution contract for this run. Every permission below is read at the layer
+   * that would otherwise violate it, so a prohibition stated once is honoured everywhere.
+   */
+  const contract = options.executionConstraints ?? UNCONSTRAINED_RESEARCH;
   const systemOrigin: ProvenanceOrigin = { kind: "agent", detail: "adaptive research loop" };
   const workspace = options.workspace;
   const maxRounds = options.maxRounds ?? MAX_RESEARCH_ROUNDS;
@@ -450,7 +483,18 @@ export async function runAdaptiveResearch(
   requirements = completeRequirements(contractQuestion, requirements, {
     ...(resolvedAsset !== undefined ? { subject: resolvedAsset } : {}),
     marketClass: engineMarketClass(contractQuestion, resolvedAsset),
+    // EXECUTION CONTRACT: a request that forbids counterevidence earns no CHALLENGE dimension,
+    // whatever its question type says. Without this the reproduction carried a CRITICAL
+    // "disconfirming evidence" row for a request that forbade counterevidence analysis in writing.
+    challengeRequired: contract.allowCounterevidence && challengeEarnedBy(questionTypeOf(contractQuestion)),
   });
+  // MODE-SCOPED LEDGER: the PLANNER can propose a challenge/counterevidence row too, and it
+  // drives the capability floor, the coverage assessment and the completion gate exactly like an
+  // engine-added one. A forbidden role is stripped wherever it came from.
+  requirements = dropForbiddenRequirementRoles(
+    requirements,
+    contract.allowCounterevidence ? [] : ["CHALLENGE"],
+  );
   /** Wrong-target observations discarded at ingestion (diagnostic; never user-facing noise). */
   let rejectedAtIngestion = 0;
   /** Capabilities for the NEXT round when it is a gap-recovery round (engine-scheduled). */
@@ -473,6 +517,10 @@ export async function runAdaptiveResearch(
     // checked FIRST, before availability. An unavailable capability is dropped; a FORBIDDEN
     // one must never run even though a provider could serve it.
     capabilityPermitted(cap, options.capabilityConstraint ?? {}) &&
+    // EXECUTION CONTRACT: a capability the request's contract forbids is unusable even when a
+    // provider serves it. FALSIFICATION is the one the reproduction exposed, but the gate is on
+    // the name, not on the capability, so any future prohibition is enforced identically.
+    !(contract.allowFalsification === false && cap === "FALSIFICATION") &&
     options.registry.resolve(cap as Parameters<typeof options.registry.resolve>[0]).length > 0 &&
     (resolvedAsset !== undefined || !SUBJECT_REQUIRED_CAPABILITIES.includes(cap));
   /**
@@ -488,7 +536,7 @@ export async function runAdaptiveResearch(
   // challenge requirement becomes UNAVAILABLE (recorded blocker) instead of an unresolvable gap.
   requirements = markUnattemptableChallenges(requirements, capabilityUsable);
   let recoveryRoundsUsed = 0;
-  const MAX_RECOVERY_ROUNDS = options.maxRecoveryRounds ?? 2;
+  const MAX_RECOVERY_ROUNDS = contract.allowGapRecovery ? (options.maxRecoveryRounds ?? 2) : 0;
 
   for (let round = 1; round <= maxRounds; round += 1) {
     // Determine this round's tasks: round 1 = the plan; a gap-recovery round = the engine's
@@ -525,6 +573,11 @@ export async function runAdaptiveResearch(
         !planned.has(falsification) &&
         floor.length < 4 &&
         requirements.some((r) => r.importance === "CRITICAL") &&
+        // EXECUTION CONTRACT: disconfirmation is an ENGINE action, so when the trader forbids
+        // falsification the engine must not take it. Gating on the capability alone left the
+        // floor free to add FALSIFICATION to a request that named no capability but forbade it.
+        contract.allowFalsification &&
+        contract.allowCounterevidence &&
         capabilityUsable(falsification)
       ) {
         floor.push(falsification);
@@ -632,10 +685,14 @@ export async function runAdaptiveResearch(
     // capabilities have run is engine knowledge; whether counterevidence was found is judged
     // by coverage). Then assess requirement coverage from THIS run's evidence (engine-assessed,
     // never the model).
-    requirements = markChallengeAttempted(
-      requirements,
-      executions.filter((e) => e.result.failure.type === "NONE").map((e) => e.capability),
-    );
+    // EXECUTION CONTRACT: with the CHALLENGE role stripped from the ledger there is nothing to
+    // mark, but the call is skipped explicitly so a future role rule cannot quietly re-add it.
+    if (contract.allowCounterevidence) {
+      requirements = markChallengeAttempted(
+        requirements,
+        executions.filter((e) => e.result.failure.type === "NONE").map((e) => e.capability),
+      );
+    }
     requirements = assessCoverage(requirements, coverageEvidenceOf(workspace, researchRef), {
       ...(subjectTerms !== undefined ? { subjectTerms } : {}),
       questionMarketClass: engineMarketClass(currentRun()?.userQuestion ?? objective, resolvedAsset),
@@ -1035,7 +1092,7 @@ export async function runAdaptiveResearch(
     failedPaths,
     calculationsMissing: requirements.filter((r) => r.calculation !== undefined && r.status !== "SATISFIED").length,
   });
-  if (collected.length > 0 && stoppedBecause !== "MODEL_FAILURE") {
+  if (collected.length > 0 && stoppedBecause !== "MODEL_FAILURE" && contract.allowSynthesis) {
     synthesis = await synthesizeAnswer({
       provider: options.provider,
       question: currentRun()?.userQuestion ?? objective,
@@ -1103,7 +1160,12 @@ export async function runAdaptiveResearch(
   }
   // QUESTION RESOLUTION on every path (including no-synthesis): the engine's own verdict so
   // the API can surface it and an external benchmark can score question fit independently.
-  if (questionResolution === undefined) {
+  // EXECUTION CONTRACT: question resolution is an ASSESSMENT of how well an analytical answer
+  // resolved the trader's question, and it carries the actionable insight ("what would change
+  // this conclusion", watch items). For a request that forbade synthesis, deriving it would
+  // re-create the very analytical output the trader excluded — the reproduction produced
+  // MATERIALITY and an actionable insight from exactly this call.
+  if (questionResolution === undefined && contract.allowSynthesis) {
     questionResolution = evaluateQuestionResolution({
       question: contractQuestion,
       ledger: requirements,
@@ -1113,6 +1175,16 @@ export async function runAdaptiveResearch(
       evidenceTypes: [...new Set(collected.map((e) => e.evidenceType))],
       evidenceCount: collected.length,
     });
+  }
+  /**
+   * RAW-OBSERVATION RESPONSE (execution contract): the capability result IS the answer. No
+   * synthesis model call, no factor analysis, no materiality, no recommendation — the requested
+   * fields, read from THIS run's evidence, which is the only data a raw-observation request may
+   * report. Every field comes from the evidence object itself, never from prose, so the response
+   * cannot drift from the observation it claims to be reporting.
+   */
+  if (isObservationMode(contract) && collected.length > 0) {
+    answer = renderRawObservation(collected, contract.expectedOutputShape);
   }
   return {
     research: mustResearch(workspace, researchRef),
@@ -1130,6 +1202,9 @@ export async function runAdaptiveResearch(
     confidence,
     ...(floorCapabilities.length > 0 ? { floorCapabilities } : {}),
     recoveryRounds: recoveryRoundsUsed,
+    // The run's enforced execution contract, so the API, the response assembler and the UI can
+    // honour the prohibitions WITHOUT re-deriving them from the trader's text.
+    executionMode: contract.mode,
     ...(synthesis?.contractViolations !== undefined ? { contractViolations: synthesis.contractViolations } : {}),
     ...(questionResolution !== undefined ? { questionResolution } : {}),
   };
