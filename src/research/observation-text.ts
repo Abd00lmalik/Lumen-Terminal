@@ -91,17 +91,34 @@ function quoteText(o: Record<string, unknown>): string | undefined {
   return parts.join(", ");
 }
 
-/** A macro/market observable: a named measure with its value and previous close. */
+/**
+ * A macro/market observable: a named measure with its value in the UNIT the measurement
+ * declares. A yield is a percentage and an index level is points; neither is an amount of
+ * money, and rendering either with a currency is a wrong reading of the observation.
+ */
+const UNIT_SUFFIX: Record<string, string> = {
+  percent_per_year: "%",
+  index_points: " index points",
+  usd_per_troy_ounce: " USD per troy ounce",
+  usd_per_barrel: " USD per barrel",
+  percent: "%",
+};
+
 function metricText(o: Record<string, unknown>): string | undefined {
   const value = num(o["value"]);
   if (value === undefined) return undefined;
   const label = str(o["label"]) ?? str(o["instrument"]) ?? str(o["metric"]);
-  const unit = str(o["currency"]);
+  const unit = str(o["unit"]);
+  // A currency is only meaningful when the measurement says it is money; otherwise it is the
+  // provider's quote convention leaking into the sentence.
+  const suffix = unit !== undefined
+    ? UNIT_SUFFIX[unit] ?? ""
+    : (str(o["currency"]) !== undefined ? ` ${str(o["currency"])}` : "");
   const previous = num(o["previousClose"]);
   const change = num(o["changePct"]);
   return tail(
-    `${label ?? "value"}: ${price(value)}${unit !== undefined ? ` ${unit}` : ""}`,
-    previous !== undefined ? `previous close ${price(previous)}` : undefined,
+    `${label ?? "value"}: ${price(value)}${suffix}`,
+    previous !== undefined ? `previous close ${price(previous)}${suffix}` : undefined,
     change !== undefined ? pct(change) : undefined,
     str(o["asOf"]) !== undefined ? `as of ${str(o["asOf"])!.slice(0, 10)}` : undefined,
   );

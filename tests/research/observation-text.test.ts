@@ -47,11 +47,47 @@ describe("readableObservation", () => {
       value: 5.277,
       previousClose: 5.24,
       changePct: 0.706,
-      currency: "USD",
+      unit: "percent_per_year",
       asOf: "2026-10-02T18:59:55.000Z",
     }));
-    expect(text).toMatch(/10-year Treasury yield: 5\.28 USD/);
-    expect(text).toMatch(/previous close 5\.24/);
+    expect(text).toMatch(/10-year Treasury yield: 5\.28%/);
+    expect(text).toMatch(/previous close 5\.24%/);
+  });
+
+  it("never reads a yield or an index level as an amount of money", () => {
+    // The defect, verbatim from a manual test: "10-year Treasury yield: 5.28 USD".
+    const yieldText = readableObservation(JSON.stringify({
+      metric: "market_regime_observable",
+      instrument: "^TNX",
+      label: "10-year Treasury yield",
+      value: 5.277,
+      unit: "percent_per_year",
+      // A provider quote convention that must NOT be read as the unit.
+      currency: "USD",
+    }));
+    expect(yieldText).not.toMatch(/USD/);
+
+    const indexText = readableObservation(JSON.stringify({
+      metric: "market_regime_observable",
+      instrument: "^VIX",
+      label: "CBOE volatility index",
+      value: 16.4,
+      unit: "index_points",
+      currency: "USD",
+    }));
+    expect(indexText).toMatch(/16\.4 index points/);
+    expect(indexText).not.toMatch(/USD/);
+
+    // Money stays money: a genuinely USD-denominated quote keeps its unit.
+    const moneyText = readableObservation(JSON.stringify({
+      metric: "market_regime_observable",
+      instrument: "CL=F",
+      label: "WTI crude oil futures",
+      value: 71.4,
+      unit: "usd_per_barrel",
+      currency: "USD",
+    }));
+    expect(moneyText).toMatch(/71\.4 USD per barrel/);
   });
 
   it("summarises a month of candles without printing the series", () => {

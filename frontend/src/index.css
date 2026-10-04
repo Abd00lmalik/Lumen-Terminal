@@ -250,6 +250,47 @@ a.row:hover { background: var(--panel-2); text-decoration: none; }
 .surface-judgment .verdict .answer-prose {
   font-weight: 400;
 }
+
+/* DEEPER VIEW (progressive disclosure): the audit surface is one click away, never a wall
+   between the trader and the answer. The summary line reads as a quiet section label. */
+.deeper {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.deeper > .deeper-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  color: var(--text-3);
+  user-select: none;
+}
+.deeper > .deeper-summary::-webkit-details-marker {
+  display: none;
+}
+.deeper > .deeper-summary::before {
+  content: "▸";
+  font-size: 10px;
+  color: var(--text-3);
+}
+.deeper[open] > .deeper-summary::before {
+  content: "▾";
+}
+.deeper > .deeper-summary:hover {
+  color: var(--text-2);
+}
+.deeper > .deeper-summary .mono {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+}
+.deeper[open] > .deeper-summary {
+  margin-bottom: 6px;
+}
 .surface-judgment .verdict .answer-prose .mono {
   font-weight: 500;
 }

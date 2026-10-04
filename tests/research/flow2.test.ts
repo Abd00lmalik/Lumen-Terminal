@@ -107,11 +107,20 @@ describe("Flow 2; WHY DID IT HAPPEN? (causal investigation)", () => {
     const judgment = workspace.currentJudgment(result.outcome.researchId);
     expect(judgment).toBeDefined();
     expect(judgment?.statement).toContain("PLAUSIBLE_MECHANISM");
-    // Response structure per M4 §10:
+    // PRIMARY ANSWER FORMAT (trader-facing, short): what happened, what the evidence
+    // suggests, what does not fit. The causal status and confidence are READ as clauses
+    // inside the answer, never as an engine-status heading.
     expect(result.response).toContain("**What happened:**");
-    expect(result.response).toContain("**Leading explanation:**");
-    expect(result.response).toContain("**Competing explanations:**");
-    expect(result.response).toContain("**Confidence:**");
+    expect(result.response).toContain("**What the evidence suggests:**");
+    expect(result.response).toContain("**What doesn't fit:**");
+    expect(result.response).toContain("a mechanism is plausible but not demonstrated");
+    expect(result.response).toContain("low confidence");
+    // No engine-status headings and no inventory sections in the primary answer.
+    expect(result.response).not.toContain("**Leading explanation:**");
+    expect(result.response).not.toContain("**Confidence:**");
+    expect(result.response).not.toContain("**Evidence:**");
+    // Depth stays available in the run, not in the prose.
+    expect(result.response!.split(String.fromCharCode(10)).length).toBeLessThanOrEqual(6);
   });
 
   it("invented citations are dropped; no fabricated evidence (M4 §28)", async () => {
@@ -135,7 +144,9 @@ describe("Flow 2; WHY DID IT HAPPEN? (causal investigation)", () => {
     const judgment = workspace.currentJudgment(result.outcome.researchId);
     // competing explanations remain explicitly unresolved:
     expect(judgment?.unresolvedQuestions.some((q) => q.includes("not eliminated"))).toBe(true);
-    expect(result.response).toContain("**Contradictions:**");
+    // Contradictions survive — under the "what doesn't fit" heading.
+    expect(result.response).toContain("**What doesn't fit:**");
+    expect(result.response).toContain("macro indices stable during the move");
   });
 
   it("correlation ≠ causation: causalStatus flows into the judgment verbatim", async () => {

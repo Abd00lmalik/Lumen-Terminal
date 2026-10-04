@@ -66,12 +66,16 @@ function readResearchListOptions(query: unknown): ResearchListOptions {
   }
   const status = text(q.status);
   const search = text(q.q) ?? text(q.query);
+  // THREAD SCOPE: the workspace asks for ONE investigation's runs so a fresh thread cannot
+  // hydrate itself from the previous investigation's history.
+  const investigation = text(q.investigationRef) ?? text(q.investigation);
   return {
     ...(limit !== undefined ? { limit } : {}),
     ...(offset !== undefined ? { offset } : {}),
     ...(sort !== undefined ? { sort } : {}),
     ...(status !== undefined ? { status } : {}),
     ...(search !== undefined ? { q: search } : {}),
+    ...(investigation !== undefined ? { investigationRef: investigation } : {}),
   };
 }
 

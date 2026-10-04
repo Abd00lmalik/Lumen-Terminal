@@ -48,18 +48,36 @@ interface ChartQuoteResponse {
   };
 }
 
-/** Canonical regime instruments: the market-implied macro observables any MACRO requirement can use. */
-export const REGIME_OBSERVABLES: readonly { readonly symbol: string; readonly label: string; readonly measures: string }[] = [
-  { symbol: "^TNX", label: "10-year Treasury yield", measures: "long-term risk-free rate, growth/inflation expectations" },
-  { symbol: "^FVX", label: "5-year Treasury yield", measures: "mid-curve risk-free rate, policy-rate expectations" },
-  { symbol: "^IRX", label: "13-week Treasury bill yield", measures: "front-end policy-rate proxy" },
-  { symbol: "^VIX", label: "CBOE volatility index", measures: "equity risk appetite / implied volatility" },
-  { symbol: "DX-Y.NYB", label: "US dollar index", measures: "USD strength (global liquidity/risk channel)" },
-  { symbol: "^GSPC", label: "S&P 500 index", measures: "broad equity risk-asset level" },
-  { symbol: "^IXIC", label: "Nasdaq Composite index", measures: "growth/technology equity leadership, risk appetite" },
-  { symbol: "GC=F", label: "Gold futures", measures: "safe-haven demand, real-rate/inflation hedging" },
-  { symbol: "CL=F", label: "WTI crude oil futures", measures: "energy/inflation pressure, supply-demand balance" },
+/**
+ * Canonical regime instruments: the market-implied macro observables any MACRO requirement can
+ * use, each with the UNIT its number is denominated in.
+ *
+ * UNITS ARE PART OF THE MEASUREMENT, not a label. Yahoo quotes these index series in POINTS
+ * and reports `currency: "USD"` for all of them, which is how "10-year Treasury yield: 5.277
+ * USD" reached a trader: a yield is not a dollar amount, an index level is not a currency, and
+ * a stored observation that says otherwise is semantically wrong at the source — every
+ * consumer downstream (evidence, answers, premise checks) would carry the mistake. Each
+ * observable therefore declares what its number means, and the stored observation carries that
+ * unit; the provider's `currency` field is kept ONLY for instruments that really are money.
+ */
+export type ObservableUnit = "percent_per_year" | "index_points" | "usd_per_troy_ounce" | "usd_per_barrel";
+
+export const REGIME_OBSERVABLES: readonly { readonly symbol: string; readonly label: string; readonly measures: string; readonly unit: ObservableUnit }[] = [
+  { symbol: "^TNX", label: "10-year Treasury yield", measures: "long-term risk-free rate, growth/inflation expectations", unit: "percent_per_year" },
+  { symbol: "^FVX", label: "5-year Treasury yield", measures: "mid-curve risk-free rate, policy-rate expectations", unit: "percent_per_year" },
+  { symbol: "^IRX", label: "13-week Treasury bill yield", measures: "front-end policy-rate proxy", unit: "percent_per_year" },
+  { symbol: "^VIX", label: "CBOE volatility index", measures: "equity risk appetite / implied volatility", unit: "index_points" },
+  { symbol: "DX-Y.NYB", label: "US dollar index", measures: "USD strength (global liquidity/risk channel)", unit: "index_points" },
+  { symbol: "^GSPC", label: "S&P 500 index", measures: "broad equity risk-asset level", unit: "index_points" },
+  { symbol: "^IXIC", label: "Nasdaq Composite index", measures: "growth/technology equity leadership, risk appetite", unit: "index_points" },
+  { symbol: "GC=F", label: "Gold futures", measures: "safe-haven demand, real-rate/inflation hedging", unit: "usd_per_troy_ounce" },
+  { symbol: "CL=F", label: "WTI crude oil futures", measures: "energy/inflation pressure, supply-demand balance", unit: "usd_per_barrel" },
 ];
+
+/** Is this number an amount of money (so the provider's currency is meaningful)? */
+function isMoneyUnit(unit: ObservableUnit): boolean {
+  return unit === "usd_per_troy_ounce" || unit === "usd_per_barrel";
+}
 
 export class MarketRegimeAdapter implements ProviderAdapter {
   readonly providerId = "market/yahoo-regime-observables";
@@ -124,9 +142,13 @@ export class MarketRegimeAdapter implements ProviderAdapter {
             label: observable.label,
             measures: observable.measures,
             value: meta.regularMarketPrice,
+            unit: observable.unit,
             ...(previous !== undefined ? { previousClose: previous } : {}),
             ...(changePct !== undefined ? { changePct: Number(changePct.toFixed(3)) } : {}),
-            ...(meta.currency !== undefined ? { currency: meta.currency } : {}),
+            // The provider's currency field is a QUOTE CONVENTION (Yahoo reports USD for index
+            // points too). It is carried only for instruments that are actually money; a yield
+            // stored as "5.277 USD" is a wrong measurement, not a wrong label.
+            ...(meta.currency !== undefined && isMoneyUnit(observable.unit) ? { currency: meta.currency } : {}),
             ...(asOf !== undefined ? { asOf } : {}),
             upstreamSource: "yahoo-finance",
           },

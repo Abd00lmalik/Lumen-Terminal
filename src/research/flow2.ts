@@ -87,6 +87,8 @@ const CAUSAL_SYNTHESIS_SYSTEM = [
   "- LIMITATIONS (tool failures, empty feeds) are NOT negative evidence; never cite them against an explanation.",
   "- Only cite evidence ids present in the context. No fabricated citations.",
   "- LANGUAGE: trader-facing prose only. Never mention internal identifiers (requirement ids, run ids), capability or tool names, or evidence object counts.",
+  "- LENGTH IS PART OF THE ANSWER: eventDefinition and leadingExplanation are one or two sentences each, and each list holds at most three short items. The primary answer is read in seconds; the depth belongs in the evidence list behind it, not in the prose.",
+  "- SELECT, DO NOT INVENTORY: choose the few observations that actually bear on the question. Listing everything retrieved is not analysis.",
   "- No chain-of-thought: reasons are evidence-backed statements, not private reasoning.",
   "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
@@ -289,31 +291,74 @@ function causalFailureResponse(failure: ModelFailure): string {
   ].join("\n");
 }
 
+/**
+ * How the engine's causal vocabulary reads to a trader. The status is load-bearing (a timing
+ * association is not a cause) but its NAME is engineering: it becomes a clause, not a label.
+ */
+const CAUSAL_STATUS_PLAIN: Record<string, string> = {
+  STRONG_CAUSAL_EVIDENCE: "strong evidence links it as the driver",
+  SUPPORTED_CAUSAL_EVIDENCE: "the evidence supports it as the driver",
+  PLAUSIBLE_MECHANISM: "a mechanism is plausible but not demonstrated",
+  CORRELATION: "the evidence shows co-movement, not cause",
+  TEMPORAL_ASSOCIATION: "this is a timing association, not an established cause",
+  INCONCLUSIVE: "the evidence collected does not establish a cause",
+};
+
+const CONFIDENCE_PLAIN: Record<string, string> = {
+  HIGH: "high confidence",
+  MODERATE: "medium confidence",
+  LOW: "low confidence",
+  MEDIUM: "medium confidence",
+};
+
+/**
+ * One clause per claim: the primary answer is read in seconds, not scrolled.
+ *
+ * The trailing full stop is dropped so the section can add exactly one ("... respectively.").
+ */
+function clause(text: string, max = 240): string {
+  const first = text.split(/(?<=\.)\s+/)[0]?.trim() ?? text.trim();
+  const chosen = (first.length > 0 ? first : text.trim()).replace(/[.\s]+$/, "");
+  return chosen.length <= max ? chosen : `${chosen.slice(0, max - 1).trimEnd()}…`;
+}
+
+/**
+ * THE PRIMARY ANSWER (product promise: "Lumen investigates the question").
+ *
+ * A causal question gets five short sections, in the trader's order of need: what happened,
+ * what the evidence suggests, what does not fit, what is still open, what to watch. Nothing
+ * else — no engine status vocabulary as a heading, no evidence inventory, no counts, no
+ * traceability, no process commentary. The provenance the trader may want to audit stays in
+ * the run's evidence list and diagnostics, which is where it belongs.
+ */
 function buildFlow2Response(synthesis: CausalSynthesis, flowOutcome: FlowOutcome): string {
   void flowOutcome; // the run's ids/counts live in the research state, not in trader-facing prose
   const lines: string[] = [];
-  lines.push(`**What happened:** ${synthesis.eventDefinition}`);
-  lines.push(`**Leading explanation:** ${synthesis.leadingExplanation} (causal status: ${synthesis.causalStatus})`);
+  lines.push(`**What happened:** ${clause(synthesis.eventDefinition, 320)}`);
+  const status = CAUSAL_STATUS_PLAIN[synthesis.causalStatus] ?? "the causal status of this reading is not established";
+  const confidence = CONFIDENCE_PLAIN[synthesis.confidence] ?? "confidence not stated";
+  lines.push(`**What the evidence suggests:** ${clause(synthesis.leadingExplanation)} ${status}, ${confidence}.`);
   if (synthesis.supportingReasons.length > 0) {
-    lines.push(`**Evidence:** ${synthesis.supportingReasons.slice(0, 4).join("; ")}`);
+    lines.push(`**What supports it:** ${synthesis.supportingReasons.slice(0, 2).map((r) => clause(r)).join("; ")}.`);
   }
-  if (synthesis.competingExplanations.length > 0) {
-    lines.push(`**Competing explanations:** ${synthesis.competingExplanations.slice(0, 3).join("; ")}`);
+  // What does NOT fit: the contradictions and the runners-up together. A trader weighs the
+  // case against, not a taxonomy of it.
+  const against = [
+    ...synthesis.contradictions.slice(0, 2).map((c) => clause(c)),
+    ...(synthesis.causalStatus === "STRONG_CAUSAL_EVIDENCE" ? [] : synthesis.competingExplanations.slice(0, 2).map((c) => clause(c))),
+  ];
+  if (against.length > 0) {
+    lines.push(`**What doesn't fit:** ${against.join("; ")}.`);
   } else if (synthesis.causalStatus !== "STRONG_CAUSAL_EVIDENCE") {
     // A "why" question that ends without naming a single alternative has not been a real
-    // investigation: the trader is told plainly that nothing else was ruled out, which is the
-    // honest state of the evidence rather than an implied single cause.
-    lines.push("**Competing explanations:** none were ruled out by the evidence collected.");
+    // investigation: the trader is told plainly that nothing else was ruled out.
+    lines.push("**What doesn't fit:** no alternative explanation was ruled out by the evidence collected.");
   }
-  if (synthesis.contradictions.length > 0) {
-    lines.push(`**Contradictions:** ${synthesis.contradictions.slice(0, 3).join("; ")}`);
-  }
-  lines.push(`**Confidence:** ${synthesis.confidence}.`);
   if (synthesis.uncertainty.length > 0) {
-    lines.push(`**What remains uncertain:** ${synthesis.uncertainty.slice(0, 3).join("; ")}`);
+    lines.push(`**What remains uncertain:** ${synthesis.uncertainty.slice(0, 2).map((u) => clause(u)).join("; ")}.`);
   }
   if (synthesis.whatWouldChange.length > 0) {
-    lines.push(`**What would change the conclusion:** ${synthesis.whatWouldChange.slice(0, 3).join("; ")}`);
+    lines.push(`**Watch next:** ${synthesis.whatWouldChange.slice(0, 2).map((w) => clause(w)).join("; ")}.`);
   }
   return lines.join("\n");
 }

@@ -93,12 +93,39 @@ describe("run identity (B1)", () => {
     expect(historyPage).not.toMatch(/encodeURIComponent\(e\.objective\)/);
   });
 
-  it("the thread hydrates from the history list (no fixed three-row source of truth)", () => {
+  it("the thread hydrates from the CURRENT investigation's runs (no fixed three-row source of truth)", () => {
     // The thread asks the backend for a window instead of slicing an unbounded list, and the
-    // History page is the full surface with pagination.
-    expect(workspacePage).toContain("listResearch({ limit: 50, status: \"COMPLETED\" })");
+    // History page is the full surface with pagination. The window is scoped to ONE
+    // investigation: a thread that had been reset must not refill itself from every run in
+    // the workspace (the "New research showed the old report" bug).
+    expect(workspacePage).toContain("listResearch({ limit: 50, status: \"COMPLETED\", investigationRef: threadInvestigationId })");
     expect(historyPage).toContain("HISTORY_PAGE_SIZE");
     expect(historyPage).toContain("listResearch({ limit: HISTORY_PAGE_SIZE, offset: from");
+  });
+
+  it("keeps the audit surface behind one disclosure instead of in front of the answer", () => {
+    // PRIMARY VIEW = concise trader intelligence; DEEPER VIEW = provenance and diagnostics.
+    // Everything stays reachable (a disclosure, not a deletion).
+    expect(workspacePage).toContain('<details className="deeper"');
+    expect(workspacePage).toContain("DEEPER VIEW");
+    const deeperIdx = workspacePage.indexOf('<details className="deeper"');
+    const closeIdx = workspacePage.indexOf("</details>", deeperIdx);
+    const insightIdx = workspacePage.indexOf("actionable insight");
+    const evidenceIdx = workspacePage.indexOf("Evidence behind this response");
+    const diagnosticsIdx = workspacePage.indexOf("<RunDiagnostics");
+    expect(deeperIdx).toBeGreaterThan(-1);
+    expect(closeIdx).toBeGreaterThan(deeperIdx);
+    expect(insightIdx).toBeGreaterThan(deeperIdx);
+    expect(evidenceIdx).toBeGreaterThan(deeperIdx);
+    expect(diagnosticsIdx).toBeGreaterThan(deeperIdx);
+    expect(workspacePage.indexOf("</details>", diagnosticsIdx)).toBeGreaterThan(diagnosticsIdx);
+  });
+
+  it("the thread reads are scoped to the current investigation", () => {
+    // A thread that hydrates from GLOBAL history is a thread that resurrects the previous
+    // investigation's report after "New research".
+    expect(workspacePage).toContain("investigationRef: threadInvestigationId");
+    expect(workspacePage).toContain("threadOwnerRef.current !== threadInvestigationId");
   });
 
   it("the not-available panel is reserved for a typed NOT_FOUND", () => {

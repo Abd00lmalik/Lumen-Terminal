@@ -209,6 +209,8 @@ export interface ResearchListQuery {
   readonly sort?: "recent" | "oldest";
   readonly status?: string;
   readonly q?: string;
+  /** Restrict the window to ONE investigation (the workspace thread, never History). */
+  readonly investigationRef?: string;
 }
 
 // ---------------------------------------------------------------------------

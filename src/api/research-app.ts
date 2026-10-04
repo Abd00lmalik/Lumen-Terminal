@@ -1007,7 +1007,21 @@ export class ResearchApp {
 
     const wanted = options.status?.trim().toUpperCase();
     const needle = options.q?.trim().toLowerCase();
+    // THREAD SCOPE (conversational law): a workspace thread shows the CURRENT investigation's
+    // runs and nothing else. Without this filter the thread re-hydrated itself from global
+    // history, so after "New research" the brand-new empty thread rendered the PREVIOUS
+    // investigation's completed reports — a new empty state beside an old investigation beside
+    // an old report. History keeps every run; this window is not History.
+    const threadRuns = options.investigationRef !== undefined
+      ? new Set(ws.investigationRuns(options.investigationRef).map((r) => r.id))
+      : undefined;
     let filtered = entries;
+    if (threadRuns !== undefined) {
+      filtered = filtered.filter((e) => {
+        const members = [e.ref, ...(e.internalRefs ?? [])];
+        return members.some((ref) => threadRuns.has(ref));
+      });
+    }
     if (wanted !== undefined && wanted.length > 0) {
       filtered = filtered.filter((e) => (wanted === "CURRENT" ? e.isCurrent === true : e.status === wanted));
     }
@@ -2261,6 +2275,11 @@ export interface ResearchListOptions {
   readonly sort?: "recent" | "oldest";
   readonly status?: string;
   readonly q?: string;
+  /**
+   * Restrict the window to ONE investigation's runs (the workspace thread). Never a filter on
+   * History, which always shows every run the trader has.
+   */
+  readonly investigationRef?: string;
 }
 
 /**

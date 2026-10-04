@@ -60,6 +60,19 @@ export function sentencesOf(text: string): readonly string[] {
     .filter((s) => s !== "");
 }
 
+/**
+ * Sentences as CLAIMS: a `**Label:**` prefix is presentation, not hedging.
+ *
+ * Reading the label as part of the sentence silently changed a verdict: the label "What the
+ * evidence suggests" contains a hedge word, so an assertive causal sentence underneath it
+ * passed the hedged-language exemption that exists for genuinely hedged PROSE. Only the
+ * causal-link check reads claims this way; every other check keeps the raw text, because its
+ * patterns are written against the answer's own wording (gap acknowledgement included).
+ */
+function claimSentencesOf(text: string): readonly string[] {
+  return sentencesOf(text).map((s) => s.replace(/^\**\s*[^*]{1,80}?\s*:\s*\**/, "").trim()).filter((s) => s !== "");
+}
+
 const NO_COUNTEREVIDENCE_CLAIM =
   /\b(no (material )?(counter[- ]?evidence|opposing (evidence|factors?|reasons?)|contradict(ory|ing) evidence)|nothing (contradicts|weakens|opposes)|no evidence (contradicts|weakens))\b/i;
 const COMPARISON_CLAIM =
@@ -129,7 +142,7 @@ export function contractViolations(answerText: string, state: ContractState): re
   const causalLinks = deriveCausalLinkStatuses(state.ledger as readonly ResearchRequirement[]);
   for (const link of causalLinks) {
     if (ADMISSIBLE_LINK_STATUS.has(link.status)) continue;
-    for (const sentence of sentencesOf(answerText)) {
+    for (const sentence of claimSentencesOf(answerText)) {
       if (!ASSERTIVE_CAUSAL.test(sentence) || HEDGED_CAUSAL.test(sentence)) continue;
       // The sentence must be ABOUT this link: it names the link's target market.
       if (!new RegExp(`\\b${link.targetLabel.split(/\s+/)[0]}\\b`, "i").test(sentence) &&

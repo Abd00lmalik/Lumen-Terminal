@@ -178,7 +178,7 @@ describe("compound plan run ownership (Test 2 regression)", () => {
     expect(runId).toBeDefined();
     // The answer is the flow's; the response identity must be the flow's run, not the first
     // step's (first-writer-wins was the bug).
-    expect(response.answer.answer).toContain("Leading explanation:");
+    expect(response.answer.answer).toContain("What the evidence suggests:");
     expect(response.judgmentRef).toBeDefined();
 
     // RUN OWNERSHIP, artifact by artifact — exactly what the client guard checks.
@@ -193,7 +193,7 @@ describe("compound plan run ownership (Test 2 regression)", () => {
     // The minted judgment is the run's own validated answer, never a sibling run's conclusion
     // echoed onto another run (the old cross-run echo produced jd(run A) with the flow's text).
     for (const j of response.judgments) {
-      expect(j.statement === response.answer.answer || j.statement.startsWith("LEADING EXPLANATION: ") || j.statement.startsWith("Leading explanation:")).toBe(true);
+      expect(j.statement === response.answer.answer || j.statement.startsWith("LEADING EXPLANATION: ") || j.statement.startsWith("Leading explanation:") || j.statement.startsWith("**What the evidence suggests:**") || j.statement.startsWith("What the evidence suggests:")).toBe(true);
     }
   });
 

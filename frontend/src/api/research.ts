@@ -76,6 +76,9 @@ export function listResearch(query: ResearchListQuery = {}): Promise<readonly Re
   if (query.sort !== undefined) params.set("sort", query.sort);
   if (query.status !== undefined && query.status !== "") params.set("status", query.status);
   if (query.q !== undefined && query.q.trim() !== "") params.set("q", query.q.trim());
+  // THREAD SCOPE: the workspace thread asks for ONE investigation's runs, so a freshly reset
+  // thread can never hydrate itself from the previous investigation's history.
+  if (query.investigationRef !== undefined && query.investigationRef !== "") params.set("investigationRef", query.investigationRef);
   const suffix = params.toString();
   return http.get<readonly ResearchRunSummaryDto[]>(`/api/research${suffix === "" ? "" : `?${suffix}`}`);
 }

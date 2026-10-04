@@ -81,6 +81,13 @@ describe("workspace resets every conversation-scoped state on the flag (source g
     expect(workspacePage).toContain('setInput("");');
     expect(workspacePage).toContain("setSubmitting(false);");
     expect(workspacePage).toContain("setSaveError(undefined);");
+    // The previous investigation's readouts (evidence, judgment, thesis, snapshot) are CLEARED,
+    // not merely hidden: the rail must not keep presenting the old thread's state.
+    expect(workspacePage).toContain("setWs((prev) => ({ ...prev, evidence: [], judgment: undefined, thesis: undefined, snapshot: undefined, loadError: undefined }));");
+    // The thread's OWNER is dropped too, so the next hydration cannot refill the fresh thread
+    // from the previous investigation's runs.
+    expect(workspacePage).toContain("threadOwnerRef.current = undefined;");
+    expect(workspacePage).toContain("investigationRefRef.current = undefined;");
   });
 
   it("consumes the flag after the reset (one-shot; a replay cannot reset twice)", () => {
@@ -94,7 +101,7 @@ describe("workspace resets every conversation-scoped state on the flag (source g
     expect(workspacePage).toContain("const mountedForNewResearch = useRef(isNewResearchRequest(location.state));");
     // The hold is consumed even on a failed history read so it cannot leak into a later refresh.
     const holdIdx = workspacePage.indexOf("if (mountedForNewResearch.current)");
-    const mergeIdx = workspacePage.indexOf("if (historyTurns !== undefined) {\n      setRuns((prev) => {");
+    const mergeIdx = workspacePage.indexOf("if (historyTurns !== undefined) {");
     expect(holdIdx).toBeGreaterThan(-1);
     expect(mergeIdx).toBeGreaterThan(holdIdx);
   });

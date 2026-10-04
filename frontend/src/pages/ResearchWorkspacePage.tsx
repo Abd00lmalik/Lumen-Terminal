@@ -244,6 +244,18 @@ export function ResearchWorkspacePage() {
    * back in the thread they just left while the clear is still in flight.
    */
   const [resetPending, setResetPending] = useState(false);
+  /**
+   * THREAD OWNER: the investigation whose runs the thread currently shows, and the identity
+   * `refresh` hydrates from. It is a REF because `refresh` must read the LATEST owner without
+   * being re-created on every change: a change of owner means "this thread is a different
+   * conversation", and its turns are REPLACED, never merged with the previous one's.
+   */
+  const threadOwnerRef = useRef<string | undefined>(undefined);
+  /** The current investigation id, mirrored for `refresh` (which is created once). */
+  const investigationRefRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    investigationRefRef.current = investigation?.id;
+  }, [investigation?.id]);
 
   const refreshInvestigation = useCallback(async (): Promise<void> => {
     try {
@@ -382,40 +394,57 @@ export function ResearchWorkspacePage() {
   }, [stream.errorId]);
 
   const refresh = useCallback(async () => {
-    // Workspace state (history + snapshot) refresh; RESILIENT by design:
-    // - a failed history read NEVER wipes turns already on screen (the live result a user
-    //   just received must not vanish because a read hiccuped) — history is merged, not set;
+    // Workspace state (thread + snapshot) refresh; RESILIENT by design:
+    // - a failed thread read NEVER wipes turns already on screen (the live result a user
+    //   just received must not vanish because a read hiccuped) — turns are merged, not set;
     // - the snapshot load retries once (bounded) to absorb cold-start/deploy blips before
     //   the honest banner is shown; previous state stays visible meanwhile.
     let historyTurns: readonly Turn[] | undefined;
+    // THREAD SCOPE (the New Research bug): the thread is hydrated from the CURRENT
+    // investigation's runs ONLY. Reading global history here is what produced, after "New
+    // research", a blank composer beside the previous investigation beside its finished
+    // report: the fresh thread refilled itself from every run in the workspace. When there is
+    // no current investigation there is no thread to hydrate at all — the thread is empty by
+    // definition, and History keeps the previous investigation for the trader to reopen.
+    const threadInvestigationId = investigationRefRef.current;
     try {
-      // The thread shows the newest few COMPLETED runs (oldest→newest, chat order); the
-      // History page is the full, paginated surface. The window is requested from the
-      // backend rather than sliced out of an unbounded list.
-      const history = await listResearch({ limit: 50, status: "COMPLETED" });
-      const latest = history.slice(0, 3).reverse();
-      const hydrated = await Promise.all(
-        latest.map(async (r): Promise<Turn | undefined> => {
-          try {
-            const full = await getResearch(r.ref);
-            return researchDtoToTurn(full);
-          } catch {
-            return undefined; // one unreadable run must not sink the rest
-          }
-        }),
-      );
-      historyTurns = hydrated.filter((t): t is Turn => t !== undefined);
+      if (threadInvestigationId === undefined) {
+        historyTurns = [];
+      } else {
+        // The newest few COMPLETED runs of THIS thread (oldest→newest, chat order); the
+        // History page is the full, paginated surface across every investigation.
+        const history = await listResearch({ limit: 50, status: "COMPLETED", investigationRef: threadInvestigationId });
+        const latest = history.slice(0, 3).reverse();
+        const hydrated = await Promise.all(
+          latest.map(async (r): Promise<Turn | undefined> => {
+            try {
+              const full = await getResearch(r.ref);
+              return researchDtoToTurn(full);
+            } catch {
+              return undefined; // one unreadable run must not sink the rest
+            }
+          }),
+        );
+        historyTurns = hydrated.filter((t): t is Turn => t !== undefined);
+      }
     } catch {
-      // History unavailable (cold store, transient fault); existing turns stay untouched.
+      // Thread unavailable (cold store, transient fault); existing turns stay untouched.
     }
     // D6: consume the one-shot hydration hold (see mountedForNewResearch). The thread stays
-    // clean for this fresh conversation; later refreshes merge history again as always.
+    // clean for this fresh conversation; later refreshes hydrate the thread again as always.
     // Consumed even when the read failed, so the hold cannot leak into a LATER refresh.
     if (mountedForNewResearch.current) {
       mountedForNewResearch.current = false;
       historyTurns = undefined;
     }
     if (historyTurns !== undefined) {
+      // A DIFFERENT conversation: the thread belongs to one investigation at a time, so its
+      // turns are replaced outright. Merging here is what let the previous investigation's
+      // report survive inside a thread that had just been reset.
+      if (threadOwnerRef.current !== threadInvestigationId) {
+        threadOwnerRef.current = threadInvestigationId;
+        setRuns(historyTurns);
+      } else {
       setRuns((prev) => {
         // MERGE LAW, identity-keyed: turns are deduped by research ref (never by requestId,
         // which compared a UUID against a ref and appended a duplicate row on every reopen).
@@ -442,6 +471,7 @@ export function ResearchWorkspacePage() {
         }
         return [...merged.values()];
       });
+      }
     }
     try {
       const snapshot = await getWorkspace();
@@ -473,7 +503,9 @@ export function ResearchWorkspacePage() {
     }
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  // Re-hydrate when the THREAD's owner changes: a new investigation (the trader's next
+  // question) must hydrate ITS runs, and a cleared one must empty the thread.
+  useEffect(() => { void refresh(); }, [refresh, investigation?.id]);
 
   // A direct link to a specific run (Research history click): fetch THAT run and show it
   // in the thread. Every run hydrates from its own persisted object, so clicking a BTC
@@ -621,6 +653,14 @@ export function ResearchWorkspacePage() {
     setInput("");
     setSubmitting(false);
     setSaveError(undefined);
+    // NEW RESEARCH STATE IS A CLEAN SLATE (product law): every conversation-scoped surface
+    // is emptied HERE, not merely hidden — no previous turn, no selected run, no previous
+    // evidence/judgment/thesis readout, and no previous investigation identity presented as
+    // current. The thread's OWNER becomes "none", so the next hydration cannot refill the
+    // fresh thread from the previous investigation's runs.
+    threadOwnerRef.current = undefined;
+    investigationRefRef.current = undefined;
+    setWs((prev) => ({ ...prev, evidence: [], judgment: undefined, thesis: undefined, snapshot: undefined, loadError: undefined }));
     // NEW RESEARCH (lifecycle fix): the reset used to be CLIENT-ONLY, so the backend still
     // reported the previous investigation as current and the next refresh put the composer
     // straight back into follow-up mode over the thread the trader had just left. Clear the
@@ -725,7 +765,10 @@ export function ResearchWorkspacePage() {
               <Empty
                 title="No active research"
                 hint={investigation !== undefined && lifecycle !== "NO_INVESTIGATION"
-                  ? "This investigation has no completed run yet."
+                  // The thread HAS results; this rail simply does not belong to a selected
+                  // run right now. Saying "no completed run yet" there was a second,
+                  // contradictory statement about the same investigation.
+                  ? "Open a run from this investigation to see its research state."
                   : "Ask a question to start a new investigation."}
               />
             )}
@@ -909,6 +952,9 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
 }) {
   const run = turn.run;
   const runRef = run.researchRef;
+  // DEEPER VIEW state: closed by default (a trader reads the answer first), remembered for
+  // this run so a re-render does not slam it shut again.
+  const [deeperOpen, setDeeperOpen] = useState(false);
   // Contextual save control(s) render only when the run has a research identity (a transport
   // failure turn has nothing to save). One control per artifact, near the artifact itself.
   const saveControl = (kind: SavedKindDto, sourceRef: string | undefined, label: string) => {
@@ -939,6 +985,15 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
   const recordTier: ResearchRecordTierDto = turn.recordTier ?? "FULL";
   const insight = run.actionableInsight ?? resolution?.actionableInsight;
   const watchNext = run.watchNext ?? insight?.watchItems ?? [];
+  // How much sits behind the disclosure (the summary line tells the trader what they can open).
+  const deeperCount =
+    (insight !== undefined ? 1 : 0)
+    + (supporting.length > 0 ? 1 : 0)
+    + (opposing.length > 0 ? 1 : 0)
+    + (run.evidence.length > 0 ? 1 : 0)
+    + ((run.researchGaps ?? []).length + run.limitations.length > 0 ? 1 : 0)
+    + (watchNext.length > 0 ? 1 : 0)
+    + (run.judgments.length > 0 ? 1 : 0);
 
   return (
     <>
@@ -1054,6 +1109,20 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
       {/* Phase D: "what did I save from THIS research?" — SERVER-SIDE filtered by researchRef, so
           the client never fetches the whole library to filter it, and only real saves appear. */}
       {runRef !== undefined && isResearchRef(runRef) && <SavedFromResearch runRef={runRef} reloadKey={save.savedSectionNonce} onOpenSaved={save.onOpenSaved} />}
+
+      {/* DEEPER VIEW (progressive disclosure, product law): the audit surface stays, but out
+          of the primary read. A trader asked a question and wants a short answer first; the
+          insight ledger, the supporting/opposing breakdown, the evidence list, the coverage
+          gaps, the watch list, the engine diagnostics and the judgment objects are one click
+          away, never a wall in front of the answer. Nothing is removed or hidden from audit:
+          the same objects are here, open. */}
+      <details className="deeper" open={deeperOpen} onToggle={(e) => setDeeperOpen((e.target as HTMLDetailsElement).open)}>
+        <summary className="deeper-summary">
+          <span className="mono">DEEPER VIEW</span>
+          <span>
+            {deeperCount} item{deeperCount === 1 ? "" : "s"}: evidence, provenance, gaps, diagnostics
+          </span>
+        </summary>
 
       {/* ACTIONABLE INSIGHT (engine-derived): what the evidence shows, what it does NOT
           show, what it means, and what would change the conclusion. Never trade
@@ -1209,6 +1278,7 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
           </div>
         </Panel>
       )}
+      </details>
 
       {/* DECISION OWNERSHIP (product law): Lumen researches; the human decides. Nothing on
           this page is an instruction, a recommendation or an execution. */}

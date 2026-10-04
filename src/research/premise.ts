@@ -154,10 +154,14 @@ export function checkQuestionPremise(input: {
     asserted.magnitudePct !== undefined
       ? `moved ${asserted.direction === "DOWN" ? "down" : "up"} about ${asserted.magnitudePct}%`
       : `moved ${asserted.direction === "DOWN" ? "down" : "up"}`;
+  // The note states the mismatch, says what it blocks, and names what would resolve it. It
+  // does NOT silently reinterpret the question: "I am treating your question as X" would be
+  // the system quietly answering a different question, and any causal reading that followed
+  // would belong to a move the trader never asked about.
   const note =
-    `One thing to flag before the analysis: the current market data shows ${subjectName} is ${observed}, ` +
-    `which does not match the premise that it ${assertedPhrase}. ` +
-    `I am treating your question as referring to the move you observed rather than to the current ${best.move.window} direction.`;
+    `Premise check: the current market data shows ${subjectName} is ${observed}, which does not match the premise that it ${assertedPhrase}. ` +
+    `I cannot reliably attribute a ${asserted.direction === "DOWN" ? "down" : "up"} move from the evidence available, because the ${best.move.window} window shows the opposite direction. ` +
+    `If you mean a specific decline or session, name the window (for example "since yesterday's open" or a date), and the investigation will target that move.`;
 
   return {
     verdict,
