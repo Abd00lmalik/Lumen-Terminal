@@ -73,6 +73,21 @@ export interface StructuredRequest {
   readonly preferJson?: boolean;
   /** Hard deadline for the call in milliseconds (advisory; transport-enforced where possible). */
   readonly timeoutMs?: number;
+  /**
+   * Lines budget compaction MUST NOT touch: the trader's own words, the schema contract, the
+   * run's citable-evidence header. A request whose protected line is dropped is not a smaller
+   * request, it is a DIFFERENT question — so the request-budget layer removes context, never
+   * the question.
+   */
+  readonly protectedFragments?: readonly string[];
+  /**
+   * Explicit serialized-size ceiling for this attempt, in bytes. Providers default to their own
+   * documented limit; the fallback facade lowers it when an earlier provider rejected the payload
+   * for size, so no two attempts ever put the same bytes on the wire.
+   */
+  readonly limitBytes?: number;
+  /** Provenance for a reduced-budget attempt (why the ceiling moved); diagnostics only. */
+  readonly fallbackReason?: string;
 }
 
 export interface StructuredResponse<T = unknown> {

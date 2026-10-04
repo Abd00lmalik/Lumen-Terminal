@@ -96,6 +96,12 @@ export interface ResearchContext {
    * unlabeled evidence from another run.
    */
   readonly runEvidenceRefs: readonly string[];
+  /**
+   * Archive-scope only: how many evidence objects exist across the whole workspace. Reported as
+   * a COUNT, never as a list: with no run there is no citable set, and enumerating every id
+   * made an interpretation prompt grow with the workspace's history (the HTTP 413 cause).
+   */
+  readonly archiveEvidenceCount?: number;
   readonly claims: readonly { ref: string; statement: string; status: string }[];
   readonly hypotheses: readonly { ref: string; statement: string; status: string; ranking: number }[];
   readonly judgment?: { ref: string; statement: string; confidence?: string; uncertainty: readonly string[] };
@@ -352,7 +358,16 @@ export function buildResearchContext(
     runResearch !== undefined
       ? workspace.evidenceForRun(runResearch)
       : workspace.listEvidence(); // no run scope (explicit workspace-archive analysis)
-  const runEvidenceRefs = new Set<string>(candidateEvidence.map((e) => e.id));
+  // RUN-SCOPED CITABLE SET (provenance contract, and the request-size law): "the only objects a
+  // conclusion may cite" is a property of a RUN. Before a run exists there is no citable set —
+  // and this line used to publish the ENTIRE workspace archive (2,285 evidence ids in the live
+  // workspace: ~50 KB of a single interpretation prompt, growing without bound until the
+  // provider rejected the request outright with HTTP 413). Archive evidence stays available as
+  // labelled background items; it is never described as this run's evidence.
+  const runEvidenceRefs = new Set<string>(
+    runResearch !== undefined ? candidateEvidence.map((e) => e.id) : [],
+  );
+  const archiveEvidenceCount = runResearch !== undefined ? undefined : candidateEvidence.length;
   const allowHistorical = options.historical === "reference";
   const archiveBackground = { count: 0, sampleRefs: [] as string[] };
   let rejectedWrongTarget = 0;
@@ -600,6 +615,7 @@ export function buildResearchContext(
     ...(currentResearch !== undefined ? { objective: currentResearch.objective } : {}),
     ...(currentResearch !== undefined ? { currentResearchRef: currentResearch.id, currentResearchQuestion: currentResearch.question } : {}),
     ...(researchRef === undefined ? { scope: "workspace_archive" as const } : { scope: "single_research" as const }),
+    ...(archiveEvidenceCount !== undefined ? { archiveEvidenceCount } : {}),
     ...(archiveBackground.count > 0 ? { archiveBackground } : {}),
     ...(rejectedWrongTarget > 0 ? { rejectedWrongTarget } : {}),
     ...(rejectedNoRequirement > 0 ? { rejectedNoRequirement } : {}),
@@ -688,6 +704,11 @@ export function renderResearchContext(ctx: ResearchContext): string {
   const runEvidenceRefs = ctx.runEvidenceRefs ?? [];
   if (runEvidenceRefs.length > 0) {
     lines.push(`CURRENT RUN EVIDENCE (the only objects a current conclusion may cite): ${runEvidenceRefs.join(", ")}`);
+  } else if (ctx.archiveEvidenceCount !== undefined) {
+    lines.push(
+      `NO CURRENT RUN: no research run exists for this question yet, so there is no citable evidence set. ` +
+      `${ctx.archiveEvidenceCount} object(s) from earlier work exist in this workspace as labelled background below; none of them belongs to a run for this question.`,
+    );
   }
   if (ctx.objective !== undefined) lines.push(`RESEARCH OBJECTIVE: ${ctx.objective}`);
   if (ctx.requirementCoverage !== undefined) lines.push(ctx.requirementCoverage);
@@ -708,7 +729,14 @@ export function renderResearchContext(ctx: ResearchContext): string {
       const historical = item.historical === true ? " [HISTORICAL REFERENCE - another run; never cite it as a current observation]" : "";
       lines.push(`    ${item.ref}: ${item.text.slice(0, 300)}${freshness}${proxy}${ts}${historical}`);
     }
-    if (list.length > 40) lines.push(`    … ${list.length - 40} more (${list.map((i) => i.ref).slice(40).join(", ")})`);
+    // OMITTED-OBJECT MARKER (request-size law): this line once enumerated EVERY remaining id
+    // ("… 2242 more (ev_000041, ev_000042, …)" = 24.7 KB in one line, growing with the
+    // workspace). A count plus a five-id sample says the same thing and keeps the prompt
+    // bounded; the full inventory stays in the workspace, which is where an audit reads it.
+    if (list.length > 40) {
+      const sample = list.slice(40, 45).map((i) => i.ref).join(", ");
+      lines.push(`    … ${list.length - 40} more of this class (sample: ${sample}; the full inventory is in the workspace archive)`);
+    }
   }
 
   if (ctx.claims.length > 0) {

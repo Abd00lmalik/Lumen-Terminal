@@ -23,6 +23,7 @@ import {
   type StructuredResponse,
   type ModelUsage,
 } from "./provider.js";
+import { budgetRequest } from "./request-budget.js";
 
 /**
  * Default model: openai/gpt-oss-120b (Groq free tier, structured JSON capable,
@@ -123,11 +124,22 @@ export class GroqProvider implements ModelProvider {
   }
 
   private async structuredOnce<T>(request: StructuredRequest): Promise<StructuredResponse<T>> {
+    const systemWithSchema = this.systemWithSchema(request);
+    // REQUEST BUDGET: measure what we are about to put on the wire BEFORE we put it on the wire,
+    // and compact the prompt if it exceeds Groq's accepted body size. The schema and the system
+    // contract are never compacted, the trader's question is never compacted, and any omission
+    // is stated in-band. Without this the payload grew with the workspace rather than with the
+    // question and a one-line question could be rejected with HTTP 413 before any research ran.
+    const budgeted = budgetRequest(request, {
+      providerId: this.providerId,
+      modelId: this.modelId,
+      systemAndSchemaBytes: Buffer.byteLength(systemWithSchema, "utf8"),
+    }).request;
     const body = {
       model: this.modelId,
       messages: [
-        { role: "system" as const, content: this.systemWithSchema(request) },
-        { role: "user" as const, content: request.prompt },
+        { role: "system" as const, content: this.systemWithSchema(budgeted) },
+        { role: "user" as const, content: budgeted.prompt },
       ],
       ...(request.preferJson !== false ? { response_format: { type: "json_object" as const } } : {}),
       temperature: 0.2, // research interpretation favors determinism over creativity

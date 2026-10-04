@@ -22,14 +22,26 @@ import {
   type StructuredRequest,
   type StructuredResponse,
 } from "./provider.js";
+import { FALLBACK_BUDGET_FRACTION, limitForProvider } from "./request-budget.js";
 
-/** Failure types that represent technical outages (never genuine safety refusals). */
+/**
+ * Failure types that represent technical outages (never genuine safety refusals).
+ *
+ * PAYLOAD_TOO_LARGE is here under a specific, narrow law: the payload was rejected because the
+ * provider accepts less than we serialized. The request CONTENT is not wrong, and the provider
+ * is not down — but resending the IDENTICAL bytes to the next provider reproduces the same
+ * rejection whenever the next provider's limit is also below the payload. So a 413 is
+ * fallback-eligible AND arms a reduced budget for every subsequent attempt: the next provider
+ * gets the same research question with strictly less context, compacted deterministically, never
+ * the same oversized payload again.
+ */
 const TECHNICAL_FAILURES: ReadonlySet<string> = new Set([
   "PROVIDER_UNAVAILABLE",
   "RATE_LIMITED",
   "TIMEOUT",
   "INVALID_OUTPUT",
   "EMPTY_OUTPUT",
+  "PAYLOAD_TOO_LARGE",
   "UNKNOWN",
 ]);
 
@@ -113,10 +125,32 @@ export class ModelFallbackProvider implements ModelProvider {
     }
 
     let lastError: unknown;
+    // PAYLOAD_TOO_LARGE DEGRADATION: once a provider has rejected the request for size, every
+    // later attempt for THIS request runs on a reduced, explicitly-bounded budget. The research
+    // question, the system contract and the output schema are carried over unchanged; only
+    // optional context is compacted away, deterministically and in-band. Two attempts therefore
+    // never put the same bytes on the wire.
+    //
+    // The reduced ceiling is a fraction of the ATTEMPTING provider's own limit (not the failing
+    // provider's): the budget a request is held to is the budget of the provider it is going to,
+    // so the reduction is meaningful even when the chain goes from a large-limit provider to a
+    // small-limit one. Each further 413 tightens it again, so degradation is bounded and monotone.
+    let degraded = false;
+    let reducedLimitBytes: number | undefined;
+    let fallbackReason: string | undefined;
     for (const provider of candidates) {
+      const attemptLimit = degraded
+        ? Math.min(
+            limitForProvider(provider.providerId) * FALLBACK_BUDGET_FRACTION,
+            reducedLimitBytes ?? Number.POSITIVE_INFINITY,
+          )
+        : undefined;
+      const attemptRequest: StructuredRequest = attemptLimit !== undefined
+        ? { ...request, limitBytes: Math.floor(attemptLimit), ...(fallbackReason !== undefined ? { fallbackReason } : {}) }
+        : request;
       const started = this.now();
       try {
-        const response = await provider.structured<T>(request);
+        const response = await provider.structured<T>(attemptRequest);
         this.recordSuccess(provider.providerId, this.now() - started);
         // Provenance (§18) rides on the response for diagnostics when fallback actually happened.
         return (attemptedModels.length > 0
@@ -134,6 +168,13 @@ export class ModelFallbackProvider implements ModelProvider {
         if (isSafetyRefusal(error)) {
           this.lastRefusal = { providerId: provider.providerId, message: error.message };
           throw error; // §14: a genuine safety refusal is never bypassed with another model
+        }
+        if (error instanceof ModelFailure && error.type === "PAYLOAD_TOO_LARGE") {
+          // Size rejection, not an outage: the next attempt keeps the question and loses context.
+          const nextLimit = Math.floor(limitForProvider(provider.providerId) * FALLBACK_BUDGET_FRACTION);
+          fallbackReason = `${provider.providerId} rejected the serialized request for size (HTTP 413); the next attempt is budgeted to at most ${nextLimit} bytes with compacted context instead of resending the same payload`;
+          reducedLimitBytes = reducedLimitBytes === undefined ? nextLimit : Math.min(reducedLimitBytes, nextLimit);
+          degraded = true;
         }
         attemptedModels.push({ providerId: provider.providerId, modelId: provider.modelId, ...(error instanceof ModelFailure ? { failureType: error.type, failureReason: error.message } : { failureReason: String(error) }) });
         this.recordFailure(provider.providerId, error, latency);

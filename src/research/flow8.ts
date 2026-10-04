@@ -401,6 +401,9 @@ async function evaluateAgainstFramework(flowOutcome: FlowOutcome, framework: Sav
     schemaName: "flow8.framework_evaluation",
     schemaDescription: FRAMEWORK_EVALUATION_SCHEMA_DESC,
     system: FRAMEWORK_SYSTEM,
+    // The framework IS the yardstick for this evaluation; compaction may drop rendered
+    // evidence, never the trader's own framework text.
+    protectedFragments: [framework.content],
     prompt: [
       `TRADER'S FRAMEWORK (authoritative, artifact ${framework.id}; evaluate BY it, never rewrite it):`,
       "<<<FRAMEWORK TEXT>>>",

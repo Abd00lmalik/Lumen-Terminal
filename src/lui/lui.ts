@@ -18,7 +18,8 @@
  *   the engine executes; the workspace owns state.
  */
 
-import type { ModelProvider } from "../model/provider.js";
+import type { ModelProvider, StructuredRequest, StructuredResponse } from "../model/provider.js";
+import { traderWords } from "../model/request-budget.js";
 import { ModelFailure } from "../model/provider.js";
 import {
   LUI_ACTIONS, RESOLVED_TARGET_SCHEMA, AMBIGUITY_SCHEMA, CONSEQUENCE_SCHEMA,
@@ -497,6 +498,23 @@ export function resolveChallengeThesis(workspace: Workspace): ChallengeThesisRes
 
 export class Lui {
   private currentMessage: string | undefined;
+  /**
+   * THE ONLY MODEL SEAM THE LUI USES. Every interpretation, plan, analysis and response call
+   * goes through here so one law holds for all of them: the trader's own words are PROTECTED
+   * from request-budget compaction. A request that lost the question is not a smaller request,
+   * it is a different question — so the budget layer may only ever remove CONTEXT, and this is
+   * what makes that structural rather than a convention each call site has to remember.
+   */
+  private ask<T>(request: StructuredRequest): Promise<StructuredResponse<T>> {
+    const question = this.currentMessage ?? "";
+    return this.options.provider.structured<T>({
+      ...request,
+      protectedFragments: [
+        ...(request.protectedFragments ?? []),
+        ...(question === "" ? [] : traderWords(question)),
+      ],
+    });
+  }
   /** The deterministic flow guard's verdict for the CURRENT message (reset every handle()). */
   private flowGuard: FlowGuardResult | undefined;
   /**
@@ -589,7 +607,6 @@ export class Lui {
     /** Wall-clock deadline (epoch ms) threaded into every research loop (honest time budget). */
     deadlineMs?: number,
   ): Promise<LuiResult> {
-    const provider = this.options.provider;
     const progress = onProgress ?? this.options.onProgress;
     // The verbatim message, kept for the target law (a model-resolved asset is only the
     // question's target when the QUESTION ITSELF names it).
@@ -630,7 +647,7 @@ export class Lui {
     progress?.(progressEvent("request_accepted", new Date(), "request accepted", { messageLength: userMessage.length }));
     let request: NormalizedRequest;
     try {
-      const res = await provider.structured<string>({
+      const res = await this.ask<string>({
         schemaName: "lui.normalized_request",
         schemaDescription: NORMALIZED_REQUEST_SCHEMA_DESC,
         system: INTERPRETER_SYSTEM,
@@ -651,7 +668,7 @@ export class Lui {
     // 3–4. CONTEXT + TARGET RESOLUTION (workspace-grounded; no invented ids).
     let target: ResolvedTarget;
     try {
-      const res = await provider.structured<string>({
+      const res = await this.ask<string>({
         schemaName: "lui.resolved_target",
         schemaDescription: RESOLVED_TARGET_SCHEMA_DESC,
         system: TARGET_SYSTEM,
@@ -700,7 +717,7 @@ export class Lui {
     // 5. AMBIGUITY CHECK; genuinely ambiguous consequential actions block execution.
     let ambiguity: AmbiguityAssessment;
     try {
-      const res = await provider.structured<string>({
+      const res = await this.ask<string>({
         schemaName: "lui.ambiguity",
         schemaDescription: AMBIGUITY_SCHEMA_DESC,
         system: AMBIGUITY_SYSTEM,
@@ -722,7 +739,7 @@ export class Lui {
     // 6. CONSEQUENCE CHECK; gates confirmations for state mutation/persistence.
     let consequence: ConsequenceAssessment;
     try {
-      const res = await provider.structured<string>({
+      const res = await this.ask<string>({
         schemaName: "lui.consequence",
         schemaDescription: CONSEQUENCE_SCHEMA_DESC,
         system: CONSEQUENCE_SYSTEM,
@@ -738,7 +755,7 @@ export class Lui {
     // 7. SAFETY SCREEN; execution-like intent is rejected before any dispatch (M3 §14).
     let safety: { isExecutionCommand: boolean; detectedViolations: readonly string[]; rationale: string };
     try {
-      const res = await provider.structured<string>({
+      const res = await this.ask<string>({
         schemaName: "safety.screen",
         schemaDescription: SAFETY_SCHEMA_DESC,
         system: SAFETY_SYSTEM,
@@ -771,7 +788,7 @@ export class Lui {
     // 8. ACTION PLAN; the model proposes the step plan; the LUI validates it (M3 §5).
     let plan: ActionPlan;
     try {
-      const res = await provider.structured<string>({
+      const res = await this.ask<string>({
         schemaName: "lui.action_plan",
         schemaDescription: ACTION_PLAN_SCHEMA_DESC_LOCAL,
         system: [
@@ -1310,7 +1327,7 @@ export class Lui {
     }
     const ctx = this.researchContext(explicitRef !== undefined ? { researchRef: explicitRef } : {});
     try {
-      const res = await this.options.provider.structured<string>({
+      const res = await this.ask<string>({
         schemaName: "analysis.model_analysis",
         schemaDescription: ANALYSIS_SCHEMA_DESC,
         system: ANALYSIS_SYSTEM,
@@ -1339,7 +1356,7 @@ export class Lui {
       return;
     }
     try {
-      const res = await this.options.provider.structured<string>({
+      const res = await this.ask<string>({
         schemaName: "thesis.assessment",
         schemaDescription: THESIS_ASSESSMENT_SCHEMA_DESC,
         system: THESIS_SYSTEM,
@@ -1361,7 +1378,7 @@ export class Lui {
     const ctx = this.researchContext(step.params["researchRef"] !== undefined ? { researchRef: step.params["researchRef"] } : {});
     const targetStatement = step.params["statement"] ?? ctx.thesis?.statement ?? ctx.judgment?.statement ?? step.description;
     try {
-      const res = await this.options.provider.structured<string>({
+      const res = await this.ask<string>({
         schemaName: "analysis.challenge",
         schemaDescription: CHALLENGE_SCHEMA_DESC,
         system: CHALLENGE_SYSTEM,
@@ -1385,7 +1402,7 @@ export class Lui {
     // inventory from the action that exists to select from it.
     const ctx = this.researchContext({ includeThesis: true });
     try {
-      const res = await this.options.provider.structured<string>({
+      const res = await this.ask<string>({
         schemaName: "state.change_proposal",
         schemaDescription: STATE_CHANGE_SCHEMA_DESC,
         system: STATE_CHANGE_SYSTEM,
@@ -1441,7 +1458,7 @@ export class Lui {
   private async dispatchMonitor(step: ActionPlan["steps"][number], result: LuiResult): Promise<void> {
     const ctx = this.researchContext();
     try {
-      const res = await this.options.provider.structured<string>({
+      const res = await this.ask<string>({
         schemaName: "monitor.proposal",
         schemaDescription: MONITOR_SCHEMA_DESC,
         system: MONITOR_SYSTEM,
@@ -1491,7 +1508,7 @@ export class Lui {
   private async dispatchSave(step: ActionPlan["steps"][number], result: LuiResult, origin: ProvenanceOrigin): Promise<void> {
     const ctx = this.researchContext();
     try {
-      const res = await this.options.provider.structured<string>({
+      const res = await this.ask<string>({
         schemaName: "state.save_proposal",
         schemaDescription: SAVE_SCHEMA_DESC,
         system: SAVE_SYSTEM,
@@ -1750,7 +1767,7 @@ export class Lui {
       if (disclosureLevel >= 2) {
         try {
           const ctx = research.context;
-          const res = await this.options.provider.structured<string>({
+          const res = await this.ask<string>({
             schemaName: "response.final",
             schemaDescription: FINAL_RESPONSE_SCHEMA_DESC,
             system: RESPONSE_SYSTEM,

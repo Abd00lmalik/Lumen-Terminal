@@ -25,6 +25,7 @@ import {
   type StructuredResponse,
   type ModelUsage,
 } from "./provider.js";
+import { budgetRequest } from "./request-budget.js";
 
 /**
  * Safe default model ID; the ONLY place in the codebase where a model name appears.
@@ -143,9 +144,18 @@ export class GeminiProvider implements ModelProvider {
   }
 
   private async structuredOnce<T>(request: StructuredRequest): Promise<StructuredResponse<T>> {
+    const systemWithSchema = this.systemWithSchema(request);
+    // REQUEST BUDGET: the same law as every provider — measured before serialization, compacted
+    // deterministically to fit this provider's limit, never touching the output contract or the
+    // trader's question, and always saying in-band what was omitted.
+    const budgeted = budgetRequest(request, {
+      providerId: this.providerId,
+      modelId: this.modelId,
+      systemAndSchemaBytes: Buffer.byteLength(systemWithSchema, "utf8"),
+    }).request;
     const body = {
-      system_instruction: { parts: [{ text: this.systemWithSchema(request) }] },
-      contents: [{ role: "user", parts: [{ text: request.prompt }] }],
+      system_instruction: { parts: [{ text: this.systemWithSchema(budgeted) }] },
+      contents: [{ role: "user", parts: [{ text: budgeted.prompt }] }],
       generationConfig: {
         ...(request.preferJson !== false ? { responseMimeType: "application/json" } : {}),
         temperature: 0.2, // research interpretation favors determinism over creativity

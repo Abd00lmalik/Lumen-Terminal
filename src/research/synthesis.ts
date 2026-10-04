@@ -34,6 +34,7 @@
 
 import type { ModelProvider, OutputSchema } from "../model/provider.js";
 import { validateModelOutput } from "../model/provider.js";
+import { traderWords } from "../model/request-budget.js";
 import type { ResearchContext } from "./context.js";
 import { renderResearchContext } from "./context.js";
 import {
@@ -317,6 +318,9 @@ export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promis
       schemaName: "research.answer_synthesis",
       schemaDescription: ANSWER_SYNTHESIS_SCHEMA_DESC,
       system: SYNTHESIS_SYSTEM,
+      // The trader's question is protected context: compaction may drop rendered
+      // evidence, never the words the answer has to be about.
+      protectedFragments: traderWords(question),
       prompt: [
         `Trader question (answer THIS): "${question}"`,
         "Validated research context follows. Evidence ids in brackets are the ONLY citable refs.",
@@ -362,6 +366,9 @@ export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promis
         schemaName: "research.answer_synthesis",
         schemaDescription: ANSWER_SYNTHESIS_SCHEMA_DESC,
         system: SYNTHESIS_SYSTEM,
+        // The trader's question is protected context: compaction may drop rendered
+        // evidence, never the words the answer has to be about.
+        protectedFragments: traderWords(question),
         prompt: [
           `Trader question (answer THIS): "${question}"`,
           "Your previous draft violated the QUESTION-FIRST LAW: it opened with scene-setting instead of the answer.",
@@ -427,6 +434,9 @@ export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promis
         schemaName: "research.answer_synthesis",
         schemaDescription: ANSWER_SYNTHESIS_SCHEMA_DESC,
         system: SYNTHESIS_SYSTEM,
+        // The trader's question is protected context: compaction may drop rendered
+        // evidence, never the words the answer has to be about.
+        protectedFragments: traderWords(question),
         prompt: [
           `Trader question (answer THIS): "${question}"`,
           "Your previous draft made claims the evidence ledger does not support:",

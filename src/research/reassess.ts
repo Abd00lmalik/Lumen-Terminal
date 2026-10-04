@@ -176,6 +176,8 @@ export async function reassessThesis(options: ReassessOptions): Promise<Reassess
       schemaName: "reassess.materiality",
       schemaDescription: MATERIALITY_SCHEMA_DESC,
       system: MATERIALITY_SYSTEM,
+      // Trader-owned thesis text is protected: compaction may drop evidence, never the thesis.
+      protectedFragments: [thesis.statement],
       prompt: [
         `Thesis (trader-owned): "${thesis.statement}" (version ${thesis.version})`,
         `Claims: ${JSON.stringify(thesis.claims.map((c) => ({ statement: c.statement, importance: c.importance })))}`,
