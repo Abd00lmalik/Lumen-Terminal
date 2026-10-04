@@ -88,6 +88,34 @@ describe("run coherence guard", () => {
     expect(isCoherentRunResponse(staleCitation)).toBe(false);
   });
 
+  it("rejects the compound-plan mixed-run shape (Test 2 regression): judgments/evidence from a sibling run ride along", () => {
+    // Production failure this pins: a compound action plan ran a generic adaptive step AND a
+    // flow step; the backend once bound the response to the FIRST run while the flow's
+    // judgment/evidence rode along. The guard correctly refused, the stream-done effect
+    // silently dropped the completed result, and the finished report appeared only in
+    // History. The backend now emits the answer-bearing run only (tests/api/
+    // compound-run-ownership.test.ts); this test keeps the guard's refusal of the old shape
+    // load-bearing, so the client is never "fixed" by relaxing it.
+    const mixed = response({
+      evidence: [evidence("ev_new", "rs_new"), evidence("ev_flow", "rs_flow")],
+      evidenceRefs: ["ev_new", "ev_flow"],
+      judgments: [judgment("jd_flow", "rs_flow", ["ev_flow"]), judgment("jd_new", "rs_new", ["ev_new"])],
+    });
+    expect(isCoherentRunResponse(mixed)).toBe(false);
+  });
+
+  it("accepts the fixed compound-plan shape: one answer-bearing run, all artifacts its own", () => {
+    // What the backend now emits for the same submission: the flow's run id, the flow's
+    // evidence and the flow's judgment — one run throughout. The guard accepts it and the
+    // stream-done effect renders the completed report in place.
+    expect(isCoherentRunResponse(response({
+      evidence: [evidence("ev_flow", "rs_new")],
+      evidenceRefs: ["ev_flow"],
+      judgments: [judgment("jd_flow", "rs_new", ["ev_flow"])],
+      answer: { answer: "flow conclusion", supportingReasons: [], opposingReasons: [], counterevidenceStatus: "NOT_ASSESSED", confidence: "MODERATE", keyUncertainty: "", implication: "", citedObjectRefs: ["ev_flow"] },
+    }))).toBe(true);
+  });
+
   it("rejects a response that lists evidence owned by another run", () => {
     // Even when the citation is fine, an object from another run must never ride along in
     // the current run's evidence list.

@@ -414,25 +414,39 @@ export class ResearchApp {
           citedObjectRefs: [...(result.response?.citedObjectRefs ?? [])],
         };
 
+    // ANSWER-BEARING RUN (run-ownership contract): the response, its evidence, its judgments
+    // and its citations all belong to the ONE research run whose validated answer this response
+    // presents — the same precedence `buildResponse` used to pick that answer (a canonical flow's
+    // outcome first, then the adaptive loop's run). A compound action plan can run a sibling
+    // research object as well; its artifacts must NOT ride along in this response, because the
+    // provenance contract makes `evidence.researchRunId === researchRunId` true BY CONSTRUCTION
+    // and the client refuses — by design — a response whose artifacts disagree about their
+    // owning run (that refusal was the silent Test 2 drop: the completed report never reached
+    // the screen). Sibling runs are not lost: they remain members of the same History entry
+    // (runMembers) and their evidence stays in the archive and the investigation state.
+    const flowAnswerOutcome =
+      result.flow2?.outcome ?? result.flow6?.outcome ?? result.flow7?.outcome
+      ?? result.flow3?.outcome ?? result.flow4?.outcome ?? result.flow8?.outcome ?? result.flow5?.outcome;
+    const answerRunId = flowAnswerOutcome !== undefined
+      ? flowAnswerOutcome.researchId
+      : result.research?.research.id;
     // Evidence + judgments exposed with epistemic classes intact (observation ≠ interpretation
     // ≠ proxy ≠ speculation). Limitations surface exactly what the research could not do.
     const evidence: EvidenceDTO[] = [];
     const judgments: JudgmentDTO[] = [];
-    let researchRef: string | undefined;
-    if (result.research !== undefined) {
-      researchRef = result.research.research.id;
+    const researchRef: string | undefined = answerRunId;
+    if (result.research !== undefined && result.research.research.id === answerRunId) {
       for (const e of result.research.evidence) {
         const domain = ws.getEvidence(e.id) ?? e;
         evidence.push(evidenceToDTO(domain));
       }
-      judgments.push(...judgmentsForResearch(ws, researchRef));
+      judgments.push(...judgmentsForResearch(ws, answerRunId));
     }
     for (const flowOutcome of [
       result.flow2?.outcome, result.flow3?.outcome, result.flow4?.outcome,
       result.flow5?.outcome, result.flow6?.outcome, result.flow7?.outcome, result.flow8?.outcome,
     ]) {
-      if (flowOutcome === undefined) continue;
-      researchRef ??= flowOutcome.researchId;
+      if (flowOutcome === undefined || flowOutcome.researchId !== answerRunId) continue;
       for (const e of flowOutcome.evidence) {
         if (!evidence.some((d) => d.ref === e.id)) evidence.push(evidenceToDTO(ws.getEvidence(e.id) ?? e));
       }
@@ -653,12 +667,27 @@ export class ResearchApp {
         researchRef,
         groundedAnswer,
         { kind: "agent", detail: "completion backstop: validated answer recorded as the run judgment" },
-        // EXECUTION CONTRACT: the run's own enforced mode, not a re-parse of the trader's text.
-        result.research?.executionMode === "RAW_OBSERVATION"
+        // EXECUTION CONTRACT: the answer-bearing run's own enforced mode, not a re-parse of
+        // the trader's text — and never a SIBLING run's mode (a compound plan whose observation
+        // step ran RAW_OBSERVATION must not suppress the flow run's judgment backstop).
+        result.research !== undefined && result.research.research.id === answerRunId && result.research.executionMode === "RAW_OBSERVATION"
           ? OBSERVATION_ONLY_CONTRACT
           : UNCONSTRAINED_RESEARCH,
       );
       if (minted !== undefined && !judgments.some((d) => d.ref === minted.ref)) judgments.push(minted);
+    }
+
+    // SELF-CONSISTENCY HARDENING (provenance contract): before the DTO leaves, assert the
+    // invariant the domain gate already enforces — every artifact carries THIS response's run
+    // id. A violation here is an assembly bug, never a content judgment: fail fast instead of
+    // emitting a payload a (correct) client must refuse.
+    if (researchRef !== undefined) {
+      for (const j of judgments) {
+        if (j.researchRunId !== researchRef) throw new Error(`run-ownership assembly fault: judgment ${j.ref} belongs to ${j.researchRunId}, response binds ${researchRef}`);
+      }
+      for (const e of evidence) {
+        if (e.researchRunId !== undefined && e.researchRunId !== researchRef) throw new Error(`run-ownership assembly fault: evidence ${e.ref} belongs to ${e.researchRunId}, response binds ${researchRef}`);
+      }
     }
 
     const response: ResearchResponseDTO = {
@@ -678,7 +707,9 @@ export class ResearchApp {
       // EXECUTION MODE: the run's enforced contract, exposed so the client presents a raw
       // observation as a measurement (and so a test can assert the mode without re-parsing the
       // trader's message). Absent on non-research responses.
-      ...(result.research !== undefined ? { executionMode: result.research.executionMode ?? "RESEARCH" } : {}),
+      ...(result.research !== undefined && result.research.research.id === answerRunId
+        ? { executionMode: result.research.executionMode ?? "RESEARCH" }
+        : {}),
       evidenceRefs: evidence.map((e) => e.ref),
       ...(judgments.length > 0 ? { judgmentRef: judgments[judgments.length - 1]!.ref } : {}),
       evidence,
