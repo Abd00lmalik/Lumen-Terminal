@@ -54,6 +54,26 @@ describe("active research selection", () => {
     expect(selectActiveTurnRef({ turns, running: false })).toBe("rs_000052");
   });
 
+  it("a terminal response that is NOT a research run is the visible answer, not a hidden row", () => {
+    // Browser acceptance: the trader followed up ("Focus specifically on ETF flows.") and the
+    // backend answered with a clarification, which carries no research identity. The turn
+    // collapsed into an archival row and the PREVIOUS run's answer stayed on screen reading as
+    // the answer to the follow-up. A clarification is the answer; it must own the active area.
+    const withClarification: readonly IdentifiedTurn[] = [
+      ...turns,
+      { question: "Focus specifically on ETF flows.", requestId: "r3" },
+    ];
+    const active = selectActiveTurnRef({ turns: withClarification, running: false, liveIdentity: "r3" });
+    expect(active).toBe("r3");
+    expect(isExpandedTurn(withClarification[2]!, active, false)).toBe(true);
+    expect(isExpandedTurn(turns[1]!, active, false)).toBe(false);
+  });
+
+  it("a clarification does not become the active view while the run that asked for it is in flight", () => {
+    const active = selectActiveTurnRef({ turns, running: true, liveIdentity: "r3" });
+    expect(active).toBeUndefined();
+  });
+
   it("a run that finishes AFTER a newer one starts cannot become the active view", () => {
     // A completes late: the stream still reports the newer run as running, so A's identity
     // must not take over the active area.

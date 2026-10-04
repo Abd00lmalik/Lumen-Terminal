@@ -406,7 +406,7 @@ export function currentSetupFromRecord(series: CandleSeries): { setup: CurrentSe
       volatilityState: `average daily move ${fmt(features.volatilityPct)} with range expansion ${features.rangeExpansion}x baseline`,
       rangePositionState: `close at ${round(features.rangePosition * 100)}% of the 10-day range`,
       volumeState: features.volumeAvailable && features.volumeRatio !== undefined ? `volume ${features.volumeRatio}x the prior baseline` : "volume data unavailable in the retrieved record",
-      basis: `computed from the retrieved G1 candle record (final 10 days ending ${last.openTime.slice(0, 10)}); not a live cross-capability reading`,
+      basis: `computed from the retrieved daily candle record (final 10 days ending ${last.openTime.slice(0, 10)}); not a live cross-capability reading`,
     },
     features,
     endIndex,

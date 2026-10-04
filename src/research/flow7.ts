@@ -348,6 +348,7 @@ function failureResponse(failure: ModelFailure): string {
 }
 
 function buildFlow7Response(assessment: FalsificationAssessment, flowOutcome: FlowOutcome, beliefStatement: string): string {
+  void flowOutcome; // run identifiers/counts live in the research state, not in trader prose
   const lines: string[] = [];
   lines.push(`**Thesis (trader-owned, unchanged):** "${beliefStatement}"`);
   lines.push(`**Strongest case against it:** ${assessment.rationale}`);
@@ -362,6 +363,6 @@ function buildFlow7Response(assessment: FalsificationAssessment, flowOutcome: Fl
   lines.push(`**Current assessment:** ${assessment.currentAssessment} (confidence: ${assessment.confidence})`);
   const proposed = assessment.falsificationTargets.filter((t) => t.conditionStatus === "PROPOSED");
   if (proposed.length > 0) lines.push(`**Proposed (not established) conditions to watch:** ${proposed.slice(0, 2).map((t) => t.condition).join("; ")}`);
-  lines.push(`**Traceability:** research ${flowOutcome.researchId}; your thesis object was not modified; deeper levels available on request.`);
+  lines.push("**Your thesis was not modified:** this run tests it; it never rewrites it.");
   return lines.join("\n");
 }

@@ -492,7 +492,7 @@ function buildResponse(input: {
   const statement = judgment?.statement ?? "No judgment was formed.";
   lines.push(`**Answer:** ${statement}`);
   const supporting = judgment?.basis.supportingEvidence.length ?? 0;
-  lines.push(`**Basis:** ${supporting} evidence object(s) in the research graph (price structure + contemporaneous developments); full traceability: research ${input.executions[0]?.result.id ? "and tool results" : ""} available in the workspace state.`);
+  lines.push(`**Basis:** ${supporting} observation(s) retrieved for this question (price structure + contemporaneous developments); each one is listed below with its source and time.`);
   if (input.contradictions.length > 0) {
     lines.push(`**Contradictions:** ${input.contradictions.join("; ")}`);
   }

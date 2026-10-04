@@ -289,7 +289,7 @@ export async function runFlow4(objective: string, options: Flow4Options): Promis
     {
       outcome: { ...flowOutcome, analysisId: analysis.id, judgmentId: judgment.id },
       evaluation,
-      response: buildFlow4Response(evaluation, flowOutcome, thesis),
+      response: buildFlow4Response(evaluation, thesis),
     },
     { failedPaths: flowOutcome.executions.filter((e) => e.result.failure.type !== "NONE").length },
   );
@@ -382,7 +382,7 @@ function failureResponse(failure: ModelFailure): string {
   ].join("\n");
 }
 
-function buildFlow4Response(evaluation: ThesisEvaluation, flowOutcome: FlowOutcome, thesis: Thesis): string {
+function buildFlow4Response(evaluation: ThesisEvaluation, thesis: Thesis): string {
   const lines: string[] = [];
   lines.push(`**Thesis (trader-owned, version ${thesis.version}, unchanged):** "${thesis.statement}"`);
   lines.push(`**Assessment:** ${evaluation.overallAssessment}; ${evaluation.rationale}`);
@@ -396,6 +396,8 @@ function buildFlow4Response(evaluation: ThesisEvaluation, flowOutcome: FlowOutco
   lines.push(`**Evidence basis:** ${evaluation.evidenceBasisQuality} (distinct from confidence: ${evaluation.confidence})`);
   if (evaluation.unresolved.length > 0) lines.push(`**Unresolved:** ${evaluation.unresolved.slice(0, 3).join("; ")}`);
   if (evaluation.whatWouldChange.length > 0) lines.push(`**What would change this:** ${evaluation.whatWouldChange.slice(0, 2).join("; ")}`);
-  lines.push(`**Traceability:** research ${flowOutcome.researchId}; your thesis was not modified; Flow 7 can stress-test this further.`);
+  // No internal run id on the trader-facing answer (§7): the traceability panel and the
+  // thesis history already carry it, and the id adds nothing a trader can act on.
+  lines.push("**Traceability:** the evidence behind this assessment is listed below; your thesis was not modified; asking what could prove you wrong stress-tests it further.");
   return lines.join("\n");
 }

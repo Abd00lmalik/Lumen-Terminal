@@ -98,7 +98,9 @@ describe("Flow 5; historical comparison (G1 unavailable)", () => {
 
     // The response states unavailability; it does not pretend precedent was found.
     expect(result.response).toContain("UNAVAILABLE");
-    expect(result.response).toContain("G1 historical-data vendor has not been connected");
+    // TRADER LANGUAGE: the internal provider codename never reaches an answer (§7).
+    expect(result.response).toContain("no connected historical market-data provider is available");
+    expect(result.response).not.toContain("G1");
     expect(result.response).not.toMatch(/precedent (was )?found/i);
     expect(result.response).not.toContain("Historical comparison:");
   });
@@ -487,7 +489,8 @@ describe("Flow 5; LUI routing", () => {
     // No generic-loop substitution: zero evidence, honest answer.
     expect(result.flow5?.outcome.evidence).toHaveLength(0);
     expect(result.response?.answer).toContain("UNAVAILABLE");
-    expect(result.response?.keyUncertainty).toContain("G1 historical-data provider");
+    expect(result.response?.keyUncertainty).toContain("historical market-data provider");
+    expect(result.response?.keyUncertainty).not.toContain("G1");
     // Nothing was silently saved or turned into a thesis change.
     expect(result.saved).toBeUndefined();
   });

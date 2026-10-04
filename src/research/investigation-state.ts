@@ -21,6 +21,7 @@
 
 import type { Workspace } from "../domain/workspace.js";
 import type { Investigation, InvestigationState } from "../domain/investigation.js";
+import { readableObservation } from "./observation-text.js";
 
 /** How many findings/facts the sidebar and synthesis surface. Bounded on purpose. */
 const MAX_FACTS = 8;
@@ -69,7 +70,10 @@ export function deriveInvestigationState(ws: Workspace, investigation: Investiga
       if (evidence === undefined) continue;
       if (evidence.freshness === "HISTORICAL") continue; // another period; not an established present fact
       establishedFacts.push({
-        statement: truncate(evidence.observation),
+        // READABLE, never the raw transport payload: the accumulated surface asks the trader
+        // "what have we established", and a JSON blob is not an established fact. The bytes are
+        // unchanged on the evidence object itself; only this projection is prose.
+        statement: truncate(readableObservation(evidence.observation)),
         runId: run.id,
         evidenceRefs: [evidence.id],
       });
@@ -98,7 +102,7 @@ export function deriveInvestigationState(ws: Workspace, investigation: Investiga
         const opposing = ws.getEvidence(opposingRef);
         if (opposing === undefined) continue;
         competingExplanations.push({
-          statement: truncate(`Against ${judgment.statement}: ${opposing.observation}`),
+          statement: truncate(`Against ${judgment.statement}: ${readableObservation(opposing.observation)}`),
           runId: run.id,
         });
       }

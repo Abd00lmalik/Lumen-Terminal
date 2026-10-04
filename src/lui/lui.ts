@@ -41,6 +41,7 @@ import { runAdaptiveResearch, type AdaptiveLoopOutcome, MAX_RESEARCH_ROUNDS } fr
 import { progressEvent, type ProgressListener } from "../research/progress.js";
 import { buildResearchContext, renderResearchContext, type ResearchContext } from "../research/context.js";
 import { guardFlow, type FlowGuardResult } from "./flow-guard.js";
+import { statedThesisText } from "./conversation-routing.js";
 import { capabilityConstraintOf } from "./capability-constraints.js";
 import {
   executionConstraintsOf,
@@ -301,6 +302,17 @@ export interface LuiResult {
 // The LUI
 // ---------------------------------------------------------------------------
 
+/**
+ * What each challenge verdict MEANS, in the trader's words. The engine's vocabulary
+ * (FALSIFICATION, the capability that runs it) is internal: an answer that says "falsification
+ * verdict: INCONCLUSIVE" reads like a log line, not like a colleague's conclusion.
+ */
+const CHALLENGE_VERDICT_PLAIN: Record<string, string> = {
+  WEAKENED: "what the research found weakens your view",
+  STOOD: "nothing found so far contradicts your view",
+  INCONCLUSIVE: "the evidence available does not settle it either way",
+};
+
 const INTERPRETER_SYSTEM = [
   "You are the natural-language interpreter of a trading RESEARCH workbench used by a professional trader.",
   "Classify the trader's request into exactly one of the six first-class actions:",
@@ -315,6 +327,10 @@ const INTERPRETER_SYSTEM = [
   "- isExplanationOnly=true when the trader only asks why/how/what-did-you-find about existing research.",
   "- disclosureLevel: 0 answer, 1 why, 2 evidence, 3 research structure, 4 source trail, 5 full history.",
   "- Copy the trader's objective verbatim; never paraphrase it into something stronger or weaker.",
+  "- FOLLOW-UP INSIDE AN ACTIVE INVESTIGATION (read the CONVERSATION CONTEXT below): a turn that narrows, focuses, adds or asks about one angle of what the investigation is already about ('Focus specifically on ETF flows', 'and liquidations?', 'go deeper on derivatives') is RESEARCH continuing that investigation. It is NOT MANAGE_STATE: the trader is asking to investigate an angle, not to change their working state.",
+  "- MANAGE_STATE requires an explicit instruction about the trader's working state ('switch my active target to X', 'make X my active thesis', 'change the active framework'). The word 'focus' alone is never a state change.",
+  "- A follow-up inherits the conversation's subject and period; never treat the missing asset or timeframe as something to ask about again.",
+  "- For a follow-up, the objective restates the conversation's subject together with the angle the trader named, in the trader's own words ('Why did Bitcoin move down today, with focus on ETF flows'). Never drop the subject.",
   "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
@@ -334,6 +350,7 @@ const TARGET_SYSTEM = [
   "  WHAT_COULD_PROVE_ME_WRONG = active falsification of the trader's thesis/belief.",
   "  EVALUATE_WITH_MY_FRAMEWORK = evaluation against a framework the trader supplied (criteria, weights, 'according to this framework').",
   "- Explicit negative constraints are binding: 'do not explain why' means the request is NOT causal even if a move is mentioned; 'do not perform a thesis or falsification assessment' forbids DOES_MY_THESIS_HOLD and WHAT_COULD_PROVE_ME_WRONG.",
+  "- FOLLOW-UP INSIDE AN ACTIVE INVESTIGATION: the subject is the investigation's own subject unless the trader's words name another. 'Focus specifically on ETF flows' targets <investigation subject> ETF flows; keep the investigation's question shape (a causal question stays causal) unless the follow-up asks for a different one.",
   "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
@@ -341,6 +358,8 @@ const AMBIGUITY_SYSTEM = [
   "Detect GENUINE ambiguity that blocks correct execution.",
   "Ambiguous: unclear asset, unclear timeframe for consequential actions, unclear which thesis/framework/state object when several exist, unclear requested persistence.",
   "NOT ambiguous: ordinary research where context resolves the target; do not ask unnecessary questions.",
+  "NOT ambiguous when the CONVERSATION CONTEXT below already establishes the asset and the period: a follow-up that narrows scope ('Focus specifically on ETF flows') inherits both, so the answer is to investigate that angle, not to ask which asset or which period was meant.",
+  "Only flag ambiguity when the trader's OWN words cannot be resolved against that context, and then only when the choice would change what gets investigated.",
   "Never invent missing context; if genuinely ambiguous, list the clarifying questions.",
   "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
@@ -529,6 +548,38 @@ export class Lui {
 
   constructor(private readonly options: LuiOptions) {}
 
+  /**
+   * CONVERSATION FRAME (conversational law): a trader inside an investigation says "Focus
+   * specifically on ETF flows." — a follow-up that names no asset. Every model call that
+   * interprets, resolves, disambiguates or plans the turn reads the SAME frame: what this
+   * conversation is about, what the conversation layer already decided this turn is (it is
+   * recorded state, never re-decided here), and the trader's own earlier turns.
+   *
+   * Without it the interpreter reads the sentence in a vacuum and classifies "focus on X" as a
+   * working-state change ("set my active target to X"); the ambiguity check then asks which asset
+   * and which period were meant; the turn ends AWAITING_CONFIRMATION with no research run at all.
+   * That is how the most common follow-up in the product answered nothing while the previous
+   * answer stayed on screen looking like the answer to it.
+   */
+  private conversationFrame(): string | undefined {
+    const investigationId = this.investigationContext?.investigationId;
+    if (investigationId === undefined) return undefined;
+    const investigation = this.options.workspace.getInvestigation(investigationId);
+    if (investigation === undefined) return undefined;
+    // Only a FOLLOW-UP gets a frame. The investigation's first question has no conversation to
+    // read yet (the only turn on record is the one being answered), and handing a model a frame
+    // built from the question itself teaches it to treat every request as context-dependent.
+    if (this.options.workspace.listTurns(investigationId).length <= 1) return undefined;
+    const turns = this.investigationContext?.turns.slice(-6)
+      .map((t) => `- ${t.role}: ${t.content.replace(/\s+/g, " ").trim()}`) ?? [];
+    return [
+      "CONVERSATION CONTEXT (an investigation is already in progress):",
+      `Active investigation: ${investigation.title} (subject: ${investigation.subject})`,
+      `Conversation decision for THIS turn, already recorded and binding: ${this.conversationIntent ?? "FOLLOW_UP"}`,
+      ...(turns.length > 0 ? ["Earlier turns in this conversation:", ...turns] : []),
+    ].join("\n");
+  }
+
   /** Main entry: one user message → validated pipeline → LuiResult.
    *  `onProgress` (F0 SSE seam) receives REAL pipeline-stage events when supplied. */
   async handle(
@@ -583,7 +634,12 @@ export class Lui {
         schemaName: "lui.normalized_request",
         schemaDescription: NORMALIZED_REQUEST_SCHEMA_DESC,
         system: INTERPRETER_SYSTEM,
-        prompt: `Trader message: "${userMessage}"\nRespond as JSON conforming to schema "lui.normalized_request".\n${NORMALIZED_REQUEST_SCHEMA_DESC}`,
+        prompt: [
+          `Trader message: "${userMessage}"`,
+          this.conversationFrame(),
+          `Respond as JSON conforming to schema "lui.normalized_request".`,
+          NORMALIZED_REQUEST_SCHEMA_DESC,
+        ].filter((line) => line !== undefined).join("\n"),
         preferJson: true,
       });
       request = parseNormalizedRequest(res.raw);
@@ -603,6 +659,7 @@ export class Lui {
           `Trader message: "${userMessage}"`,
           `Interpreted objective: ${request.objective}`,
           `Primary action: ${request.primaryAction}`,
+          this.conversationFrame(),
           "CURRENT WORKSPACE STATE:",
           renderResearchContext(this.researchContext()),
         ].join("\n"),
@@ -651,6 +708,7 @@ export class Lui {
           `Trader message: "${userMessage}"`,
           `Primary action: ${request.primaryAction}`,
           `Resolved target: ${JSON.stringify(target)}`,
+          this.conversationFrame(),
           `Workspace context summary: ${renderResearchContext(this.researchContext()).slice(0, 2000)}`,
         ].join("\n"),
         preferJson: true,
@@ -727,6 +785,7 @@ export class Lui {
           `Trader message: "${userMessage}"`,
           `Interpreted request: ${JSON.stringify(request)}`,
           `Resolved target: ${JSON.stringify(target)}`,
+          this.conversationFrame(),
           `Consequence: ${JSON.stringify(consequence)}`,
         ].join("\n"),
         preferJson: true,
@@ -742,6 +801,41 @@ export class Lui {
       request, target, ambiguity, consequence, plan,
       response: undefined,
     };
+
+    // THESIS CAPTURE (trader's own words). A trader who says "My thesis is that X. Test it."
+    // asked for two things, and the first one is a precondition of the second: a thesis that
+    // was never recorded cannot be tested, and the run answered "no active thesis to evaluate".
+    // The statement is copied VERBATIM from their sentence (conversation-routing), and the
+    // record goes through the SAME authorization boundary as every other consequential
+    // action — an unconfirmed turn records NOTHING and halts with the confirmation prompt.
+    if (this.conversationIntent === "THESIS_STATEMENT" && this.options.workspace.getActiveThesis() === undefined) {
+      const statement = statedThesisText(userMessage);
+      if (statement !== undefined) {
+        const confirmed = origin.kind === "trader" && /confirm/i.test(origin.detail ?? "");
+        if (!confirmed) {
+          result.awaitingConfirmation = {
+            status: "REQUIRED",
+            stepIndex: 0,
+            reason: "recording your own thesis as a trader-owned object requires your explicit confirmation",
+          };
+          result.response = {
+            answer: `Before I test it, I need your confirmation to record your thesis as your own: "${statement}". Nothing is stored until you confirm, and the research below will test it against the evidence either way.`,
+            supportingReasons: [],
+            opposingReasons: [],
+            confidence: "UNKNOWN",
+            keyUncertainty: "",
+            implication: "Confirm to record the thesis and run the test against it.",
+            citedObjectRefs: [],
+          };
+          return result;
+        }
+        result.thesis = this.options.workspace.addThesis(
+          { statement, objective: userMessage },
+          origin,
+          this.options.now?.(),
+        );
+      }
+    }
 
     if (ambiguity.isAmbiguous && consequence.level !== "INFORMATIONAL") {
       // Genuinely ambiguous + state-affecting → clarify before touching state (M3 §13).
@@ -1552,8 +1646,8 @@ export class Lui {
         ...(result.flow3?.landscape?.uncertainty ?? []),
         ...(result.flow4?.evaluation?.unresolved ?? []),
         ...(result.flow8?.evaluation?.unresolved ?? []),
-        ...(result.flow5 !== undefined
-          ? ["historical comparison is available only through a connected G1 historical-data provider" as const]
+        ...(result.flow5 !== undefined && result.flow5.outcome.evidence.length === 0
+          ? ["historical precedent data for this asset is unavailable until a historical market-data provider is connected" as const]
           : []),
       ][0] ?? "see research state";
       const opposing = [
@@ -1683,7 +1777,9 @@ export class Lui {
       const ctx = this.researchContext();
       const cited = [...(analysis?.citedObjectRefs ?? []), ...(challenge?.citedObjectRefs ?? [])].filter((ref) => objectExists(ctx, ref));
       const verdict = challenge !== undefined
-        ? `falsification verdict: ${challenge.falsificationVerdict}; ${challenge.rationale}`
+        // TRADER LANGUAGE, not engine vocabulary: the internal capability name never appears in
+        // an answer, and the verdict leads with what it MEANS for the trader's own view.
+        ? `**Verdict:** ${CHALLENGE_VERDICT_PLAIN[challenge.falsificationVerdict] ?? challenge.falsificationVerdict}. ${challenge.rationale}`
         : (analysis?.conclusion ?? "");
       return {
         answer: verdict,

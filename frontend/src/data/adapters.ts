@@ -25,7 +25,9 @@ import type {
 export function evidenceFromDto(e: EvidenceDto): EvidenceItem {
   return {
     ref: e.ref,
-    observation: e.observation,
+    // The backend's READABLE rendering wins on screen: every trader-facing surface shows the
+    // prose, never the transport payload it was rendered from. The raw bytes stay on the API.
+    observation: e.displayText ?? e.observation,
     evidenceType: e.evidenceType,
     evidenceClass: e.evidenceClass, // verbatim: RAW_DATA…SPECULATION
     ...(e.proxyBasis !== undefined ? { proxyBasis: e.proxyBasis } : {}),

@@ -392,12 +392,26 @@ export function registerRoutes(app: FastifyInstance, context: RouteContext): voi
       }
     }
 
-    // SSE path: REAL progress events from the engine listener + terminal final/error event.
+    // SSE path: REAL progress events from the engine listener + terminal final/event.
     // `reply.hijack()` gives this handler exclusive control of the raw stream; the supported
     // Fastify pattern for server-driven streaming (works identically under inject()).
+    //
+    // CORS ON A HIJACKED REPLY: hijacking hands the raw socket to this handler, so the response
+    // headers @fastify/cors computed for this request (Access-Control-Allow-Origin and its
+    // Vary) are DROPPED unless they are written explicitly — a cross-origin client then fails
+    // the whole stream with "Failed to fetch" and never sees progress or the final result.
+    // Production is same-origin so this hides there; any cross-origin run (the documented local
+    // vite -> Fastify workflow) lost the entire research stream. The framework's already-
+    // computed headers are preserved and the SSE headers layered on top.
+    const computedHeaders = reply.getHeaders();
+    const hijackedHeaders: Record<string, string> = {};
+    for (const [key, value] of Object.entries(computedHeaders)) {
+      if (value === undefined) continue;
+      hijackedHeaders[key] = Array.isArray(value) ? value.join(", ") : String(value);
+    }
     void reply.hijack();
     const raw = reply.raw;
-    raw.writeHead(200, sseHeaders());
+    raw.writeHead(200, { ...hijackedHeaders, ...sseHeaders() });
     raw.write(": research stream opened\n\n");
 
     // Heartbeats: model calls and capability executions can stay silent for minutes.

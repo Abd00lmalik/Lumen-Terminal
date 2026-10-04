@@ -21,6 +21,7 @@ import { THESIS_TRANSITIONS } from "../domain/thesis.js";
 import type { Challenge } from "../domain/challenge.js";
 import type { MonitoringAssessment, MonitorNotification } from "../domain/monitoring.js";
 import type { Provenance, ProvenanceOrigin } from "../domain/provenance.js";
+import { readableObservation } from "../research/observation-text.js";
 
 // ---------------------------------------------------------------------------
 // Shared primitives
@@ -70,6 +71,13 @@ export interface EvidenceDTO {
   /** The research run that retrieved this observation (explicit ownership; never inferred). */
   readonly researchRunId?: string;
   readonly observation: string;
+  /**
+   * READABLE RENDERING of `observation` (presentation, not a second record): the frozen bytes
+   * above are the integrity contract and stay untouched, while every trader-facing surface
+   * shows this prose instead of a transport payload. Deterministic; asserts nothing the
+   * payload does not say.
+   */
+  readonly displayText?: string;
   readonly evidenceType: string;
   /** Epistemic status AS DATA; the frontend badges this verbatim. */
   readonly evidenceClass: EvidenceClassDTO;
@@ -97,6 +105,7 @@ export function evidenceToDTO(e: Evidence): EvidenceDTO {
     // client can verify `evidence.researchRunId === currentResearchRunId` without inferring it.
     ...(e.researchRef !== undefined ? { researchRunId: e.researchRef } : {}),
     observation: e.observation,
+    displayText: readableObservation(e.observation),
     evidenceType: e.evidenceType,
     evidenceClass: e.evidenceClass,
     ...(e.proxyBasis !== undefined ? { proxyBasis: e.proxyBasis } : {}),
@@ -936,6 +945,23 @@ export function uiText(s: string): string {
   return s.replace(/[\u2014\u2013]/g, "; ").replace(/\s{2,}/g, " ");
 }
 
+/**
+ * PREMISE VALIDATION, as the client sees it: the run's own evidence contradicted the direction or
+ * magnitude the question asserted. Every field is derived from admitted evidence; the note is a
+ * trader-facing sentence with no identifiers, ids or engine vocabulary.
+ */
+export interface PremiseCheckDTO {
+  readonly verdict: "CONTRADICTED" | "CONSISTENT" | "UNTESTABLE";
+  readonly subject: string;
+  readonly assertedDirection: "UP" | "DOWN";
+  readonly assertedMagnitudePct?: number;
+  readonly observedDirection?: "UP" | "DOWN";
+  readonly observedChangePct?: number;
+  readonly observedWindow: string;
+  readonly evidenceRef: string;
+  readonly note: string;
+}
+
 /** The progressive-disclosure answer card (L0); the primary frontend answer surface. */
 export interface AnswerDTO {
   readonly answer: string;
@@ -1075,6 +1101,14 @@ export interface ResearchResponseDTO {
    * the collapsed traceability detail.
    */
   readonly researchGaps: readonly string[];
+  /**
+   * PREMISE VALIDATION: present only when the run's OWN evidence contradicts the direction (or
+   * magnitude) the question asserted. Trader-facing, identifier-free: "the current data shows
+   * Bitcoin is up 0.81% over 24 hours, which does not match the premise that it moved down."
+   * The note is ALSO the first line of the answer prose; this field lets the UI present it as a
+   * distinct premise check rather than ordinary prose.
+   */
+  readonly premiseCheck?: PremiseCheckDTO;
   /**
    * BENCHMARK VISIBILITY (research coverage contract): structured execution metadata for
    * external scoring — what the run had to know, what it attempted, what it could not close.

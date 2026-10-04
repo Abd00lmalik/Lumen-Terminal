@@ -78,11 +78,15 @@ const CAUSAL_SYNTHESIS_SYSTEM = [
   "You receive the VALIDATED research context (epistemic classes preserved) for a causal question.",
   "Hard rules:",
   "- Event definition ONLY from cited evidence. If magnitude/time is not in the evidence, say it is unknown; never invent values.",
+  "- PREMISE CHECK: if the observed evidence contradicts the direction or magnitude the question asserted (the trader says it fell, the price data shows it rose), say so plainly in eventDefinition and analyze the move the evidence actually shows.",
+  "- ALWAYS RANK THE CANDIDATES: a 'why' answer that does not name the strongest candidate explanations is not an investigation. Even when no single catalyst is established, list the candidate explanations and, for each, what supports it and what weakens it. competingExplanations must never be empty for a causal question unless strong causal evidence eliminates every alternative.",
+  "- Judge each candidate on timing alignment with the move, magnitude fit, and independent corroboration, and state which is strongest.",
   "- Correlation is not causation. Choose the WEAKEST causalStatus the evidence supports: temporal association ≠ correlation ≠ mechanism ≠ strong causal evidence.",
   "- Competing explanations that were not eliminated remain competing; do not erase them to make the answer cleaner.",
   "- Contradictions must be reported, not resolved by deletion.",
   "- LIMITATIONS (tool failures, empty feeds) are NOT negative evidence; never cite them against an explanation.",
   "- Only cite evidence ids present in the context. No fabricated citations.",
+  "- LANGUAGE: trader-facing prose only. Never mention internal identifiers (requirement ids, run ids), capability or tool names, or evidence object counts.",
   "- No chain-of-thought: reasons are evidence-backed statements, not private reasoning.",
   "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
@@ -286,6 +290,7 @@ function causalFailureResponse(failure: ModelFailure): string {
 }
 
 function buildFlow2Response(synthesis: CausalSynthesis, flowOutcome: FlowOutcome): string {
+  void flowOutcome; // the run's ids/counts live in the research state, not in trader-facing prose
   const lines: string[] = [];
   lines.push(`**What happened:** ${synthesis.eventDefinition}`);
   lines.push(`**Leading explanation:** ${synthesis.leadingExplanation} (causal status: ${synthesis.causalStatus})`);
@@ -294,18 +299,22 @@ function buildFlow2Response(synthesis: CausalSynthesis, flowOutcome: FlowOutcome
   }
   if (synthesis.competingExplanations.length > 0) {
     lines.push(`**Competing explanations:** ${synthesis.competingExplanations.slice(0, 3).join("; ")}`);
+  } else if (synthesis.causalStatus !== "STRONG_CAUSAL_EVIDENCE") {
+    // A "why" question that ends without naming a single alternative has not been a real
+    // investigation: the trader is told plainly that nothing else was ruled out, which is the
+    // honest state of the evidence rather than an implied single cause.
+    lines.push("**Competing explanations:** none were ruled out by the evidence collected.");
   }
   if (synthesis.contradictions.length > 0) {
     lines.push(`**Contradictions:** ${synthesis.contradictions.slice(0, 3).join("; ")}`);
   }
-  lines.push(`**Confidence:** ${synthesis.confidence}; evidence objects: ${flowOutcome.evidence.length}${flowOutcome.hypotheses.length > 0 ? `, hypotheses tracked: ${flowOutcome.hypotheses.length}` : ""}`);
+  lines.push(`**Confidence:** ${synthesis.confidence}.`);
   if (synthesis.uncertainty.length > 0) {
     lines.push(`**What remains uncertain:** ${synthesis.uncertainty.slice(0, 3).join("; ")}`);
   }
   if (synthesis.whatWouldChange.length > 0) {
     lines.push(`**What would change the conclusion:** ${synthesis.whatWouldChange.slice(0, 3).join("; ")}`);
   }
-  lines.push(`**Traceability:** research ${flowOutcome.researchId}; deeper levels available on request.`);
   return lines.join("\n");
 }
 

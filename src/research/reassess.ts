@@ -378,6 +378,6 @@ function buildReassessmentResponse(
     lines.push(`**Monitors:** ${revalidations.map((m) => `${m.monitorId} → ${m.outcome === "REVIEW" ? "flagged for your review (conditions may no longer be material)" : "still relevant"}`).join("; ")}`);
   }
   lines.push(`**What would change this:** ${record.whatWouldChange.slice(0, 2).join("; ") || "see assessment history"}`);
-  lines.push(`**Traceability:** assessment ${record.id} recorded in the thesis's assessment history; your thesis was not modified.`);
+  lines.push("**Traceability:** this assessment is recorded in your thesis's assessment history; your thesis was not modified.");
   return lines.join("\n");
 }

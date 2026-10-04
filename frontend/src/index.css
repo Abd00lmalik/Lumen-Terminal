@@ -244,6 +244,15 @@ a.row:hover { background: var(--panel-2); text-decoration: none; }
   letter-spacing: 0.005em;
   margin: 0;
 }
+/* READABILITY LAW: the emphasis belongs to the answer's opening statement, not to every line.
+   The answer body renders at normal weight with quiet mono labels, so a long answer reads as
+   prose instead of a wall of bold text. */
+.surface-judgment .verdict .answer-prose {
+  font-weight: 400;
+}
+.surface-judgment .verdict .answer-prose .mono {
+  font-weight: 500;
+}
 .surface-judgment .judgment-head {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px;
 }

@@ -99,6 +99,20 @@ export function statesThesis(message: string): boolean {
   return THESIS_STATEMENT.test(message);
 }
 
+/**
+ * The trader's thesis STATEMENT, in their own words, or undefined when they stated none.
+ *
+ * "My thesis is that liquidity conditions are the primary driver. Test it." records
+ * "liquidity conditions are the primary driver" — never a paraphrase, never strengthened,
+ * never extended with the trailing instruction. A thesis is the trader's own position; a
+ * system that rewrites it owns it, and a system that cannot quote it cannot record it.
+ */
+export function statedThesisText(message: string): string | undefined {
+  const match = /\b(?:my|our)\s+(?:thesis|view|position|case|setup|belief)\s+(?:is|are)\s+(?:that\s+)?([^?!.]+?)\s*(?:[.?!]|$)/i.exec(message);
+  const statement = match?.[1]?.trim();
+  return statement !== undefined && statement.length >= 8 ? statement : undefined;
+}
+
 /** The subject the trader's own words establish, or undefined when the message names none. */
 function statedSubject(message: string): string | undefined {
   // resolveNamedAsset answers "did the trader name an ASSET", and nothing else. An earlier

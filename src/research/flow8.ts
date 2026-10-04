@@ -463,6 +463,7 @@ function failureResponse(failure: ModelFailure): string {
 }
 
 function buildFlow8Response(evaluation: FrameworkEvaluation, flowOutcome: FlowOutcome, framework: SavedArtifact): string {
+  void flowOutcome; // run identifiers/counts live in the research state, not in trader prose
   const lines: string[] = [];
   lines.push(`**Framework (trader-owned, artifact ${framework.id}, unchanged):** ${evaluation.frameworkSummary}`);
   lines.push(`**Overall:** ${evaluation.overallAssessment}${evaluation.frameworkScore !== undefined ? ` (framework score: ${evaluation.frameworkScore})` : " (qualitative; the framework defines no numeric scoring)"}`);
@@ -477,6 +478,6 @@ function buildFlow8Response(evaluation: FrameworkEvaluation, flowOutcome: FlowOu
   if (evaluation.contradictions.length > 0) lines.push(`**Contradictions:** ${evaluation.contradictions.slice(0, 2).join("; ")}`);
   lines.push(`**Confidence:** ${evaluation.confidence}`);
   if (evaluation.whatWouldChange.length > 0) lines.push(`**What would change this:** ${evaluation.whatWouldChange.slice(0, 2).join("; ")}`);
-  lines.push(`**Traceability:** research ${flowOutcome.researchId}; criterion-level evidence lives in the research state.`);
+  lines.push("**Criterion-level evidence** for each verdict lives in the research state.");
   return lines.join("\n");
 }

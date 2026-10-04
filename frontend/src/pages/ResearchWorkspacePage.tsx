@@ -14,7 +14,7 @@ import { AppShell } from "../components/AppShell.js";
 import { BackendDownNote } from "../components/BackendDownNote.js";
 import {
   Panel, ClassBadge, EpistemicRail, FreshnessBadge, ConfidenceMeter, StatusBadge,
-  ProxyNote, UnavailableNote, KV, Note, Empty, timeAgo,
+  ProxyNote, UnavailableNote, KV, Note, Empty, AnswerProse, timeAgo,
 } from "../components/ui.js";
 import { evidenceFromDto, judgmentFromDto, thesisFromDto } from "../data/adapters.js";
 import { isResearchRef, preferTurn, runOpenRef, turnIdentity } from "../data/identity.js";
@@ -103,6 +103,16 @@ interface Turn {
   readonly degraded?: boolean;
   /** How completely this run could be reconstructed: FULL | JUDGMENT | SUMMARY. */
   readonly recordTier?: ResearchRecordTierDto;
+}
+
+/**
+ * The premise note is shown ONCE, as its own notice above the answer. The backend also prefixes
+ * the answer prose with it so any other surface (history reopen, thread view) still says it; here
+ * it is removed from the prose so the trader does not read the same sentence twice.
+ */
+function premiseStripped(premise: { note: string } | undefined, answer: string): string {
+  if (premise === undefined) return answer;
+  return answer.startsWith(premise.note) ? answer.slice(premise.note.length).replace(/^\n+/, "") : answer;
 }
 
 /** Contextual SAVE/UNSAVE wiring passed to a rendered run (no wall of global buttons). */
@@ -663,6 +673,12 @@ export function ResearchWorkspacePage() {
     turns: identifiedTurns,
     ...(viewedRef !== undefined ? { viewedRef } : {}),
     ...(stream.result?.researchRef !== undefined ? { liveRef: stream.result.researchRef } : {}),
+    // A terminal response that is NOT a research run (clarification, confirmation request,
+    // rejection) is still the answer to the question just asked, so it owns the active area
+    // instead of hiding behind the previous run.
+    ...(stream.result !== undefined && stream.result.researchRef === undefined && stream.result.researchRunId === undefined
+      ? { liveIdentity: turnIdentity({ requestId: stream.result.requestId }) }
+      : {}),
     running: stream.running,
   });
   /**
@@ -961,7 +977,9 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
               {saveControl("RESEARCH", undefined, "this observation")}
             </span>
           </div>
-          <p className="verdict mono" style={{ whiteSpace: "pre-wrap", fontSize: 13 }}>{run.answer.answer}</p>
+          <div className="verdict mono" style={{ fontSize: 13 }}>
+            <AnswerProse className="answer-prose mono" text={premiseStripped(run.premiseCheck, run.answer.answer)} />
+          </div>
           <p style={{ margin: "10px 0 0", fontSize: 11.5, color: "var(--text-3)" }}>
             Retrieved as requested. No judgment, synthesis or falsification was performed.
           </p>
@@ -982,7 +1000,19 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
               )}
             </span>
           </div>
-          <p className="verdict">{run.answer.answer}</p>
+          <div className="verdict">
+            {/* PREMISE CHECK first: when fresh evidence contradicted the question's premise,
+                the trader reads the correction BEFORE the analysis, never after it. */}
+            {run.premiseCheck !== undefined && (
+              <div className="note warn" style={{ marginBottom: 12 }}>
+                <span className="mono" style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", marginRight: 8 }}>
+                  premise check
+                </span>
+                {run.premiseCheck.note}
+              </div>
+            )}
+            <AnswerProse className="answer-prose" text={premiseStripped(run.premiseCheck, run.answer.answer)} />
+          </div>
           {run.answer.keyUncertainty.length > 0 && (
             <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--warn)" }}>◆ {run.answer.keyUncertainty}</p>
           )}

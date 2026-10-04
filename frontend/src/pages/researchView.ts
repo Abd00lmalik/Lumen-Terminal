@@ -15,6 +15,8 @@
  *    active result; a stale snapshot never renders beside a new question.
  */
 
+import { turnIdentity } from "../data/identity.js";
+
 export interface IdentifiedTurn {
   readonly question: string;
   readonly requestId: string;
@@ -29,6 +31,12 @@ export interface ActiveViewInput {
   readonly viewedRef?: string;
   /** Research identity of the live stream result, when the stream has completed. */
   readonly liveRef?: string;
+  /**
+   * Identity of the LIVE terminal turn when it carries NO research identity: a clarification, a
+   * confirmation request, a rejection, a model failure. Such a turn is not a research run, but
+   * it IS the answer to the question the trader just asked, so it must occupy the active area.
+   */
+  readonly liveIdentity?: string;
   readonly running: boolean;
 }
 
@@ -39,6 +47,11 @@ export interface ActiveViewInput {
   // trader had once clicked a History entry — so the new answer was there but collapsed, and
   // the only way to see it was to go back to History and click it again.
   if (input.liveRef !== undefined && input.liveRef !== "") return input.liveRef;
+  // rule 2b: a terminal response that is not a research run. It has no research identity to
+  // match on, and without this it collapsed into an archival row while the PREVIOUS run's
+  // answer stayed on screen looking like the answer to the question just asked — the trader
+  // sent "Focus specifically on ETF flows." and read their earlier answer back.
+  if (input.liveIdentity !== undefined && input.liveIdentity !== "") return input.liveIdentity;
   if (input.viewedRef !== undefined && input.viewedRef !== "") return input.viewedRef;
   // rule 3: newest turn carrying an identity
   for (let i = input.turns.length - 1; i >= 0; i -= 1) {
@@ -131,11 +144,17 @@ export function isNewResearchRequest(state: unknown): boolean {
   return typeof state === "object" && state !== null && (state as { newResearch?: unknown }).newResearch === true;
 }
 
-/** Is this turn the expanded active result (as opposed to an archival row)? */
+/**
+ * Is this turn the expanded active result (as opposed to an archival row)?
+ *
+ * Identity is the SAME one `selectActiveTurnRef` returns: the research ref when the turn has
+ * one, else its own request id. A turn with no research identity (a clarification, a
+ * confirmation request, a rejection) is therefore expandable exactly like a run.
+ */
 export function isExpandedTurn(turn: IdentifiedTurn, activeRef: string | undefined, running: boolean): boolean {
   if (running) return false; // rule 1
   if (activeRef === undefined) return false;
-  return turn.researchRef === activeRef;
+  return turnIdentity(turn) === activeRef;
 }
 
 export interface RailScopeInput {

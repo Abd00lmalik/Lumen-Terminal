@@ -307,6 +307,7 @@ function failureResponse(failure: ModelFailure): string {
 }
 
 function buildFlow3Response(landscape: FactorLandscape, flowOutcome: FlowOutcome, objective: string): string {
+  void flowOutcome; // run identifiers/counts live in the research state, not in trader prose
   const lines: string[] = [];
   lines.push(`**Answer:** ${landscape.overallAssessment}`);
   const current = landscape.factors.filter((f) => f.status === "OBSERVED_CURRENT_DRIVER");
@@ -324,7 +325,6 @@ function buildFlow3Response(landscape: FactorLandscape, flowOutcome: FlowOutcome
   }
   lines.push(`**Confidence:** ${landscape.confidence}${landscape.uncertainty.length > 0 ? `; key uncertainty: ${landscape.uncertainty[0]}` : ""}`);
   if (landscape.whatWouldChange.length > 0) lines.push(`**What would change this:** ${landscape.whatWouldChange.slice(0, 2).join("; ")}`);
-  lines.push(`**Traceability:** research ${flowOutcome.researchId}; every factor's evidence lives in the research state; deeper levels available on request.`);
   void objective;
   return lines.join("\n");
 }

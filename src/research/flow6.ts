@@ -21,6 +21,8 @@
 import type { ModelProvider } from "../model/provider.js";
 import { ModelFailure } from "../model/provider.js";
 import { validateModelOutput, type OutputSchema } from "../model/provider.js";
+import { readableLimitation, readableLimitations } from "./limitation-text.js";
+import { readableObservation } from "./observation-text.js";
 import { FLOW_OBJECTIVES, runFlow, validateFlowOutcome, type FlowOutcome } from "./flow-runner.js";
 import { renderResearchContext } from "./context.js";
 import type { Workspace } from "../domain/workspace.js";
@@ -292,32 +294,31 @@ function synthesisFailureResponse(failure: ModelFailure): string {
  */
 function partialSynthesisResponse(flowOutcome: FlowOutcome, failure: ModelFailure): string {
   const domains = [...new Set(flowOutcome.executions.map((e) => e.capability))];
-  const failedPaths = flowOutcome.executions.filter((e) => e.result.failure.type !== "NONE").map((e) => `${e.capability}: ${e.result.failure.message}`);
-  const established = flowOutcome.evidence.slice(0, 5).map((e) => `  • [${e.id}] ${summarizeObservation(e.observation)}`);
+  // Provider plumbing (capability ids, raw provider error bodies) is diagnostics; the answer
+  // surface says only that a path could not be completed.
+  const failedPaths = flowOutcome.executions
+    .filter((e) => e.result.failure.type !== "NONE")
+    .map((e) => readableLimitation({ kind: e.result.failure.type === "EMPTY_RESULT" ? "empty_result" : "tool_failure", description: e.result.failure.message ?? "provider path failed", capability: e.capability }));
+  // No `[ev_... ]` ids and no raw payloads: the trader reads what was observed, and the id
+  // belongs to the archive rather than to the sentence.
+  const established = flowOutcome.evidence.slice(0, 5).map((e) => `  • ${readableObservation(e.observation, 160)}`);
   const gaps = flowOutcome.context.limitations.slice(0, 4);
   const lines: string[] = [];
   lines.push(`**Answer:** Cross-domain synthesis could not be completed (${failure.type}: ${failure.message}). The gathered evidence is preserved below; no overall picture is asserted without the synthesis step.`);
-  lines.push(`**What is established (from ${flowOutcome.evidence.length} evidence object(s) across ${domains.length} investigation path(s)):**`);
-  lines.push(...(established.length > 0 ? established : ["  • (no validated evidence objects were produced)"]));
+  lines.push(`**What is established (from the observations gathered across ${domains.length} investigation path(s)):**`);
+  lines.push(...(established.length > 0 ? established : ["  • (nothing was established before the synthesis step failed)"]));
   lines.push(`**What is NOT established:** the cross-domain overall picture, typed disagreements, and the weighted confidence judgment. The research ran; the synthesis step failed.`);
   lines.push(`**Why it could not be established:** ${failure.type} is a system condition, not evidence about the market. The failure keeps its type and is never read as a negative finding.`);
   if (failedPaths.length > 0) lines.push([`**Provider paths that failed (technical conditions):**`, ...failedPaths.slice(0, 4).map((f) => `  • ${f}`)].join("\n"));
-  if (gaps.length > 0) lines.push([`**Missing evidence / limitations:**`, ...gaps.map((g) => `  • ${g}`)].join("\n"));
-  lines.push(`**What would resolve the gap:** re-running the synthesis with a reachable model provider; the evidence objects (refs above) remain in the workspace and stay citable.`);
+  const gapText = readableLimitations(gaps, 4);
+  if (gapText !== undefined) lines.push(`**Missing evidence / limitations:** ${gapText}`);
+  lines.push("**What would resolve the gap:** a reachable model provider for the synthesis step; the observations already gathered stay in the research state and remain citable.");
   return lines.join("\n");
 }
 
-function summarizeObservation(text: string, max = 160): string {
-  try {
-    const parsed = JSON.parse(text) as Record<string, unknown>;
-    if (typeof parsed.title === "string") return parsed.title.slice(0, max);
-  } catch {
-    // not JSON
-  }
-  return text.slice(0, max);
-}
 
 function buildFlow6Response(synthesis: CrossDomainSynthesis, flowOutcome: FlowOutcome): string {
+  void flowOutcome; // run identifiers/counts live in the research state, not in trader prose
   const lines: string[] = [];
   lines.push(`**Overall picture:** ${synthesis.overallPicture}`);
   if (synthesis.supportingSignals.length > 0) lines.push(`**Supporting signals:** ${synthesis.supportingSignals.slice(0, 3).join("; ")}`);
@@ -329,8 +330,7 @@ function buildFlow6Response(synthesis: CrossDomainSynthesis, flowOutcome: FlowOu
     }
   }
   if (synthesis.missingInformation.length > 0) lines.push(`**Missing information:** ${synthesis.missingInformation.slice(0, 3).join("; ")}`);
-  lines.push(`**Confidence:** ${synthesis.confidence}; evidence objects: ${flowOutcome.evidence.length}, domains investigated: ${new Set(flowOutcome.executions.map((e) => e.capability)).size}`);
+  lines.push(`**Confidence:** ${synthesis.confidence}.`);
   if (synthesis.thesisImplication !== undefined) lines.push(`**Thesis implication:** ${synthesis.thesisImplication}`);
-  lines.push(`**Traceability:** research ${flowOutcome.researchId}; deeper levels available on request.`);
   return lines.join("\n");
 }

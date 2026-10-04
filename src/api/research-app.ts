@@ -53,6 +53,8 @@ import {
 } from "../lui/conversation-routing.js";
 import { investigationHasResearch } from "../research/investigation-context.js";
 import { deriveInvestigationState } from "../research/investigation-state.js";
+import { checkQuestionPremise } from "../research/premise.js";
+import { resolveNamedAsset } from "../domain/instruments.js";
 
 /** F0 session stub (FRONTEND_ARCHITECTURE.md §18): one local trader identity, server-side only. */
 export const TRADER_ORIGIN: ProvenanceOrigin = { kind: "trader", detail: "F0 API session (local trader identity)" };
@@ -427,15 +429,24 @@ export class ResearchApp {
     const flowAnswerOutcome =
       result.flow2?.outcome ?? result.flow6?.outcome ?? result.flow7?.outcome
       ?? result.flow3?.outcome ?? result.flow4?.outcome ?? result.flow8?.outcome ?? result.flow5?.outcome;
-    const answerRunId = flowAnswerOutcome !== undefined
+    const rawAnswerRunId = flowAnswerOutcome !== undefined
       ? flowAnswerOutcome.researchId
       : result.research?.research.id;
+    // A FLOW THAT RESEARCHED NOTHING reports the sentinel `"n/a"` as its research id (Flow 4 /
+    // 7 / 8 return an honest shell when there is no thesis, belief or framework to evaluate).
+    // That sentinel is NOT a research identity: it reached the client as `researchRef`, where
+    // the run-coherence check bound the answer to a run that does not exist and the thread
+    // collapsed the turn — a real answer ("no belief or thesis to falsify") silently vanished.
+    // Only a minted research id (`rs_…`) is an identity; everything else is "no research ran".
+    const answerRunId = typeof rawAnswerRunId === "string" && /^rs_/.test(rawAnswerRunId)
+      ? rawAnswerRunId
+      : undefined;
     // Evidence + judgments exposed with epistemic classes intact (observation ≠ interpretation
     // ≠ proxy ≠ speculation). Limitations surface exactly what the research could not do.
     const evidence: EvidenceDTO[] = [];
     const judgments: JudgmentDTO[] = [];
     const researchRef: string | undefined = answerRunId;
-    if (result.research !== undefined && result.research.research.id === answerRunId) {
+    if (answerRunId !== undefined && result.research !== undefined && result.research.research.id === answerRunId) {
       for (const e of result.research.evidence) {
         const domain = ws.getEvidence(e.id) ?? e;
         evidence.push(evidenceToDTO(domain));
@@ -446,7 +457,7 @@ export class ResearchApp {
       result.flow2?.outcome, result.flow3?.outcome, result.flow4?.outcome,
       result.flow5?.outcome, result.flow6?.outcome, result.flow7?.outcome, result.flow8?.outcome,
     ]) {
-      if (flowOutcome === undefined || flowOutcome.researchId !== answerRunId) continue;
+      if (flowOutcome === undefined || answerRunId === undefined || flowOutcome.researchId !== answerRunId) continue;
       for (const e of flowOutcome.evidence) {
         if (!evidence.some((d) => d.ref === e.id)) evidence.push(evidenceToDTO(ws.getEvidence(e.id) ?? e));
       }
@@ -670,7 +681,7 @@ export class ResearchApp {
         // EXECUTION CONTRACT: the answer-bearing run's own enforced mode, not a re-parse of
         // the trader's text — and never a SIBLING run's mode (a compound plan whose observation
         // step ran RAW_OBSERVATION must not suppress the flow run's judgment backstop).
-        result.research !== undefined && result.research.research.id === answerRunId && result.research.executionMode === "RAW_OBSERVATION"
+        answerRunId !== undefined && result.research !== undefined && result.research.research.id === answerRunId && result.research.executionMode === "RAW_OBSERVATION"
           ? OBSERVATION_ONLY_CONTRACT
           : UNCONSTRAINED_RESEARCH,
       );
@@ -690,11 +701,41 @@ export class ResearchApp {
       }
     }
 
+    // PREMISE VALIDATION (user premise vs observed fact): when the run's OWN evidence
+    // contradicts the direction or magnitude the question asserted ("why did BTC move down"
+    // while BTC is up 0.81% over 24h), the trader is told FIRST, in plain language, and the
+    // investigation continues on the move they actually observed. Deterministic and
+    // evidence-bound (src/research/premise.ts): it never asserts a move no observation shows.
+    const premiseCheck = checkQuestionPremise({
+      question: submittedQuestion,
+      subject: result.target.asset ?? resolveNamedAsset(submittedQuestion),
+      evidence: evidence.map((e) => ({ ref: e.ref, observation: e.observation })),
+    });
+    const traderAnswer: AnswerDTO =
+      premiseCheck === undefined
+        ? groundedAnswer
+        : { ...groundedAnswer, answer: `${premiseCheck.note}\n\n${groundedAnswer.answer}` };
+
     const response: ResearchResponseDTO = {
       requestId,
       action: result.request.primaryAction,
       outcome,
-      answer: groundedAnswer,
+      answer: traderAnswer,
+      ...(premiseCheck !== undefined
+        ? {
+            premiseCheck: {
+              verdict: premiseCheck.verdict,
+              subject: premiseCheck.subject,
+              assertedDirection: premiseCheck.assertedDirection,
+              ...(premiseCheck.assertedMagnitudePct !== undefined ? { assertedMagnitudePct: premiseCheck.assertedMagnitudePct } : {}),
+              ...(premiseCheck.observedDirection !== undefined ? { observedDirection: premiseCheck.observedDirection } : {}),
+              ...(premiseCheck.observedChangePct !== undefined ? { observedChangePct: premiseCheck.observedChangePct } : {}),
+              observedWindow: premiseCheck.observedWindow,
+              evidenceRef: premiseCheck.evidenceRef,
+              note: premiseCheck.note,
+            },
+          }
+        : {}),
       ...(result.modelFailure !== undefined ? { modelFailure: { type: result.modelFailure.type, message: result.modelFailure.message } } : {}),
       limitations,
       researchGaps,

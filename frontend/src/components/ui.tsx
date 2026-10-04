@@ -102,6 +102,65 @@ export function Note({ tone, children }: { tone?: "warn" | "info"; children: Rea
   return <div className={`note ${tone ?? ""}`}>{children}</div>;
 }
 
+/**
+ * ANSWER PROSE (readability law: no raw Markdown on screen).
+ *
+ * The engine composes trader-facing answers as labelled lines ("**What happened:** ...",
+ * "**Confidence:** ...") inside one field. Rendering that string verbatim shows the trader
+ * literal asterisks and a wall of semi-bold text — the "engineering console" look the product
+ * must not have. This renders the same content as label/value pairs: a small quiet label and
+ * readable prose, with the emphasis on the substance rather than on every line.
+ *
+ * Purely presentational: the text is shown verbatim, nothing is summarized or re-worded.
+ */
+export function AnswerProse({ text, className }: { text: string; className?: string }) {
+  const blocks = text.split(/\n{2,}/);
+  return (
+    <div className={className}>
+      {blocks.map((block, i) => {
+        const lines = block.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+        const pairs: { label: string; value: string }[] = [];
+        let plain: string[] = [];
+        const flush = (): void => {
+          if (plain.length > 0) pairs.push({ label: "", value: plain.join(" ") });
+          plain = [];
+        };
+        for (const line of lines) {
+          const labelled = /^\*\*([^*]{1,80})\*\*\s*:?\s*([\s\S]*)$/.exec(line);
+          if (labelled !== null && labelled[1] !== undefined) {
+            flush();
+            // The bold span usually already carries the colon ("**What happened:** value"), so
+            // the label is normalized to exactly one; appending unconditionally rendered
+            // "WHAT HAPPENED::" on screen.
+            const label = labelled[1].trim().replace(/[:\s]+$/, "");
+            pairs.push({ label: label.length > 0 ? `${label}:` : "", value: (labelled[2] ?? "").trim() });
+          } else {
+            plain.push(line.replace(/\*\*/g, ""));
+          }
+        }
+        flush();
+        // DIV, not <p>: this renders inside the answer's own paragraph element, and a
+        // paragraph cannot legally contain paragraphs (the browser silently re-closes the
+        // ancestor and the styling breaks).
+        return (
+          <div key={i} style={{ margin: i === 0 ? 0 : "10px 0 0" }}>
+            {pairs.map((p, j) => (
+              <span key={j} style={{ display: "block" }}>
+                {p.label.length > 0 && (
+                  <span className="mono" style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-3)", marginRight: 8 }}>
+                    {p.label}
+                  </span>
+                )}
+                <span>{p.value}</span>
+              </span>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Empty({ title, hint }: { title: string; hint?: string }) {
   return (
     <div className="empty">

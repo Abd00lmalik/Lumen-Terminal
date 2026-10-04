@@ -36,6 +36,8 @@ export interface EvidenceDto {
   /** The research run that retrieved this observation; the client never infers ownership. */
   readonly researchRunId?: string;
   readonly observation: string;
+  /** Readable rendering of `observation` (the frozen bytes stay available; screens show this). */
+  readonly displayText?: string;
   readonly evidenceType: string;
   readonly evidenceClass: EvidenceClassDto;
   readonly proxyBasis?: string;
@@ -494,6 +496,23 @@ export interface SessionDto {
 // Research request/response + errors
 // ---------------------------------------------------------------------------
 
+/**
+ * PREMISE CHECK (user premise vs observed fact): present only when the run's own evidence
+ * contradicted the direction or magnitude the question asserted. The UI shows it as a distinct
+ * notice ABOVE the answer so the trader sees the correction before the analysis.
+ */
+export interface PremiseCheckDto {
+  readonly verdict: "CONTRADICTED" | "CONSISTENT" | "UNTESTABLE";
+  readonly subject: string;
+  readonly assertedDirection: "UP" | "DOWN";
+  readonly assertedMagnitudePct?: number;
+  readonly observedDirection?: "UP" | "DOWN";
+  readonly observedChangePct?: number;
+  readonly observedWindow: string;
+  readonly evidenceRef: string;
+  readonly note: string;
+}
+
 export interface AnswerDto {
   readonly answer: string;
   readonly supportingReasons: readonly string[];
@@ -574,6 +593,8 @@ export interface ResearchResponseDto {
   readonly limitations: readonly string[];
   /** Material research gaps (engine-assessed); the only user-facing coverage items. */
   readonly researchGaps?: readonly string[];
+  /** Premise validation result for this run (absent when the premise was not contradicted). */
+  readonly premiseCheck?: PremiseCheckDto;
   readonly researchRef?: string;
   /**
    * The research run this response belongs to. ASYNC INTEGRITY: a response whose

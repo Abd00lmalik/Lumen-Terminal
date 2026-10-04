@@ -657,8 +657,8 @@ function renderRequirementCoverage(requirements: readonly {
     ...linkLines,
     blocking.length === 0
       ? "VERDICT: all CRITICAL requirements are covered by relevant, fresh-enough evidence."
-      : `VERDICT: ${blocking.length} CRITICAL requirement(s) remain UNCOVERED (${blocking.map((b) => b.id).join(", ")}). Do NOT present them as answered; if recovery failed, state exactly which requirement could not be satisfied.`,
-    "ANSWER LAW (gap separation): an UNCOVERED requirement is a RESEARCH GAP and belongs in the answer's uncertainty ONLY as it affects the conclusion (one plain sentence per material gap). Provider/tool failures, fallbacks, transport notes, and data-source caveats are CAPABILITY GAPS: they are NOT uncertainty, NOT findings, and must NEVER appear in the answer. Partially covered questions are answered from what IS established while naming what is not; one uncovered requirement never reduces the whole answer to the gap.",
+      : `VERDICT: ${blocking.length} question dimension(s) remain UNCOVERED (${blocking.map((b) => b.description).join("; ")}). Do NOT present them as answered; if recovery failed, state exactly which part of the question could not be satisfied.`,
+    "ANSWER LAW (gap separation): an UNCOVERED dimension is a RESEARCH GAP and belongs in the answer's uncertainty ONLY as it affects the conclusion (one plain sentence per material gap, phrased in market terms). Provider/tool failures, fallbacks, transport notes, and data-source caveats are CAPABILITY GAPS: they are NOT uncertainty, NOT findings, and must NEVER appear in the answer. Partially covered questions are answered from what IS established while naming what is not; one uncovered dimension never reduces the whole answer to the gap. Never mention internal requirement ids, run ids, capability names or object counts in the answer.",
   ].join("\n");
 }
 

@@ -29,6 +29,7 @@ function normalizeHistoricalBase(asset: string | undefined): string {
 }
 import { analyzeEpisodes, renderEpisodeAnalysis, type EpisodeAnalysis } from "./episode-analysis.js";
 import type { Workspace } from "../domain/workspace.js";
+import { readableLimitations } from "./limitation-text.js";
 import type { WorkspaceStore } from "../persistence/index.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
 
@@ -157,18 +158,17 @@ function buildFlow5Response(
   } else {
     lines.push("**Answer:** Historical comparison is currently UNAVAILABLE.");
     lines.push(
-      "**Why:** the G1 historical-data vendor has not been connected (final lock §4), so no genuine historical episodes can be retrieved. This flow does not substitute current market data or model background knowledge for historical evidence.",
+      "**Why:** no connected historical market-data provider is available for this asset, so no genuine historical episodes can be retrieved. This flow does not substitute current market data or model background knowledge for historical evidence.",
     );
     if (excludedCapabilities.length > 0) {
       lines.push(`**Scope guard:** planned out-of-scope capabilities were not executed for a historical question (${excludedCapabilities.join(", ")}).`);
     }
-    lines.push("**What would change this:** connecting an approved G1 historical-data provider enables real precedent research.");
+    lines.push("**What would change this:** connecting an approved historical market-data provider enables real precedent research.");
   }
-  const limitationNote = outcome.context.limitations.slice(0, 3);
-  if (limitationNote.length > 0) {
-    lines.push(`**Limitations:** ${limitationNote.join("; ")}`);
-  }
-  lines.push(`**Traceability:** research ${outcome.researchId}; deeper levels available on request.`);
+  // What could not be retrieved, in trader language: the limitation objects rendered as
+  // "[object Object]", and their descriptions carried capability ids and raw provider errors.
+  const limitationNote = readableLimitations(outcome.context.limitations);
+  if (limitationNote !== undefined) lines.push(`**Limitations:** ${limitationNote}`);
   return lines.join("\n");
 }
 

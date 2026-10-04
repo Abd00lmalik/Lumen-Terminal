@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { runFlow6 } from "../../src/research/flow6.js";
+import { readableObservation } from "../../src/research/observation-text.js";
 import { Workspace } from "../../src/domain/workspace.js";
 import { MemoryStore } from "../../src/persistence/index.js";
 import { CapabilityRegistry } from "../../src/adapters/capability-registry.js";
@@ -225,7 +226,10 @@ describe("Flow 6; WHAT DOES ALL THE INFORMATION SAY? (cross-domain synthesis)", 
     expect(result.response).toContain("could not be completed");
     expect(result.response).toContain("no overall picture is asserted");
     expect(result.response).toContain("What is established");
-    expect(result.response).toContain(result.outcome.evidence[0]!.id);
+    // The observations are preserved as READABLE prose; internal evidence ids stay in the
+    // archive and never ride along on the answer surface (§7).
+    expect(result.response).toContain(readableObservation(result.outcome.evidence[0]!.observation, 160));
+    expect(result.response).not.toContain(result.outcome.evidence[0]!.id);
     // A system condition is never read as a market finding.
     expect(result.response).toContain("system condition, not evidence about the market");
     // No synthesis ran → the full-synthesis surface is absent, and no judgment is minted
