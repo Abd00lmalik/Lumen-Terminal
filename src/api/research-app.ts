@@ -287,6 +287,19 @@ export class ResearchApp {
     // context of the conversation. The decision is recorded as STRUCTURED STATE (an
     // investigation + a turn), never as a prompt instruction, because it decides whether prior
     // context may reach this run at all.
+    //
+    // ABSORB BEFORE ROUTING (production fix). This decision is made against the WORKSPACE, so
+    // the workspace must be the PERSISTED one. A request is resolved through
+    // `sessions.get(user.uid)`, which hands back a CACHED warm app per trader: two turns can be
+    // served by two different in-memory graphs over one durable store, and this instance holds
+    // only what it has itself absorbed or persisted. Routing first meant a warm instance that
+    // had never seen the trader's completed run read `getInvestigation(...)` as undefined,
+    // inferred "no live thread", and opened a NEW investigation — the trader lost the thread and
+    // every run in it by asking a follow-up. `refreshExecutionState` is the same read-freshness
+    // step `continuityFresh`/`getResearch` already perform for reads; routing is a read of the
+    // same state and was simply missing it. A transient store failure keeps serving what we
+    // hold rather than failing the submission.
+    await this.refreshExecutionState();
     const ws0 = this.ws();
     const requested = investigationId !== undefined ? ws0.getInvestigation(investigationId) : undefined;
     const current = requested ?? ws0.currentInvestigation();
@@ -870,12 +883,42 @@ export class ResearchApp {
     };
   }
 
-  /** The investigation list (newest first) plus which one the trader is currently in. */
+  /**
+   * The investigation list (newest first) plus which one the trader is currently in.
+   *
+   * Synchronous on purpose: this is a pure projection over the in-memory graph and is used
+   * internally where awaiting would be meaningless. The HTTP read path uses
+   * `listInvestigationsFresh`, which absorbs first.
+   */
   listInvestigations(): readonly InvestigationDTO[] {
     return this.ws()
       .listInvestigations()
       .map((inv) => this.investigation(inv.id))
       .filter((inv): inv is InvestigationDTO => inv !== undefined);
+  }
+
+  /**
+   * READ FRESHNESS (same law as `continuityFresh` / `getResearch`): absorb another instance's
+   * completed runs before listing.
+   *
+   * Served from a warm in-memory graph this list could predate a run another instance appended,
+   * so the thread rail under-reported its own runs and the UI could read a live investigation as
+   * having no research — the read-side twin of the routing failure fixed in
+   * `submitResearchRequest`. `listInvestigations` stays synchronous for in-process callers; this
+   * is the durable-state read the route performs.
+   */
+  async listInvestigationsFresh(): Promise<readonly InvestigationDTO[]> {
+    await this.refreshExecutionState();
+    return this.listInvestigations();
+  }
+
+  /**
+   * Public read-freshness step for a single-resource route: absorb the persisted graph before
+   * projecting one investigation. Exposed rather than absorbed inside `investigation()` so that
+   * the synchronous in-process projection stays synchronous for its existing callers.
+   */
+  async refreshExecutionStateForRead(): Promise<void> {
+    await this.refreshExecutionState();
   }
 
   /** Move the trader into a thread (what opening an investigation in the UI does). */

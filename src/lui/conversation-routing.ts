@@ -147,6 +147,29 @@ function statedSubject(message: string): string | undefined {
 const BACK_REFERENCE_DEFERRENT =
   /\b(?:the|that|this|those|these|your|our|my)\s+(?:liquidity\s+|previous\s+|prior\s+|earlier\s+|last\s+|original\s+|leading\s+|main\s+)?(?:explanation|view|mechanism|reading|thesis|hypothesis|story|answer|conclusion|narrative|reasoning|account|logic)\b/i;
 
+/**
+ * A reference to the THREAD'S OWN ACCUMULATED OUTPUT, with an intervening quantifier or
+ * adjective between the determiner and the noun.
+ *
+ * The rule above requires the article to sit directly against the noun, which is true of "the
+ * liquidity explanation" and false of two perfectly ordinary follow-ups the trader writes every
+ * day: "Compare the two strongest explanations" ("the" … "two strongest" … "explanations") and
+ * "Use the evidence you already collected" ("the evidence" — a noun the rule did not list at
+ * all). Both read unambiguously as continuations to a human and both were routed as NEW
+ * investigations, silently dropping a completed thread.
+ *
+ * The fix is structural rather than lexical: once a definite determiner has been seen, the
+ * words between it and the head noun are ORDINARY MODIFIERS and must not break the reference.
+ * That covers quantifiers ("the two explanations"), superlatives ("the strongest evidence")
+ * and possessives alike, and it keeps the topic-switch law untouched — a turn that names a real
+ * asset still leaves as a switch, because that test runs first.
+ *
+ * "evidence", "findings", "analysis", "answer" and "work" are included because they name the
+ * investigation's own products; they are not generic nouns here.
+ */
+const BACK_REFERENCE_OUTPUT =
+  /\b(?:the|that|this|those|these|your|our|my)\b(?:\s+\w+){0,3}?\s+(?:explanations?|views?|mechanisms?|readings?|thesis|hypotheses|story|answers?|conclusions?|narratives?|reasoning|accounts?|logic|evidence|findings|analysis|analyses|work|research|results?|data)\b/i;
+
 /** An explicit pointer at earlier conversational turns rather than at a new subject. */
 const BACK_REFERENCE_TURN =
   /\b(?:what\s+you\s+said|as\s+you\s+said|the\s+previous\s+(?:answer|run|research|response|question)|the\s+last\s+(?:answer|run|run's|response)|your\s+last\s+(?:answer|finding)|earlier\s+(?:turn|answer|run))\b/i;
@@ -160,7 +183,7 @@ const BACK_REFERENCE_TURN =
  * any back-reference reading.
  */
 export function referencesPriorFindings(message: string): boolean {
-  return BACK_REFERENCE_DEFERRENT.test(message) || BACK_REFERENCE_TURN.test(message);
+  return BACK_REFERENCE_DEFERRENT.test(message) || BACK_REFERENCE_OUTPUT.test(message) || BACK_REFERENCE_TURN.test(message);
 }
 
 /**

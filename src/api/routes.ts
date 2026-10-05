@@ -286,10 +286,15 @@ export function registerRoutes(app: FastifyInstance, context: RouteContext): voi
   app.get("/api/workspace", { handler: withErrors(async (req) => (await appForRequest(req)).continuityFresh()) });
   // INVESTIGATIONS (conversational workbench). A thread is a reference graph between isolated
   // runs — reading one never re-parents evidence, and every run in it keeps its own ownership.
-  app.get("/api/investigations", { handler: withErrors(async (req) => (await appForRequest(req)).listInvestigations()) });
+  // READ FRESHNESS: absorb another instance's completed runs before listing, so the thread rail
+  // reports the persisted runs rather than a warm instance's stale in-memory graph.
+  app.get("/api/investigations", { handler: withErrors(async (req) => (await appForRequest(req)).listInvestigationsFresh()) });
   app.get("/api/investigations/:ref", {
     handler: withErrors(async (req) => {
-      const dto = (await appForRequest(req)).investigation((req.params as { ref: string }).ref);
+      const app = await appForRequest(req);
+      // Absorb first, then read: the single-thread read is the page's primary thread view.
+      await app.refreshExecutionStateForRead();
+      const dto = app.investigation((req.params as { ref: string }).ref);
       if (dto === undefined) throw new NotFoundError("investigation");
       return dto;
     }),

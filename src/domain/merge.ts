@@ -27,9 +27,54 @@ interface WithProvenance {
   readonly history?: readonly unknown[];
 }
 
-/** Number of recorded lifecycle events (provenance entries + history notes); append-only, so monotonic. */
+/**
+ * A conversation THREAD: append-only, exactly like the lifecycle collections above, but it
+ * grows by APPENDING REFS rather than by appending provenance.
+ */
+interface AppendOnlyThread extends WithProvenance {
+  readonly turnRefs?: readonly string[];
+  readonly runRefs?: readonly string[];
+  readonly updatedAt?: string;
+}
+
+/**
+ * Number of recorded lifecycle events (provenance entries + history notes); append-only, so monotonic.
+ *
+ * THREAD REVISIONS: a conversation thread is also append-only, but `withTurn` grows it by
+ * appending to `turnRefs`/`runRefs` and does NOT append a provenance entry. Ranking threads by
+ * provenance alone therefore rated an EXTENDED thread and the STALE copy it superseded as
+ * equally new, and every tie keeps the local side — so a stale instance's truncated
+ * `runRefs` won and the completed runs an investigation had accumulated silently vanished
+ * from the merged graph. That is the production routing failure: the restored thread reported
+ * no research, the router read it as "no live thread", and a follow-up opened a NEW
+ * investigation. Counting the appended refs restores the append-only invariant the merge law
+ * already states.
+ */
 function revisions(o: WithProvenance): number {
   return (o.provenance?.length ?? 0) + (o.history?.length ?? 0);
+}
+
+/**
+ * Union two append-only ref lists, preserving ORDER (conversation order is the record) and
+ * never repeating a ref. Local entries keep their position; a ref only the remote side knows
+ * is appended after them.
+ */
+function unionRefs(local: readonly string[] | undefined, remote: readonly string[] | undefined): readonly string[] {
+  const out: string[] = [...(local ?? [])];
+  const seen = new Set(out);
+  for (const ref of remote ?? []) {
+    if (seen.has(ref)) continue;
+    seen.add(ref);
+    out.push(ref);
+  }
+  return Object.freeze(out);
+}
+
+/** The later of two ISO timestamps; ties keep the base object's own value. */
+function newestTimestamp(a: string | undefined, b: string | undefined): string | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return b > a ? b : a;
 }
 
 /** Union two snapshots into a merged snapshot; `local` wins ties. */
@@ -44,6 +89,42 @@ export function mergeSnapshots(local: WorkspaceSnapshot, remote: WorkspaceSnapsh
       const existing = byId.get(item.id);
       // Remote wins ONLY when strictly newer (more history); equal keeps local.
       if (existing === undefined || revisions(item) > revisions(existing)) byId.set(item.id, item);
+    }
+    return [...byId.values()];
+  };
+
+  /**
+   * Union two APPEND-ONLY THREADS rather than choosing one side.
+   *
+   * `mergeById` picks a winner, which is right for objects whose state is REPLACED on each
+   * mutation. A conversation thread is different: nothing is ever removed from it, so the
+   * correct merge is the UNION of its refs. Picking a winner by provenance alone ranked an
+   * extended thread and the stale copy that superseded it as equally new, the tie kept the
+   * local (stale) side, and the runs the investigation had accumulated disappeared from the
+   * merged graph — the restored thread then reported no research, the router read it as "no
+   * live thread", and the trader's follow-up opened a NEW investigation (production failure).
+   *
+   * Union is always safe here precisely BECAUSE the collections are append-only: no merge can
+   * invent a turn or a run that no instance ever recorded, and none can be lost. Provenance
+   * still follows the per-object law (more revisions wins) so the lifecycle record stays whole.
+   */
+  const mergeThreads = <T extends AppendOnlyThread>(
+    localItems: readonly T[],
+    remoteItems: readonly T[] | undefined,
+  ): T[] => {
+    const byId = new Map<string, T>();
+    for (const item of localItems) byId.set(item.id, item);
+    for (const item of remoteItems ?? []) {
+      const existing = byId.get(item.id);
+      if (existing === undefined) { byId.set(item.id, item); continue; }
+      // Provenance is replaced, not unioned: the more-revised side's lifecycle record wins.
+      const base = revisions(item) > revisions(existing) ? item : existing;
+      byId.set(item.id, {
+        ...base,
+        turnRefs: unionRefs(existing.turnRefs, item.turnRefs),
+        runRefs: unionRefs(existing.runRefs, item.runRefs),
+        updatedAt: newestTimestamp(existing.updatedAt, item.updatedAt),
+      } as T);
     }
     return [...byId.values()];
   };
@@ -76,7 +157,8 @@ export function mergeSnapshots(local: WorkspaceSnapshot, remote: WorkspaceSnapsh
   // Otherwise the remote pointer is kept if its investigation survives the union. A pointer
   // naming an investigation neither side still holds is dropped rather than resurrected into
   // a dangling thread — this can only happen if that investigation was deleted.
-  const mergedInvestigationIds = new Set(mergeById(local.investigations ?? [], remote.investigations ?? []).map((i) => i.id));
+  const mergedInvestigations = mergeThreads(local.investigations ?? [], remote.investigations ?? []);
+  const mergedInvestigationIds = new Set(mergedInvestigations.map((i) => i.id));
   const currentInvestigationId =
     local.currentInvestigationId !== undefined && mergedInvestigationIds.has(local.currentInvestigationId)
       ? local.currentInvestigationId
@@ -131,7 +213,7 @@ export function mergeSnapshots(local: WorkspaceSnapshot, remote: WorkspaceSnapsh
     // assessments. `currentInvestigationId` IS merged (see the CURRENT INVESTIGATION block
     // above): it is a single-trader workbench pointer, and dropping it on write made every
     // persisted investigation un-current after a reload.
-    investigations: mergeById(local.investigations ?? [], remote.investigations ?? []),
+    investigations: mergedInvestigations,
     conversationTurns: mergeById(local.conversationTurns ?? [], remote.conversationTurns ?? []),
     ...(currentInvestigationId !== undefined ? { currentInvestigationId } : {}),
     ...(activeThesisId !== undefined ? { activeThesisId } : {}),
