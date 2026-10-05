@@ -17,6 +17,7 @@
 import { sentencesOf } from "./contract-checks.js";
 import { expandSubjectTerms } from "../domain/instruments.js";
 import { withoutProhibitions } from "./execution-mode.js";
+import { contractFor } from "./flow-contract.js";
 
 export type TimeSensitivity = "CURRENT" | "RECENT" | "HISTORICAL" | "ANY";
 
@@ -382,6 +383,57 @@ export function isDiscriminatingRequirement(req: Pick<ResearchRequirement, "desc
 }
 
 /**
+ * Which DECISION DIMENSION a ledger row belongs to, or undefined when it belongs to none.
+ *
+ * Ordered most-specific-first, because a causal row ("the current drivers behind BTC") also
+ * contains "current" (RECENCY) and a challenge row ("evidence that weakens the conclusion")
+ * also matches COUNTEREVIDENCE's vocabulary. Role is authoritative where the wording is
+ * ambiguous: a CHALLENGE row is a counterevidence row whatever else it says.
+ *
+ * This is the classifier the FLOW CONTRACT uses to decide whether a row belongs to the selected
+ * flow. It is deliberately vocabulary-based and generic (it describes decision shapes, never
+ * assets), and an unrecognised row returns undefined so an unattributable requirement is never
+ * mistaken for a contract violation.
+ */
+const DIMENSION_VOCABULARY: readonly (readonly [string, RegExp])[] = [
+  ["DRIVER_RELATIONSHIP", /\b(transmission|mechanism|pass[- ]?through|channel|through how|into how|how .* reached|pathway)\b/i],
+  ["FALSIFICATION_CONDITIONS", /\b(falsif\w*|disconfirm\w*|prove.{0,12}wrong|invalidate\w*|would (?:be )?break|disprov\w*)\b/i],
+  ["THESIS_CHALLENGE", /\b(challenge\w*|contradict\w*|weaken\w*|oppos\w*|against the|counterevidence|counter-evidence|disconfirm\w*)\b/i],
+  ["COUNTEREVIDENCE", /\b(against|oppos\w*|counter\w*|disconfirm\w*|risk to|weakens?)\b/i],
+  ["THESIS_SUPPORT", /\b(supports?|confirms?|validat\w*) the .{0,24}thesis\b|\bconsistent with the .{0,24}thesis\b/i],
+  ["CURRENT_DRIVERS", /\b(driv\w*|catalysts?|what(?:'s| is|s) (?:behind|pushing|moving)|push\w*|pressur\w*|reasons? for)\b/i],
+  ["FORWARD_FACTORS", /\b(could affect|would affect|might affect|upcoming|forward[- ]looking|catalysts? ahead|next (?:few )?(?:days|weeks))\b/i],
+  // "comparabl\w*" matches "comparable"/"comparability"/"comparably", and the optional
+  // "past/prior/previous" gap absorbs the engine's own "comparable PAST episodes" wording — the
+  // row was returning no dimension at all, so a HISTORICAL flow's own analogue-retrieval
+  // requirement was unattributable and the isolation filter could not check it.
+  ["HISTORICAL_EPISODE", /\b(happened before|histor\w*|analog\w*|analogue|comparabl\w*(?: (?:past|prior|previous|similar|historical))? (?:episode|episodes|setups?|instances?|periods?)|precedent|in \d{4})\b/i],
+  ["COMPARISON_BASELINE", /\b(previous|prior|baseline|compared? (?:with|to)|versus|period over|week over|month over)\b/i],
+  ["FRAMEWORK_CRITERIA", /\b(framework|criteri\w*|checklist|rubric|scoring)\b/i],
+  ["CROSS_DOMAIN_COVERAGE", /\b(cross[- ]domain|cross[- ]asset|all (?:the )?(?:information|evidence)|everything (?:known|there is)|spillover|synthesi[sz])\b/i],
+  ["MATERIALITY", /\b(material\w*|significan\w*|meaningful|decisive|how much .{0,24}matter)\b/i],
+  ["RECENCY", /\b(current\w*|recent\w*|today|this week|latest|fresh\w*|now|timeliness)\b/i],
+];
+
+export function dimensionOfRequirement(
+  description: string,
+  role: RequirementRole,
+): string | undefined {
+  // Role is authoritative: a CHALLENGE row IS a disconfirmation dimension whatever it says,
+  // and a CONTEXT row belongs to no dimension at all.
+  if (role === "CONTEXT") return undefined;
+  if (role === "CHALLENGE") return "COUNTEREVIDENCE";
+  for (const [dimension, pattern] of DIMENSION_VOCABULARY) {
+    if (pattern.test(description)) return dimension;
+  }
+  // A price/range/volume reconstruction row is the descriptive WHAT_HAPPENED dimension.
+  if (/\b(price|ohlcv|volume|candle|kline|range|open|high|low|close|timestamp|dated|chronolog|timeline|sequence|performance)\b/i.test(description)) {
+    return "WHAT_HAPPENED";
+  }
+  return undefined;
+}
+
+/**
  * Role from the requirement's own wording plus its declared importance. Deterministic and
  * question-agnostic: it reads the CRITERION (does it look for disconfirmation? is it
  * background?), not the subject.
@@ -444,8 +496,30 @@ export function buildRequirements(seeds: readonly RequirementSeed[]): readonly R
   });
 }
 
+/**
+ * FLOW-OWNED EVIDENCE REQUIREMENTS: DELIBERATELY EMPTY.
+ *
+ * The first attempt at this fix hardcoded WHAT_HAPPENED's evidence rows (timestamped price
+ * movement, window high/low, volume, dated events) as CRITICAL engine requirements. That fixed
+ * the reproduction's evidence failure but broke the capability-first seam this engine
+ * documents — "no flow→tool hardcoding: swapping providers needs zero changes here" — because
+ * CRITICAL rows drive `mandatoryCapabilities`, so the engine started scheduling capabilities
+ * the planner never chose. The regression suite caught it (tests/lui/lui.test.ts asserts only
+ * the PLANNED capability runs).
+ *
+ * The correct place for a flow's evidence expectations is the PLANNER'S BRIEF: the resolved
+ * flow and its contract are stated to the planner (see `flowGuidance` in adaptive.ts), and the
+ * planner — which already chooses capabilities — declares the timestamped price requirements its
+ * own methodology needs. The engine still GUARANTEES the dimensions, refuses out-of-contract
+ * rows, and refuses to fabricate one: what changed is that the flow informs planning instead of
+ * overwriting it.
+ */
+const FLOW_REQUIRED_EVIDENCE: Readonly<Record<string, readonly EngineRequirementSpec[]>> = {};
+
 export type QuestionType =
-  | "COMPARISON" | "CAUSAL" | "EVENT" | "MACRO_REGIME" | "THESIS" | "FALSIFICATION" | "HISTORICAL" | "OBSERVATION" | "SYNTHESIS";
+  | "COMPARISON" | "CAUSAL" | "EVENT" | "MACRO_REGIME" | "THESIS" | "FALSIFICATION" | "HISTORICAL" | "OBSERVATION" | "SYNTHESIS"
+  /** Forward-looking/conditional: "what could affect X over the next few days". */
+  | "FORWARD_LOOKING";
 
 /**
  * The question's decision type, read from its own wording. Deterministic and generic: these
@@ -495,6 +569,16 @@ export function questionTypeOf(question: string): QuestionType {
   // falsification was read as a request for it, which then earned a real FALSIFICATION round and
   // challenge requirements. Prohibition clauses are removed before any pattern below is tested.
   const q = withoutProhibitions(question).toLowerCase();
+  // DESCRIPTIVE-BEFORE-CAUSAL (flow-isolation fix). "what happened", "what occurred", "what
+  // took place", "timeline", "chronology", "factual sequence" are RECONSTRUCTION shapes and
+  // were matched INSIDE THE CAUSAL BRANCH below, so a trader asking for the factual sequence
+  // of a move was classified CAUSAL — the exact inverse of the request — and then earned
+  // drivers, mechanism, transmission and counterevidence requirements. They are tested FIRST,
+  // before any causal shape, because a descriptive question must never inherit causal work.
+  // A genuinely causal phrasing still wins below: "why did it happen" is WHY-shaped, and a
+  // question that asks for a cause alongside the timeline ("what happened and what caused
+  // it") matches the CAUSAL patterns, which run after this test.
+  if (/\bwhat (?:happened|occurred|took place|has happened|was observed)\b|\b(?:the )?(?:factual |chronological |exact )?(?:timeline|chronology|sequence of events)\b|\bwhat(?:'s| has) been going on\b|\brecap\b|\bsequence of (?:price )?(?:movement|events)\b|\bfactual sequence\b/.test(q)) return "OBSERVATION";
   if (/\bprove\b.*\bwrong\b|\binvalidate\b|\bfalsif\w*|\bwhat would change\b|\bdisconfirm\w*/.test(q)) return "FALSIFICATION";
   // RAW OBSERVATION (question-type integrity): "what is Bitcoin's current spot price?",
   // "retrieve one fresh observation", "what is the latest quote" ask for a measurement, not
@@ -504,11 +588,19 @@ export function questionTypeOf(question: string): QuestionType {
   // that the request never asked for.
   if (/\b(spot price|current price|price (?:right )?now|latest price|current (?:quote|spot|price|value|level)|what(?:'s| is) the (?:price|quote|spot price)|retrieve|fetch|pull|observe|observation|quote|reading)\b/.test(q)) return "OBSERVATION";
   if (/\bhas (this|it|that|the .*? setup)\b.*\bhappened\b|\bhistor\w*|\bsimilar setup\b|\bhappened before\b|\banalog\w*|\bcomparable episodes?\b/.test(q)) return "HISTORICAL";
-  if (/\bmy thesis\b|\bthesis\b|\bmy (view|framework|position|read|call)\b|\baccording to my\b|\bdoes (this|the) (hold|still hold)\b/.test(q)) return "THESIS";
+    if (/\bmy thesis\b|\bthesis\b|\bmy (view|position|read|call)\b|\baccording to my\b|\bdoes (this|the) (hold|still hold)\b/.test(q)) return "THESIS";
   if (/\bcompare\w*|\bcompared (with|to)\b|\bversus\b|\bvs\.?\b|\bweek over week\b|\bweek[- ]over[- ]week\b|\bmonth over month\b|\bbetter than\b|\bperformance (vs|versus)\b/.test(q)) return "COMPARISON";
   if (/\bearnings\b|\breport\b|\bresults\b|\bfomc\b|\bcpi print\b|\bupcoming\b|\baround its next\b|\bnext (earnings|report|meeting|print)\b/.test(q)) return "EVENT";
-  if (/\bmacro\b|\brisk assets\b|\brisk[- ]on\b|\brisk appetite\b|\bregime\b|\bconditions?\b|\bfinancial conditions\b|\bliquidity\b/.test(q)) return "MACRO_REGIME";
-  if (/\bdriv\w*|\bdriving\b|\bwhy\b|\bwhat happened\b|\bwhat(?:'s| is|s) (behind|pushing|pressuring|moving)\b|\bpressur\w*|\bcaus\w*|\bexplain\w*|\b(?:is|are|was|were)\b[^.?!]{0,60}\baffect\w*\b/.test(q)) return "CAUSAL";
+  // FORWARD-LOOKING (flow-isolation fix): "what could affect X over the next few days" is a
+  // CONDITIONAL question about future drivers and catalysts, and it used to fall through to the
+  // SYNTHESIS catch-all, which generates no engine dimension at all. So the WHAT_COULD_AFFECT_IT
+  // contract GRANTED FORWARD_FACTORS while nothing in the engine could ever produce it — the
+  // grant was decorative. Tested AFTER the EVENT shape so "what could affect NVDA around its next
+  // earnings" stays an EVENT question, and BEFORE the CAUSAL shape so a conditional question is
+  // not read as an explanation of something that already happened.
+  if (/\b(?:could|would|might) affect\b|\bforward[- ]looking\b|\bupcoming (?:events?|catalysts?|decisions?|risks?)\b|\bcatalysts? ahead\b|\bover the next (?:few )?(?:days|weeks|months)\b/.test(q)) return "FORWARD_LOOKING";
+    if (/\bmacro\b|\brisk assets\b|\brisk[- ]on\b|\brisk appetite\b|\bregime\b|\bconditions?\b|\bfinancial conditions\b|\bliquidity\b/.test(q)) return "MACRO_REGIME";
+  if (/\bdriv\w*|\bdriving\b|\bwhy\b|\bwhat(?:'s| is|s) (behind|pushing|pressuring|moving)\b|\bpressur\w*|\bcaus\w*|\bexplain\w*|\b(?:is|are|was|were)\b[^.?!]{0,60}\baffect\w*\b/.test(q)) return "CAUSAL";
   return "SYNTHESIS";
 }
 
@@ -706,6 +798,28 @@ const ENGINE_REQUIRED: Readonly<Record<QuestionType, readonly EngineRequirementS
   ],
   SYNTHESIS: [],
   /**
+   * FORWARD-LOOKING / CONDITIONAL: the future-facing dimensions of "what could affect X" —
+   * the events and conditions ahead, and what would change which of them matter. Deliberately
+   * phrased in the FORWARD_FACTORS vocabulary ("upcoming events", "forward-looking conditions",
+   * "next few days") and never in CURRENT_DRIVERS' vocabulary ("drivers", "catalysts"): the
+   * dimension classifier tests CURRENT_DRIVERS first, and a row worded "upcoming catalysts" was
+   * being attributed to the CURRENT_DRIVERS dimension, which the forward-looking contract denies.
+   */
+  FORWARD_LOOKING: [
+    {
+      description: (s) => `the upcoming events and scheduled conditions that could affect ${s} over the requested horizon`,
+      role: "CORE", importance: "CRITICAL", timeSensitivity: "CURRENT",
+      evidenceClasses: ["NEWS", "EVENT", "SCHEDULED_EVENT", "CALENDAR", "POLICY", "MACRO", "PRICE", "MARKET_DATA"],
+      covers: /upcoming (?:events?|scheduled)|could affect|over the requested horizon|next (?:few )?(?:days|weeks|months)/i,
+    },
+    {
+      description: (s) => `forward-looking conditions over the next few days that would make one factor matter more than another for ${s}`,
+      role: "SUPPORTING", importance: "SUPPORTING", timeSensitivity: "CURRENT",
+      evidenceClasses: ["NEWS", "MACRO", "POLICY", "SENTIMENT", "EVENT"],
+      covers: /forward[- ]looking conditions|make one factor matter|next (?:few )?(?:days|weeks|months)/i,
+    },
+  ],
+  /**
    * RAW OBSERVATION: the single dimension the request actually asks for — the current
    * measurement itself. It carries no counterevidence row (there is no conclusion to weaken),
    * no thesis dimension, and no historical row.
@@ -762,16 +876,48 @@ export function completeRequirements(
      * rule; pass an explicit boolean only when the caller knows better.
      */
     readonly challengeRequired?: boolean;
+    /**
+     * FLOW ISOLATION (the authority hierarchy): the flow the router already RESOLVED.
+     *
+     * When a canonical flow is supplied it OWNS this ledger. Its contract decides the question
+     * type, whether a challenge is earned and whether materiality is owed — and every
+     * engine-required dimension is filtered to the flow's grants BEFORE it is added. Without
+     * this, `selectedFlow -> generic classifier -> global ledger` meant a WHAT_HAPPENED run was
+     * completed from the CAUSAL question type and acquired drivers, mechanism, transmission
+     * and counterevidence rows the trader had forbidden in writing.
+     *
+     * Omit it (or pass a non-canonical marker) and the classifier decides, which is the correct
+     * fallback for research that belongs to no flow.
+     */
+    readonly flow?: string;
   } = {},
 ): readonly ResearchRequirement[] {
   const subject = (opts.subject ?? "the subject").trim();
   const marketClass = opts.marketClass ?? "UNKNOWN";
-  const questionType = questionTypeOf(question);
+  // FLOW OWNERSHIP: a flow that PINS its question type overrides the heuristic classifier; a
+  // flow that pins none leaves the classifier's specificity intact and is enforced through its
+  // `grants` instead (which is what a broad synthesis flow needs — it spans macro, comparison
+  // and earnings questions, and pinning one type for all of them would discard dimensions the
+  // flow legitimately owns).
+  const contract = contractFor(opts.flow);
+  const questionType = contract?.pinnedQuestionType ?? questionTypeOf(question);
   const specs: EngineRequirementSpec[] = [...ENGINE_REQUIRED[questionType]].filter(
     (spec) => spec.markets === undefined || spec.markets.includes(marketClass),
   );
+  // FLOW-OWNED EVIDENCE: a resolved flow adds the observations its OWN methodology needs. This
+  // is the step that makes "what happened over 24 hours" retrieve a price timeline instead of
+  // whatever headlines happen to be available — the reproduction's evidence failure.
+  if (contract !== undefined) {
+    for (const spec of FLOW_REQUIRED_EVIDENCE[contract.flow] ?? []) {
+      if (spec.markets !== undefined && !spec.markets.includes(marketClass)) continue;
+      specs.push(spec);
+    }
+  }
   // CHALLENGE is required only where the question asks for a conclusion to be tested.
-  const challengeRequired = opts.challengeRequired ?? challengeEarnedBy(questionType);
+  // The FLOW decides this when one is resolved: WHAT_HAPPENED owes no counterevidence row.
+  const challengeRequired = contract !== undefined
+    ? contract.requiresCounterevidence && (opts.challengeRequired ?? true)
+    : (opts.challengeRequired ?? challengeEarnedBy(questionType));
   if (challengeRequired) {
     specs.push({
       description: () => "evidence that weakens or contradicts the leading conclusion (counterevidence)",
@@ -979,6 +1125,24 @@ export function completeRequirements(
         evidenceClasses: ["NEWS", "CATALYST", "EVENT", "POLICY", "PRICE", "MARKET_DATA"],
         retrievalObjective: retrievalObjectiveFor(description, "CURRENT", "CORE"),
       });
+    }
+
+    // FLOW ISOLATION: every row whose decision dimension the resolved flow does NOT GRANT is
+    // refused HERE, at ledger construction — never stripped at the UI, where the trader would see
+    // an answer that looks complete but was produced under a contract they refused in writing.
+    // This runs LAST, after every row exists, so it covers the planner's proposed rows, the
+    // engine's dimension specs, the transmission arrows, the challenge row and the watch-next
+    // row. A filter placed before those were appended would have passed the WHAT_HAPPENED
+    // reproduction tests while still handing the run causal rows.
+    if (contract !== undefined) {
+      const granted = new Set(contract.grants);
+      for (let i = out.length - 1; i >= 0; i -= 1) {
+        const row = out[i];
+        if (row === undefined || row.role === "CONTEXT") continue;
+        const dimension = dimensionOfRequirement(row.description, row.role);
+        if (dimension === undefined || granted.has(dimension)) continue;
+        out.splice(i, 1);
+      }
     }
 
     return out;

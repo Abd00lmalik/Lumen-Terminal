@@ -51,6 +51,8 @@ import {
   UNCONSTRAINED_RESEARCH,
   type ExecutionConstraints,
 } from "../research/execution-mode.js";
+import { contractFor } from "../research/flow-contract.js";
+import { renderObservationResponse, isDirectObservation } from "../research/observation-response.js";
 import {
   buildInvestigationContext,
   renderInvestigationContext,
@@ -1614,6 +1616,49 @@ export class Lui {
     if (this.conversationIntent === "SYNTHESIS") {
       const state = this.investigationState();
       if (state !== undefined) return cumulativeSynthesisResponse(state);
+    }
+    /**
+     * OBSERVATION-FLOW RESPONSE CONTRACT (flow isolation; the reproduction this fixes).
+     *
+     * A flow that is neither causal nor judgmental — WHAT_HAPPENED — answers with its OWN shape: a
+     * timestamped timeline of what was directly observed, what was only reported, and what could
+     * not be established. It does NOT answer with causal machinery, and the suppression happens
+     * HERE, at the layer that selects sections for this flow, not by stripping a causal synthesis
+     * at the end: the trader must never receive "strongest support / meaningful opposition /
+     * mechanism / transmission / materiality / what would change this conclusion" for a question
+     * that forbade all of it in writing. The causal, thesis, counterevidence, materiality and
+     * implication fields stay EMPTY, and the confidence states coverage, not conviction.
+     */
+    if (result.research !== undefined) {
+      const runFlow = this.options.workspace.getResearch(result.research.research.id)?.flow;
+      const contract = contractFor(runFlow);
+      if (contract !== undefined && !contract.causal && !contract.judgmental) {
+        const rendered = renderObservationResponse({
+          evidence: result.research.evidence,
+          requirements: result.research.requirements ?? [],
+        });
+        // Findings for this flow are its DIRECT OBSERVATIONS — not factors, not drivers, not
+        // opposition. The field stays populated so the response law (an answer carries findings
+        // and a named uncertainty) holds for every research response, but its content can only
+        // ever be something this run observed.
+        const findings = result.research.evidence.filter(isDirectObservation).slice(0, 4)
+          .map((e) => e.observation.replace(/\s+/g, " ").trim().slice(0, 140));
+        return {
+          answer: rendered.answer,
+          supportingReasons: findings,
+          opposingReasons: [],
+          confidence: result.research.evidence.length >= 3 ? "MODERATE" : result.research.evidence.length >= 1 ? "LOW" : "UNKNOWN",
+          // Uncertainty for a reconstruction is what could NOT be reconstructed. It is never
+          // "no material counterevidence found" and never a monitoring instruction: this flow
+          // searched for no counterevidence because its contract owes none.
+          keyUncertainty: rendered.gaps[0]
+            ?? (result.research.evidence.length > 0
+              ? "the observations above are the complete record this run retrieved; nothing in the requested window was left unestablished"
+              : "no observation was retrieved for the requested window"),
+          implication: "",
+          citedObjectRefs: [...rendered.citedObjectRefs],
+        };
+      }
     }
     /**
      * RAW-OBSERVATION RESPONSE (execution contract): the requested fields and nothing else.

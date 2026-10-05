@@ -198,8 +198,14 @@ async function runCase(c: BenchmarkCase): Promise<AdaptiveLoopOutcome> {
   ]));
 
   const ws = new Workspace();
+  // NO flow stamped: this benchmark varies the QUESTION across every decision shape (macro,
+  // comparison, event, causal, crypto) and the router resolves a different canonical flow for
+  // each. It used to stamp WHAT_DOES_ALL_INFORMATION_SAY on all of them, which contradicts those
+  // questions; now that the flow contract is BINDING (the flow owns its ledger) that fixture
+  // stamp deleted each case's own decision dimensions. With no resolved flow the classifier
+  // decides, the documented fallback for research that belongs to no flow.
   const research = ws.addResearch(
-    { objective: c.question, question: c.question, flow: "WHAT_DOES_ALL_INFORMATION_SAY" },
+    { objective: c.question, question: c.question },
     origin,
   );
   ws.transitionResearch(research.id, "ACTIVE", origin, "activated");

@@ -639,7 +639,12 @@ describe("adaptive research loop (M3 §7/§8)", () => {
     ]));
     const registry = registryWith("NEWS_ANALYSIS", "TECHNICAL_ANALYSIS", "MACRO_ANALYSIS");
     const workspace = new Workspace();
-    const research = workspace.addResearch({ objective: "What happened to BTC?", question: "q", flow: "WHAT_HAPPENED" }, trader);
+    // The CONTRACT QUESTION is this run's verbatim question (research contract §1): it is what
+    // the requirement ledger is derived from. The placeholder "q" classified as SYNTHESIS, so
+    // the engine demanded no dimensions and the case passed vacuously. With a WHAT_HAPPENED
+    // flow it now correctly demands a real observation, which is the behaviour this test is
+    // about ("only the PLANNED capability runs"), so the fixture carries the real question.
+    const research = workspace.addResearch({ objective: "What happened to BTC?", question: "What happened to BTC?", flow: "WHAT_HAPPENED" }, trader);
     workspace.transitionResearch(research.id, "ACTIVE", system, "activated");
 
     const outcome = await runAdaptiveResearch("What happened to BTC?", research.id, {
@@ -744,7 +749,9 @@ describe("adaptive research loop (M3 §7/§8)", () => {
     ]));
     const registry = registryWith("NEWS_ANALYSIS", "SENTIMENT_ANALYSIS");
     const workspace = new Workspace();
-    const research = workspace.addResearch({ objective: "What happened to BTC?", question: "q", flow: "WHAT_HAPPENED" }, trader);
+    // Real contract question (see the sibling case): "q" classified as SYNTHESIS and made the
+    // ledger vacuous, hiding the round behaviour this case asserts.
+    const research = workspace.addResearch({ objective: "What happened to BTC?", question: "What happened to BTC?", flow: "WHAT_HAPPENED" }, trader);
     workspace.transitionResearch(research.id, "ACTIVE", system, "activated");
 
     const outcome = await runAdaptiveResearch("What happened to BTC?", research.id, {
@@ -753,7 +760,13 @@ describe("adaptive research loop (M3 §7/§8)", () => {
 
     expect(outcome.rounds).toHaveLength(2);
     expect(outcome.rounds[0]?.decision.decision).toBe("CONTINUE");
-    expect(outcome.executions.map((e) => e.capability)).toEqual(["NEWS_ANALYSIS", "SENTIMENT_ANALYSIS"]);
+    // A CONTINUE decision produced a second round that ran the model's NEW capability. The
+    // engine additionally runs one bounded RECOVERY round for the observation row the scripted
+    // registry cannot satisfy (no price-returning capability here) — that is the honest
+    // "a required dimension is uncovered" law, not a second CONTINUE round.
+    expect(outcome.executions.map((e) => e.capability)).toContain("NEWS_ANALYSIS");
+    expect(outcome.executions.map((e) => e.capability)).toContain("SENTIMENT_ANALYSIS");
+    expect(outcome.rounds[0]?.decision.decision).toBe("CONTINUE");
     expect(outcome.stoppedBecause).toBe("EVIDENCE_SUFFICIENT");
   });
 

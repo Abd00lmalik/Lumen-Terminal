@@ -211,8 +211,16 @@ async function execute(scenario: Scenario): Promise<{
     ["research.answer_synthesis", SYNTHESIS_FOR],
   ]));
   const ws = new Workspace();
+  // NO flow is stamped on the research object: this harness asserts that the QUESTION is the only
+  // input, and the router resolves no canonical flow for a scenario that arrives with a verbatim
+  // question and no routing decision. It used to stamp WHAT_DOES_ALL_INFORMATION_SAY on every
+  // scenario regardless of the question, which contradicted its own thesis and historical cases —
+  // and once the flow contract became binding (the flow OWNS its ledger), that fixture stamp made
+  // the engine delete a thesis question's own support dimension and score 1/2 on QUESTION
+  // UNDERSTANDING. With no resolved flow the classifier decides, which is the documented fallback
+  // for research that belongs to no flow.
   const research = ws.addResearch(
-    { objective: scenario.golden.question, question: scenario.golden.question, flow: "WHAT_DOES_ALL_INFORMATION_SAY" },
+    { objective: scenario.golden.question, question: scenario.golden.question },
     origin,
   );
   ws.transitionResearch(research.id, "ACTIVE", origin, "activated");

@@ -170,8 +170,14 @@ async function execute(scenario: Scenario): Promise<{
     ]),
   );
   const ws = new Workspace();
+  // NO flow stamped: these scenarios span every decision shape and the router resolves a
+  // different canonical flow per question; this harness arrives with the verbatim question only,
+  // so no flow is resolved and the classifier decides (the documented fallback). It used to stamp
+  // WHAT_DOES_ALL_INFORMATION_SAY on all of them, which contradicts a thesis or framework
+  // question — and with the flow contract now BINDING, that fixture stamp deleted the framework
+  // scenario's own criteria dimension and dropped it to NOT_ANSWERED.
   const research = ws.addResearch(
-    { objective: scenario.golden.question, question: scenario.golden.question, flow: "WHAT_DOES_ALL_INFORMATION_SAY" },
+    { objective: scenario.golden.question, question: scenario.golden.question },
     origin,
   );
   ws.transitionResearch(research.id, "ACTIVE", origin, "activated");

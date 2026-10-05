@@ -92,6 +92,12 @@ export interface EvidenceDTO {
   readonly sourceProvider?: string;
   /** Source kind (PRIMARY/SECONDARY/COMMUNITY/ANALYSIS) when derivable from provenance. */
   readonly sourceType?: "PRIMARY" | "SECONDARY" | "COMMUNITY" | "ANALYSIS";
+  /**
+   * DIRECT_OBSERVATION vs REPORTED_CLAIM. Surfaced so the UI can never present a retrieved
+   * headline in the same clothing as an exchange print: an observation is a measurement, a claim
+   * is something a source says about the world.
+   */
+  readonly sourceClass?: "DIRECT_OBSERVATION" | "REPORTED_CLAIM";
   /** Repeated-content flag: same underlying report as another item; never independent corroboration. */
   readonly duplicateContent?: boolean;
   readonly supports: readonly string[];
@@ -116,6 +122,7 @@ export function evidenceToDTO(e: Evidence): EvidenceDTO {
     ...(e.toolResultRef !== undefined ? { toolResultRef: e.toolResultRef } : {}),
     ...(e.sourceProvider !== undefined ? { sourceProvider: e.sourceProvider } : {}),
     ...(e.sourceType !== undefined ? { sourceType: e.sourceType } : {}),
+    ...(e.sourcing !== undefined ? { sourceClass: e.sourcing } : {}),
     ...(e.duplicateContent === true ? { duplicateContent: true } : {}),
     supports: idRefs(e.supports),
     contradicts: idRefs(e.contradicts),
