@@ -1120,14 +1120,33 @@ export class Workspace {
       if (!this.researchResponses.has(raw.researchId)) this.researchResponses.set(raw.researchId, raw.response);
     }
     // CONVERSATION ABSORPTION: another instance may have extended the thread this instance is
-    // serving. Union by id (an investigation/turn is never deleted, only extended), and the
-    // more-revised object wins — the same law as every other collection here. The CURRENT
-    // investigation pointer is never taken from a remote snapshot: which thread the trader is in
-    // is local working state, and a warm instance must not yank the trader into a thread another
+    // serving. Union by id (an investigation/turn is never deleted, only extended). An
+    // investigation is an APPEND-ONLY THREAD, so the union is of its REFS rather than a
+    // winner-take-all choice: `withTurn` grows a thread by appending `turnRefs`/`runRefs` and
+    // appends NO provenance entry, so ranking by provenance alone rated an extended thread and
+    // the stale copy that superseded it as equally new, the tie kept the STALE local copy, and
+    // every run the investigation had accumulated silently vanished from the absorbed graph.
+    // The restored thread then reported no research, the conversation router read it as "no live
+    // thread", and the trader's follow-up opened a NEW investigation — the production failure.
+    // Union is safe precisely because the collections are append-only: no turn or run can be
+    // invented (neither instance recorded it) and none can be lost. The CURRENT investigation
+    // pointer is never taken from a remote snapshot: which thread the trader is in is local
+    // working state, and a warm instance must not yank the trader into a thread another
     // instance opened.
     for (const raw of snapshot.investigations ?? []) {
       const existing = this.investigations.get(raw.id);
-      if (existing === undefined || revisionsOf(raw) > revisionsOf(existing)) this.investigations.set(raw.id, raw);
+      if (existing === undefined) {
+        this.investigations.set(raw.id, raw);
+      } else {
+        // Provenance is replaced (more revisions wins); the refs are unioned, never replaced.
+        const base = revisionsOf(raw) > revisionsOf(existing) ? raw : existing;
+        this.investigations.set(raw.id, {
+          ...base,
+          turnRefs: unionRefs(existing.turnRefs, raw.turnRefs),
+          runRefs: unionRefs(existing.runRefs, raw.runRefs),
+          updatedAt: raw.updatedAt > existing.updatedAt ? raw.updatedAt : existing.updatedAt,
+        });
+      }
       bumpIdCounterPastId(raw.id); // inv_ counter continuity
     }
     for (const raw of snapshot.conversationTurns ?? []) {
@@ -1773,6 +1792,23 @@ function thesisIsNewer(candidate: Thesis, existing: Thesis): boolean {
  */
 function revisionsOf(o: { provenance?: readonly unknown[] }): number {
   return o.provenance?.length ?? 0;
+}
+
+/**
+ * Union two append-only ref lists, preserving ORDER (conversation order is the record) and
+ * never repeating a ref. Mirrors `unionRefs` in domain/merge.ts, which unions on the
+ * persistence path; this one unions on the warm-instance absorption path. Neither can invent a
+ * ref (only recorded ones are unioned) and neither can drop one.
+ */
+function unionRefs(local: readonly string[] | undefined, remote: readonly string[] | undefined): readonly string[] {
+  const out: string[] = [...(local ?? [])];
+  const seen = new Set(out);
+  for (const ref of remote ?? []) {
+    if (seen.has(ref)) continue;
+    seen.add(ref);
+    out.push(ref);
+  }
+  return Object.freeze(out);
 }
 
 /**
