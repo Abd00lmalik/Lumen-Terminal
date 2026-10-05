@@ -10,7 +10,7 @@
  * - Final lock §3: market-intel-style proxies stay explicitly labeled PROXY_EVIDENCE with basis.
  */
 
-import type { Evidence, EvidenceClass, Freshness } from "./objects.js";
+import type { Evidence, EvidenceClass, Freshness, SourcingClass } from "./objects.js";
 import { createEvidence } from "./objects.js";
 import type { ToolOutput, ToolResult } from "./tool-result.js";
 import { isInterpretationClass } from "./tool-result.js";
@@ -86,6 +86,20 @@ export function sourceProviderForOutput(result: ToolResult, output: ToolOutput):
     if (typeof upstream === "string" && upstream.trim() !== "") return upstream.trim();
   }
   return result.transport;
+}
+
+/**
+ * SOURCE CLASSIFICATION: DIRECT_OBSERVATION vs REPORTED_CLAIM.
+ *
+ * Derived only from facts the engine verified — the adapter's declared output class and the
+ * resolved source kind — and NEVER from the payload's wording. A primary quantitative/factual feed
+ * (an exchange print, an OHLCV candle, a macro series) is a direct observation of the market;
+ * secondary reporting, community signals and authored analysis are REPORTED CLAIMS about it.
+ * Successful retrieval is not observation: an RSS headline that arrived cleanly is still a claim.
+ */
+export function sourcingClassForOutput(output: ToolOutput): SourcingClass {
+  if (isInterpretationClass(output.outputClass)) return "REPORTED_CLAIM";
+  return sourceTypeForOutput(output) === "PRIMARY" ? "DIRECT_OBSERVATION" : "REPORTED_CLAIM";
 }
 
 export interface EvidenceQuality {
@@ -193,6 +207,13 @@ export function evidenceFromToolResult(
       // same upstream reached via different paths is never counted as independent corroboration.
       sourceProvider: sourceProviderForOutput(result, output),
       sourceType: sourceTypeForOutput(output),
+      // SOURCE CLASSIFICATION (DIRECT_OBSERVATION vs REPORTED_CLAIM) is resolved HERE, at the
+      // ingestion boundary, from the facts the adapter declared — never from the payload text and
+      // never by a caller. A retrieved news headline is a REPORTED_CLAIM about the world; only a
+      // primary quantitative/factual feed is a DIRECT_OBSERVATION of it. That distinction is what
+      // lets a factual-timeline answer separate "what is directly observed" from "what is reported"
+      // instead of presenting both as the same kind of thing.
+      sourcing: sourcingClassForOutput(output),
       ...(payloadDuplicateFlag(output) ? { duplicateContent: true } : {}),
     },
     origin,

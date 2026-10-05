@@ -29,6 +29,20 @@ import { blockingRequirements } from "../../src/research/requirements.js";
 const origin = { kind: "agent" as const, detail: "research-budget test" };
 const START = Date.parse("2026-09-23T12:00:00Z");
 const YIELDS_Q = "What is pushing Treasury yields higher?";
+
+/**
+ * The flow the router would resolve for a budget-test question.
+ *
+ * These cases exercise budget laws (deadline, wave window, recovery), so they must not depend
+ * on a hardcoded flow that contradicts the question. The mapping is the router's own intent
+ * test, so the fixture stays consistent with production behaviour.
+ */
+function flowFixtureFor(question: string): string {
+  const q = question.toLowerCase();
+  if (/\bwhat (?:is|are) pushing\b|\bwhy\b|\bdriving\b|\bpushing\b/.test(q)) return "WHY_IT_HAPPENED";
+  if (/\bwhat (?:happened|occurred)\b|\btimeline\b/.test(q)) return "WHAT_HAPPENED";
+  return "WHY_IT_HAPPENED";
+}
 const MACRO_Q = "What macro conditions favor risk assets right now?";
 const EVIDENCE_TEXT = "Treasury yields rose this week on policy repricing";
 
@@ -123,7 +137,16 @@ async function run(opts: {
     ["research.answer_synthesis", SYNTHESIS],
   ]));
   const ws = new Workspace();
-  const research = ws.addResearch({ objective: opts.question, question: opts.question, flow: "WHAT_HAPPENED" }, origin);
+  // The flow fixture is DERIVED from the question, not hardcoded. These cases measure budget
+  // behaviour, not flow contracts, but the research object must still carry a flow consistent
+  // with its question: the flow now OWNS the requirement ledger (flow-contract.ts), so
+  // stamping a causal question ("What is pushing Treasury yields higher?") as WHAT_HAPPENED
+  // correctly refused its causal dimensions and the run could not reach EVIDENCE_SUFFICIENT.
+  // A test fixture that contradicts the router is not a weaker test — it is an invalid one.
+  const research = ws.addResearch(
+    { objective: opts.question, question: opts.question, flow: flowFixtureFor(opts.question) },
+    origin,
+  );
   ws.transitionResearch(research.id, "ACTIVE", origin, "activated");
   const outcome = await runAdaptiveResearch(opts.question, research.id, {
     provider, registry, workspace: ws, store: new MemoryStore(),

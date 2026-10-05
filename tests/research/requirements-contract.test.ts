@@ -34,7 +34,14 @@ describe("research contract: question type is read from the question", () => {
     expect(questionTypeOf("Does my thesis that copper demand is weakening still hold?")).toBe("THESIS");
     expect(questionTypeOf("What could prove my NVDA thesis wrong?")).toBe("FALSIFICATION");
     expect(questionTypeOf("Has the current TSLA setup happened before?")).toBe("HISTORICAL");
+    // A forward-looking/conditional question is its own decision shape, not the SYNTHESIS
+    // catch-all (which generates no dimension at all, leaving WHAT_COULD_AFFECT_IT's
+    // FORWARD_FACTORS grant unsatisfiable). SYNTHESIS stays the catch-all for a question that
+    // names no decision shape, and the EVENT shape still outranks the conditional one.
     expect(questionTypeOf("What does all the information say about NVDA?")).toBe("SYNTHESIS");
+    expect(questionTypeOf("What should I do about NVDA?")).toBe("SYNTHESIS");
+    expect(questionTypeOf("What could affect NVDA over the next few days?")).toBe("FORWARD_LOOKING");
+    expect(questionTypeOf("What could affect NVDA around its next earnings?")).toBe("EVENT");
   });
 
   it("reads the subject market class from the question's own vocabulary", () => {

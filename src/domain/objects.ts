@@ -68,6 +68,18 @@ export type EvidenceClass =
 
 export type Freshness = "CURRENT" | "STALE" | "HISTORICAL";
 
+/**
+ * SOURCE CLASS (source classification): DIRECT_OBSERVATION vs REPORTED_CLAIM.
+ *
+ * An exchange price print, an OHLCV candle and a market-data series are direct observations of the
+ * market. A news headline, an analyst statement and a company announcement reported by a secondary
+ * source are REPORTED CLAIMS about it. Successful retrieval is not observation: an RSS headline that
+ * arrived cleanly is still a claim, and labelling it an observation is what let a factual-timeline
+ * request be answered with unrelated headlines. Resolved at the ingestion boundary from the
+ * adapter's declared output/source class, never from the payload's wording.
+ */
+export type SourcingClass = "DIRECT_OBSERVATION" | "REPORTED_CLAIM";
+
 export interface Evidence {
   readonly id: string;
   readonly observation: string;
@@ -102,6 +114,12 @@ export interface Evidence {
    * signal), ANALYSIS (an authored interpretation). Undefined when nothing is known.
    */
   readonly sourceType?: "PRIMARY" | "SECONDARY" | "COMMUNITY" | "ANALYSIS";
+  /**
+   * DIRECT_OBSERVATION vs REPORTED_CLAIM for this specific observation (source classification).
+   * Set at ingestion from the adapter's declared output/source class. Undefined means the item was
+   * never classified, which is NOT the same as being an observation.
+   */
+  readonly sourcing?: SourcingClass;
   /**
    * True when the adapter flagged this item as repeated content (same substance as another
    * item in the same result). A duplicate never ADDS source diversity — it is the same
@@ -139,6 +157,7 @@ export function createEvidence(
     subject?: string;
     sourceProvider?: string;
     sourceType?: "PRIMARY" | "SECONDARY" | "COMMUNITY" | "ANALYSIS";
+    sourcing?: SourcingClass;
     duplicateContent?: boolean;
   },
   origin: ProvenanceOrigin,
@@ -163,6 +182,7 @@ export function createEvidence(
     ...(input.toolResultRef !== undefined ? { toolResultRef: input.toolResultRef } : {}),
     ...(input.sourceProvider !== undefined ? { sourceProvider: input.sourceProvider } : {}),
     ...(input.sourceType !== undefined ? { sourceType: input.sourceType } : {}),
+    ...(input.sourcing !== undefined ? { sourcing: input.sourcing } : {}),
     ...(input.duplicateContent !== undefined ? { duplicateContent: input.duplicateContent } : {}),
     ...(input.subject !== undefined ? { subject: input.subject } : {}),
     ...(input.researchRef !== undefined ? { researchRef: input.researchRef } : {}),

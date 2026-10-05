@@ -79,6 +79,13 @@ export const responses = {
       tasks: [
         { type: "FACT_FINDING", objective: "Identify developments for BTC", capabilities: ["NEWS_ANALYSIS"], completion: "news collected or unavailability recorded" },
       ],
+      // A descriptive WHAT_HAPPENED plan states the information requirements its own
+      // methodology needs. Without them the engine's guaranteed observation dimension stayed
+      // uncovered and recovery ran extra rounds, so this fixture was internally inconsistent:
+      // it declared "market data" in scope while requesting no capability that provides it.
+      requirements: [
+        { description: "the current observed price level for BTC", importance: "CRITICAL", timeSensitivity: "CURRENT" },
+      ],
       completionCriteria: ["evidence collected or unavailability recorded"],
       adaptationPolicy: "add capabilities only on material information value",
     }),

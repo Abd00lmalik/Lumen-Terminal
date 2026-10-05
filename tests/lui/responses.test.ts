@@ -86,7 +86,10 @@ describe("progressive disclosure responses (M3 §11)", () => {
       })],
     ]));
     provider.responses.set("lui.normalized_request", responses.normalizedRequest({ disclosureLevel: 2 }));
-    provider.responses.set("lui.resolved_target", responses.resolvedTarget({}));
+    // No canonical flow resolved: the shared fake target fixture carries flow WHAT_HAPPENED, and
+    // that flow owns its answer shape (the observation contract), which is the point of the case
+    // below — it must NOT be answered by the generic polish.
+    provider.responses.set("lui.resolved_target", responses.resolvedTarget({ flow: "" }));
     provider.responses.set("lui.ambiguity", responses.ambiguity(false));
     provider.responses.set("lui.consequence", responses.consequence());
     provider.responses.set("safety.screen", responses.safety(false));
@@ -98,7 +101,12 @@ describe("progressive disclosure responses (M3 §11)", () => {
     registry.register(fakeCapability("NEWS_ANALYSIS", "BTC news item one"));
     const workspace = new Workspace();
     const lui = new Lui({ provider, workspace, store: newStore(), registry, now: () => new Date() });
-    const result = await lui.handle("Show me the evidence for what happened to BTC");
+    // A question that resolves NO canonical flow: the model-polish path belongs to flows that may
+    // present a polished, interpreted answer. A WHAT_HAPPENED run answers with its own observation
+    // contract instead — the polish schema carries opposing reasons, an implication and
+    // "what would change this", which is exactly what a descriptive flow owes the trader nothing
+    // of. Flow-specific answers are covered in flow-isolation.test.ts.
+    const result = await lui.handle("Give me the full trail on Bitcoin");
 
     expect(result.response?.answer).toBe("polished answer");
     expect(result.response?.citedObjectRefs).toEqual(["ev_000001"]); // invented ref dropped

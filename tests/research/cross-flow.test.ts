@@ -278,8 +278,13 @@ describe("cross-flow: capability-first execution (no Flow→Tool hardcoding)", (
     expect(result.flow6).toBeUndefined();
     expect(result.flow7).toBeUndefined();
     expect(result.research).toBeDefined(); // M3 loop handled it
-    // Deterministic L0 response comes from the loop's final decision, not a scripted answer.
-    expect(result.response?.answer).toContain("evidence assessed");
+    // The deterministic L0 response comes from this run's OWN evidence, never from a scripted
+    // answer. WHAT_HAPPENED is a canonical flow whose contract owns its answer shape, so the
+    // response is the observation contract (timeline + what is directly observed / reported /
+    // missing) and carries none of the causal machinery the generic branch would add.
+    expect(result.response?.answer).toContain("**What happened**");
+    expect(result.response?.answer).toContain("ev_000001"); // cites a real retrieved observation
+    expect(result.response?.answer).not.toMatch(/counterevidence|mechanism|transmission|materiality|what would change/i);
     expect(result.research?.evidence.length).toBeGreaterThan(0);
   });
 });

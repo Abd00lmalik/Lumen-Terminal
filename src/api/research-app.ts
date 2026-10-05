@@ -39,6 +39,7 @@ import {
 import { InvalidRequestError, ModelFailureError, PersistenceFailureError, NotFoundError } from "./errors.js";
 import { renderConfidence, type ConfidenceComponents } from "../research/confidence.js";
 import { questionTypeOf } from "../research/requirements.js";
+import { contractFor } from "../research/flow-contract.js";
 import {
   judgmentPermitted,
   OBSERVATION_ONLY_CONTRACT,
@@ -406,7 +407,7 @@ export class ResearchApp {
       result.flow2?.outcome, result.flow3?.outcome, result.flow4?.outcome,
       result.flow5?.outcome, result.flow6?.outcome, result.flow7?.outcome, result.flow8?.outcome,
     ].some((outcome) => executionsOf(outcome).some((e) => e.capability === "FALSIFICATION"));
-    const answer: AnswerDTO = result.rejected !== undefined
+    let answer: AnswerDTO = result.rejected !== undefined
       ? {
           answer: result.response?.answer ?? "Request rejected: execution-like commands cannot run in this research-only workbench.",
           supportingReasons: [],
@@ -454,6 +455,15 @@ export class ResearchApp {
     const answerRunId = typeof rawAnswerRunId === "string" && /^rs_/.test(rawAnswerRunId)
       ? rawAnswerRunId
       : undefined;
+    // FLOW CONTRACT (coverage contract, read with the flow): the counterevidence status is a
+    // statement about a SEARCH. A flow that does not GRANT counterevidence — WHAT_HAPPENED owes
+    // none — must never report NONE_FOUND, which reads as "disconfirmation was attempted and
+    // found nothing". That claim is only true when the flow actually required the search.
+    const counterevidenceOwed =
+      contractFor(answerRunId !== undefined ? ws.getResearch(answerRunId)?.flow : undefined)?.requiresCounterevidence
+      ?? true;
+    // A flow that owes no counterevidence must not report a search it never made.
+    if (!counterevidenceOwed) answer = { ...answer, counterevidenceStatus: "NOT_ASSESSED" };
     // Evidence + judgments exposed with epistemic classes intact (observation ≠ interpretation
     // ≠ proxy ≠ speculation). Limitations surface exactly what the research could not do.
     const evidence: EvidenceDTO[] = [];
@@ -571,7 +581,17 @@ export class ResearchApp {
       .map((o) => o.confidence)
       .filter((c): c is ConfidenceComponents => c !== undefined)
       .sort((a, b) => a.coreCoverage - b.coreCoverage)[0];
-    const questionText = result.request?.objective;
+    // CONTRACT QUESTION (research contract §1, mirrored in the engine): the classification must read
+    // the TRADER'S VERBATIM QUESTION, not the LUI's reformulated objective. The objective
+    // paraphrases ("Summarize the cross-domain picture") and drops the trader's own grammar, so
+    // "What happened to Bitcoin over the last 24 hours?" reported SYNTHESIS here while the engine
+    // that actually built the ledger classified it OBSERVATION — the screen and the engine
+    // disagreed about the same run. The run's stamped question wins; the objective is only the
+    // fallback when no run recorded one.
+    const questionText =
+      [answerRunId !== undefined ? ws.getResearch(answerRunId)?.userQuestion : undefined]
+        .find((q): q is string => q !== undefined && q.trim() !== "")
+      ?? result.request?.objective;
     const evidenceCount = evidence.length;
     const researchDiagnostics: ResearchDiagnosticsDTO | undefined =
       loopOutcomes.length === 0

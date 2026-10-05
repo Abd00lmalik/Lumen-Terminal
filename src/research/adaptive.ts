@@ -54,6 +54,7 @@ import {
   markChallengeAttempted,
   challengeEarnedBy,
   questionTypeOf,
+  dimensionOfRequirement,
   markUnattemptableChallenges,
   subjectClassOfKind,
   subjectMarketClassOf,
@@ -66,6 +67,8 @@ import {
   type ResearchRequirement,
   type SubjectMarketClass,
 } from "./requirements.js";
+import { assertFlowContract, contractFor, forbiddenDimensionsFor } from "./flow-contract.js";
+import { ALL_DECISION_DIMENSIONS } from "./question-resolution.js";
 import type { Evidence, Research } from "../domain/objects.js";
 import { createEvidence } from "../domain/objects.js";
 import { eventWindowEvidence, type EventWindowSpec } from "./event-window.js";
@@ -344,9 +347,37 @@ const ADAPTIVE_SYSTEM = [
   "Output style: write plain professional prose. Never use em dash or en dash punctuation characters anywhere in your output; separate clauses with commas, semicolons, or periods.",
 ].join("\n");
 
-function planPrompt(objective: string, constraints: readonly string[]): string {
+/**
+ * The FLOW CONTRACT, rendered for the planner.
+ *
+ * The planner chooses capabilities; the engine only guarantees the DIMENSIONS. Hardcoding a
+ * flow to a capability set would violate the capability-first seam this file documents ("no
+ * flow→tool hardcoding: swapping providers needs zero changes here"), and it would also be
+ * wrong — the reproduction's evidence failure was not "the wrong tool ran", it was "nothing
+ * asked for the price timeline at all". So the flow's own contract is stated to the planner as
+ * the METHODOLOGY it must plan within, and it decides which capabilities serve it.
+ */
+function flowGuidance(flow: string | undefined): readonly string[] {
+  const contract = contractFor(flow);
+  if (contract === undefined) return [];
+  const denied = forbiddenDimensionsFor(flow, ALL_DECISION_DIMENSIONS);
+  return [
+    `RESOLVED FLOW: ${contract.flow} (already decided from the trader's request; plan within it, never widen it).`,
+    `- This run answers a ${contract.questionType} question. Its permitted dimensions are: ${contract.grants.join(", ")}.`,
+    denied.length > 0 ? `- This flow must NOT acquire: ${denied.join(", ")}. Do not plan those requirements and do not plan capabilities that exist only to serve them.` : "",
+    contract.flow === "WHAT_HAPPENED"
+      ? "- DESCRIPTIVE RECONSTRUCTION: the trader asked what HAPPENED, not why. State requirements for TIMESTAMPED PRICE OBSERVATIONS across the requested window (a dated sequence of price movement, the window's high and low, traded volume), plus market events dated INSIDE that window."
+      : "",
+    contract.causal ? "- CAUSAL: generate competing candidate explanations and test them; plan for mechanism and transmission evidence." : "",
+    contract.requiresCounterevidence ? "- Plan for disconfirming evidence on the leading conclusion; the engine records the attempt either way." : "",
+    contract.causal || contract.judgmental ? "" : "- Do not plan a causal analysis, a thesis evaluation or a materiality judgment for this flow; the trader did not ask for one.",
+  ].filter((l) => l !== "");
+}
+
+function planPrompt(objective: string, constraints: readonly string[], flow?: string): string {
   return [
     `Research objective: ${objective}`,
+    ...flowGuidance(flow),
     constraints.length > 0 ? `Trader constraints: ${constraints.join("; ")}` : "",
     "Produce a research plan as JSON conforming to schema \"research.plan\".",
     RESEARCH_PLAN_SCHEMA_DESC,
@@ -452,6 +483,12 @@ export async function runAdaptiveResearch(
   // subject) keep run-scoped semantics.
   const resolvedAsset = typeof options.capabilityParams?.asset === "string" ? options.capabilityParams.asset : undefined;
   const subjectTerms = subjectTermsOf(objective, resolvedAsset);
+  /**
+   * The flow the router RESOLVED for this run, read once from the research object. It briefs
+   * the planner (which evidence this methodology needs, and what it must not acquire) and then
+   * owns the ledger.
+   */
+  const resolvedFlow = options.workspace.getResearch(researchRef)?.flow;
 
   // ID RESERVATION (multi-instance law): claim this run's monotonic id in the shared blob
   // BEFORE the (long) research work. Serverless instances seed their counters from the blob;
@@ -472,7 +509,7 @@ export async function runAdaptiveResearch(
       schemaName: "research.plan",
       schemaDescription: RESEARCH_PLAN_SCHEMA_DESC,
       system: PLAN_SYSTEM,
-      prompt: planPrompt(objective, options.constraints ?? []),
+      prompt: planPrompt(objective, options.constraints ?? [], resolvedFlow),
       preferJson: true,
     });
     plan = parseResearchPlan(planResponse.raw);
@@ -512,9 +549,15 @@ export async function runAdaptiveResearch(
   // and a broad question could silently gain another domain's dimension. The verbatim question
   // is already stamped on the run (run-context); the objective remains the planning/prompt text.
   const contractQuestion = currentRun()?.userQuestion ?? objective;
+  // FLOW OWNERSHIP (flow isolation): the flow recorded on THIS research object is the router's
+  // resolved canonical flow, and it — not the generic classifier — owns the requirement ledger.
+  // A WHAT_HAPPENED run therefore cannot acquire drivers, mechanism, transmission,
+  // counterevidence or materiality rows. A non-canonical marker (RAW_OBSERVATION,
+  // INDEPENDENT_RESEARCH) has no contract and falls through to the classifier unchanged.
   requirements = completeRequirements(contractQuestion, requirements, {
     ...(resolvedAsset !== undefined ? { subject: resolvedAsset } : {}),
     marketClass: engineMarketClass(contractQuestion, resolvedAsset),
+    ...(resolvedFlow !== undefined ? { flow: resolvedFlow } : {}),
     // EXECUTION CONTRACT: a request that forbids counterevidence earns no CHALLENGE dimension,
     // whatever its question type says. Without this the reproduction carried a CRITICAL
     // "disconfirming evidence" row for a request that forbade counterevidence analysis in writing.
@@ -527,6 +570,38 @@ export async function runAdaptiveResearch(
     requirements,
     contract.allowCounterevidence ? [] : ["CHALLENGE"],
   );
+  // RUNTIME FLOW-CONTRACT ASSERTION (step 5 of the chain, before capability planning).
+  // The ledger was already filtered to the flow's grants above; this verifies the RESULT and
+  // refuses to let a contaminated plan reach capability planning or synthesis. On a violation
+  // the run is rebuilt from the flow's own requirements (deterministic regeneration), which is
+  // why a contaminated plan never survives into an answer. Nothing is stripped at the UI layer,
+  // where the trader would see a complete-looking answer built under a refused contract.
+  const flowCheck = assertFlowContract({
+    flow: resolvedFlow,
+    requirements,
+    dimensionOf: dimensionOfRequirement,
+  });
+  if (!flowCheck.ok) {
+    // REGENERATE, DO NOT DISCARD: only the rows that violate the flow's contract are refused.
+    // The planner's IN-CONTRACT requirements are the research plan and must survive — dropping
+    // them would silently delete real research (a yields question lost its yield observation and
+    // the capability floor had nothing to map). `completeRequirements` re-derives the engine's
+    // own dimensions from the same contract, so the rebuilt ledger is the plan minus its
+    // out-of-contract rows plus the engine's guaranteed dimensions.
+    const offending = new Set(flowCheck.violations.map((v) => v.requirementId));
+    requirements = completeRequirements(contractQuestion, requirements.filter((r) => !offending.has(r.id)), {
+      ...(resolvedAsset !== undefined ? { subject: resolvedAsset } : {}),
+      marketClass: engineMarketClass(contractQuestion, resolvedAsset),
+      ...(resolvedFlow !== undefined ? { flow: resolvedFlow } : {}),
+      challengeRequired: contract.allowCounterevidence,
+    });
+    options.onProgress?.(progressEvent(
+      "research_plan_created",
+      at(),
+      `flow contract enforced for ${resolvedFlow}: ${flowCheck.violations.length} out-of-contract requirement(s) refused and the plan rebuilt`,
+      { flow: resolvedFlow ?? "UNRESOLVED", violations: flowCheck.violations.length },
+    ));
+  }
   /** Wrong-target observations discarded at ingestion (diagnostic; never user-facing noise). */
   let rejectedAtIngestion = 0;
   /** Capabilities for the NEXT round when it is a gap-recovery round (engine-scheduled). */

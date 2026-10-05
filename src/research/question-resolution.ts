@@ -128,7 +128,12 @@ export type AnswerDimension =
 
 const REQUIRED_DIMENSIONS: Readonly<Record<QuestionIntent, readonly AnswerDimension[]>> = {
   CURRENT_STATE: ["CURRENT_STATE", "RECENCY", "MATERIALITY"],
-  WHAT_HAPPENED: ["WHAT_HAPPENED", "RECENCY", "MATERIALITY"],
+  // FLOW ISOLATION (fix): a descriptive reconstruction owes the trader the events and their
+  // currency. It owes NO materiality judgment — "how much does this matter to a decision" is a
+  // DECISION dimension, and demanding it here made a factual-timeline request report MATERIALITY
+  // SATISFIED, which is exactly what the reproduction showed. RECENCY is retained because a
+  // timeline is meaningless without its dates.
+  WHAT_HAPPENED: ["WHAT_HAPPENED", "RECENCY"],
   CURRENT_DRIVERS: ["CURRENT_DRIVERS", "DRIVER_RELATIONSHIP", "RECENCY", "MATERIALITY", "COUNTEREVIDENCE"],
   WHY_DID_IT_HAPPEN: ["WHAT_HAPPENED", "CURRENT_DRIVERS", "DRIVER_RELATIONSHIP", "RECENCY", "MATERIALITY", "COUNTEREVIDENCE"],
   WHAT_COULD_AFFECT_IT: ["FORWARD_FACTORS", "MATERIALITY", "COUNTEREVIDENCE"],
@@ -151,6 +156,15 @@ export const RECOVERY_TARGET_DIMENSIONS: ReadonlySet<AnswerDimension> = new Set<
 export function requiredDimensionsFor(intent: QuestionIntent): readonly AnswerDimension[] {
   return REQUIRED_DIMENSIONS[intent];
 }
+
+/**
+ * Every dimension the system knows, derived from the intents themselves rather than restated,
+ * so a dimension added to any intent is automatically part of the flow contract's denial set.
+ * The flow contract subtracts a flow's grants from this list to compute what it must refuse.
+ */
+export const ALL_DECISION_DIMENSIONS: readonly string[] = [
+  ...new Set(Object.values(REQUIRED_DIMENSIONS).flat()),
+];
 
 // ---------------------------------------------------------------------------
 // Materiality ladder and epistemic claim levels
