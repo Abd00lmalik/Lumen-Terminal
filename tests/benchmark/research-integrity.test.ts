@@ -93,7 +93,7 @@ describe("boundary: evidence classification under provenance additions", () => {
     expect(a.sourceProvider).not.toBe(b.sourceProvider);
   });
 
-  it("an in-payload publisher is the origin; upstream lineage is honored (S7/Heurist law)", () => {
+  it("an in-payload publisher is the origin; upstream lineage is honored (S7 lineage law)", () => {
     const r = okResult({
       normalizedOutput: [
         {
@@ -107,9 +107,9 @@ describe("boundary: evidence classification under provenance additions", () => {
 
   it("the same upstream reached via two paths is ONE origin (no double-counted corroboration)", () => {
     const direct = { outputClass: "QUANTITATIVE_OBSERVATION" as const, content: { price: 1, upstreamSource: "yahoo-finance" } };
-    const viaHeurist = { outputClass: "QUANTITATIVE_OBSERVATION" as const, content: { price: 1, upstreamSource: "yahoo-finance" } };
+    const viaSecondPath = { outputClass: "QUANTITATIVE_OBSERVATION" as const, content: { price: 1, upstreamSource: "yahoo-finance" } };
     expect(sourceProviderForOutput(okResult(), direct)).toBe("yahoo-finance");
-    expect(sourceProviderForOutput(okResult(), viaHeurist)).toBe("yahoo-finance");
+    expect(sourceProviderForOutput(okResult(), viaSecondPath)).toBe("yahoo-finance");
   });
 
   it("interpretation-class output is ANALYSIS source type, never a market observation", () => {

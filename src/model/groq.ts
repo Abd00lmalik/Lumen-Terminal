@@ -1,7 +1,7 @@
 /**
  * Groq adapter; the second concrete ModelProvider (model-fallback phase 13).
  *
- * Selection rationale (researched 2026-09-18, docs/integrations/heurist.md §7 + provider
+ * Selection rationale (researched 2026-09-18, docs/integrations/provider-selection.md + provider
  * comparison): Groq is OpenAI-compatible (chat/completions with `response_format:
  * json_object`), free-tier friendly with commercial use allowed, and — most importantly —
  * an INDEPENDENT failure domain from Google (a Gemini quota/outage cannot take Groq down).

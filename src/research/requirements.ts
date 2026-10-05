@@ -1623,14 +1623,12 @@ export const CAPABILITY_SUPPORT: Readonly<Record<string, CapabilitySupport>> = {
   FALSIFICATION: { domains: ["GENERAL", "NEWS"], dataTypes: ["DISCONFIRMING", "RISK", "COUNTEREVIDENCE"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
   SOURCE_VALIDATION: { domains: ["GENERAL", "NEWS"], dataTypes: ["PRIMARY", "VERIFICATION", "PROVENANCE"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
   WEB_SEARCH: { domains: ["GENERAL", "NEWS", "PROJECT", "MACRO", "FUNDAMENTALS"], dataTypes: ["SEARCH", "PRIMARY", "DEVELOPMENT", "NARRATIVE", "TRANSMISSION", "RELATIONSHIP"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
-  CROSS_DOMAIN_SYNTHESIS: { domains: ["GENERAL"], dataTypes: ["BROAD_RESEARCH", "SYNTHESIS", "RECOVERY", "TRANSMISSION", "RELATIONSHIP", "CROSS_ASSET", "SPILLOVER", "PASS_THROUGH", "MECHANISM"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
   ONCHAIN_ANALYSIS: { domains: ["ONCHAIN"], dataTypes: ["ADDRESS", "HOLDER", "TRANSACTION", "RESERVE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   DEFI_ANALYSIS: { domains: ["DEFI"], dataTypes: ["TVL", "PROTOCOL", "LIQUIDITY", "STAKING"], freshness: ["CURRENT", "RECENT"] },
   PROJECT_RESEARCH: { domains: ["PROJECT", "NEWS", "ONCHAIN", "DEFI"], dataTypes: ["DESCRIPTION", "ECOSYSTEM", "NARRATIVE", "TEAM", "ROADMAP"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
   EQUITY_MARKET_DATA: { domains: ["PRICE_MARKET", "MACRO"], dataTypes: ["PRICE", "OHLCV", "VOLUME", "QUOTE", "YIELD", "VOLATILITY", "USD", "INDEX", "RATE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   EQUITY_FUNDAMENTALS: { domains: ["FUNDAMENTALS"], dataTypes: ["REVENUE", "MARGIN", "VALUATION", "SHARES", "BALANCE_SHEET"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   EARNINGS_CALENDAR: { domains: ["EARNINGS"], dataTypes: ["EARNINGS_DATE", "CONSENSUS", "ESTIMATE", "GUIDANCE", "REPORT"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
-  OPTIONS_CHAIN_ANALYSIS: { domains: ["OPTIONS"], dataTypes: ["CHAIN", "IMPLIED_VOLATILITY", "OPEN_INTEREST", "STRIKE", "POSITIONING"], freshness: ["CURRENT", "RECENT"] },
   EQUITY_NEWS: { domains: ["NEWS", "EARNINGS", "FUNDAMENTALS"], dataTypes: ["HEADLINE", "COMPANY_EVENT", "ANNOUNCEMENT", "CATALYST"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   LOCAL_KNOWLEDGE_RETRIEVAL: { domains: ["GENERAL"], dataTypes: ["FRAMEWORK", "SAVED_RESEARCH", "METHODOLOGY", "NOTE"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
   CRYPTO_MARKET_DATA: { domains: ["PRICE_MARKET"], dataTypes: ["PRICE", "OHLCV", "VOLUME", "QUOTE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
@@ -1704,7 +1702,12 @@ export function recoveryCapabilities(
       if (out.length >= limit) return out;
     }
   }
-  if (out.length === 0) out.push("WEB_SEARCH", "CROSS_DOMAIN_SYNTHESIS");
+  // The last-resort default is WEB_SEARCH alone. CROSS_DOMAIN_SYNTHESIS used to sit beside it
+  // as a "buy a generated research answer" capability; it was removed from the vocabulary on
+  // 2026-10-05 because its only providers cost credits per call and were being invoked as an
+  // automatic backstop. A gap that cannot be covered by retrieval must stay a gap — the run
+  // reports the limitation instead of buying an answer.
+  if (out.length === 0) out.push("WEB_SEARCH");
   return out;
 }
 
@@ -1717,7 +1720,7 @@ export function recoveryCapabilities(
  */
 export const SUBJECT_REQUIRED_CAPABILITIES: readonly string[] = [
   "MARKET_DATA_ANALYSIS", "TECHNICAL_ANALYSIS", "EQUITY_MARKET_DATA", "EQUITY_FUNDAMENTALS",
-  "EARNINGS_CALENDAR", "OPTIONS_CHAIN_ANALYSIS", "EQUITY_NEWS", "DERIVATIVES_ANALYSIS",
+  "EARNINGS_CALENDAR", "EQUITY_NEWS", "DERIVATIVES_ANALYSIS",
   "ONCHAIN_ANALYSIS", "DEFI_ANALYSIS",
   "CRYPTO_MARKET_DATA", "COMMODITY_MARKET_DATA", "FX_MARKET_DATA",
 ];

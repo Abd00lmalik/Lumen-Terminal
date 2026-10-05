@@ -6,23 +6,20 @@
  * with honest provenance — or, when every path is exhausted, returns an honest typed
  * failure without fabricating evidence.
  *
- * Scenarios:
- * 1. Earnings: direct Yahoo fails -> Heurist Yahoo agent serves (the AAPL scenario)
- * 2. Earnings: direct AND Heurist fail -> honest EMPTY with the full attempt trail
- * 3. News: direct fails -> registered fallback serves
- * 4. Macro: primary empty -> fallback serves with STALE freshness honesty
- * 5. Timeout: primary timeout -> fallback serves
- * 6. Rate limit: retriable failure classified and preserved in the trail
- * 7. Auth failure: missing credential skips the provider without killing research
+ * Scenarios (2026-10-05: the paid Heurist Mesh agent tier was removed from the research
+ * path; the failover laws are unchanged and are now exercised against the KEYLESS public
+ * replacements that took its capabilities, which is the whole point of the replacement —
+ * a chain that recovers identically without spending credits):
+ * 1. Derivatives: direct primary fails -> keyless public exchange serves
+ * 2. Derivatives: direct AND keyless both fail -> honest EMPTY with the full attempt trail
+ * 3. Cross-domain: timeout -> retriable failure classified; fallback serves
+ * 4. Cross-domain: rate limit -> retriable classification reaches the fallback trail
+ * 5. Cross-domain: auth failure skips the provider for the request; next fallback still serves
  */
 import { describe, expect, it } from "vitest";
 import { CapabilityRegistry } from "../../src/adapters/capability-registry.js";
-import {
-  HeuristMeshTransport,
-  createHeuristEarningsAdapter,
-  createHeuristFundingRateAdapter,
-} from "../../src/adapters/heurist.js";
-import { EarningsCalendarAdapter } from "../../src/adapters/equity.js";
+import { PublicDerivativesAdapter } from "../../src/adapters/public-derivatives.js";
+import { SecEdgarAdapter } from "../../src/adapters/sec-edgar.js";
 import type { ProvenanceOrigin } from "../../src/domain/provenance.js";
 import type { ProviderAdapter, ToolResultInput } from "../../src/domain/tool-result.js";
 
@@ -56,70 +53,58 @@ function failingPrimary(capability: string, providerId: string, message: string)
 }
 
 // ---------------------------------------------------------------------------
-// Scenario 1+2: the AAPL earnings chain (mandate Phase 3/5/18)
+// Scenario 1+2: the derivatives chain (direct primary -> keyless public exchange)
 // ---------------------------------------------------------------------------
 
-describe("failure injection: earnings chain", () => {
-  it("direct Yahoo earnings fails -> Heurist Yahoo agent serves; primary failure preserved in the trail", async () => {
+describe("failure injection: derivatives chain", () => {
+  it("direct primary fails -> keyless public exchange serves; primary failure preserved in the trail", async () => {
     const registry = new CapabilityRegistry();
+    registry.register(failingPrimary("DERIVATIVES_ANALYSIS", "fake/deriv-down", "connect timeout"), 100);
     registry.register(
-      new EarningsCalendarAdapter((await import("../../src/adapters/equity.js")).makeFailingRest?.() ?? {
-        async get() { throw new Error("connect timeout"); },
-      } as never),
-      100,
-    );
-    registry.register(
-      createHeuristEarningsAdapter(
-        new HeuristMeshTransport({
-          apiKey: "heu_test",
-          fetchImpl: fakeFetch([{ result: { fundamentals: { earningsDates: ["2026-10-29"] }, analyst: { consensus: "estimates only" } } }]).fetch,
-        }),
-      ),
+      new PublicDerivativesAdapter({
+        fetchImpl: fakeFetch([
+          { retCode: 0, result: { list: [{ symbol: "BTCUSDT", fundingRate: "0.00012", fundingRateTimestamp: "1791180000000" }] } },
+          { retCode: 0, result: { list: [{ symbol: "BTCUSDT", openInterest: "9500000000", openInterestValue: "820000000000", timestamp: "1791180000000" }] } },
+          { retCode: 0, result: { list: [{ symbol: "BTCUSDT", buyRatio: "0.58", sellRatio: "0.42", timestamp: "1791180000000" }] } },
+        ]).fetch,
+      }),
       300,
     );
 
-    const result = await registry.execute("EARNINGS_CALENDAR", { symbol: "AAPL" }, origin);
+    const result = await registry.execute("DERIVATIVES_ANALYSIS", { asset: "BTCUSDT" }, origin);
 
     expect(result.failure.type).toBe("NONE");
-    expect(result.tool).toContain("heurist/YahooFinanceAgent.equity_overview");
+    expect(result.tool).toContain("fallback/public-derivatives");
     expect(result.limitations.join(" ")).toContain("provider fallback");
-    expect(result.limitations.join(" ")).toContain("equity/yahoo-earnings-calendar");
-    expect(result.attemptedProviders?.map((a) => a.provider)).toContain("equity/yahoo-earnings-calendar");
-    // Epistemic honesty: agent output keeps upstream lineage; nothing upgraded to a
-    // reported result (estimates stay estimates).
-    const content = result.normalizedOutput[0]!.content as { upstreamSource?: string };
-    expect(content.upstreamSource).toBe("yahoo-finance");
+    expect(result.limitations.join(" ")).toContain("fake/deriv-down");
+    expect(result.attemptedProviders?.map((a) => a.provider)).toContain("fake/deriv-down");
+    // Epistemic honesty: every venue figure is an observation labelled with its venue.
+    const kinds = result.normalizedOutput.map((o) => (o.content as { kind?: string }).kind);
+    expect(kinds).toContain("funding_rate");
+    expect(kinds).toContain("open_interest");
   });
 
-  it("direct AND Heurist both fail -> honest EMPTY with the full attempt trail (never fabricated, never negative evidence)", async () => {
+  it("direct AND keyless both fail -> honest EMPTY with the full attempt trail (never fabricated, never negative evidence)", async () => {
     const registry = new CapabilityRegistry();
-    registry.register(failingPrimary("EARNINGS_CALENDAR", "fake/yahoo-down", "connect timeout"), 100);
-    registry.register(
-      createHeuristEarningsAdapter(
-        new HeuristMeshTransport({
-          apiKey: "heu_test",
-          fetchImpl: fakeFetch([new Error("network unreachable")]).fetch,
-        }),
-      ),
-      300,
-    );
+    registry.register(failingPrimary("DERIVATIVES_ANALYSIS", "fake/deriv-down", "connect timeout"), 100);
+    registry.register(new PublicDerivativesAdapter({ fetchImpl: fakeFetch([new Error("network unreachable")]).fetch }), 300);
 
-    const result = await registry.execute("EARNINGS_CALENDAR", { symbol: "AAPL" }, origin);
+    const result = await registry.execute("DERIVATIVES_ANALYSIS", { asset: "BTCUSDT" }, origin);
 
     expect(result.completeness).toBe("EMPTY");
     expect(result.failure.type).not.toBe("NONE");
     // The PRIMARY's failure is the headline (identity in `tool`); the fallback attempt
     // is preserved in the trail. Neither is ever erased by the other.
-    expect(result.tool).toContain("fake/yahoo-down");
+    expect(result.tool).toContain("fake/deriv-down");
     expect(result.limitations.join(" ")).toContain("provider fallback attempted and failed");
-    expect(result.limitations.join(" ")).toContain("heurist/YahooFinanceAgent");
-    expect(result.attemptedProviders?.map((a) => a.provider)).toContain("heurist/YahooFinanceAgent");
+    expect(result.limitations.join(" ")).toContain("fallback/public-derivatives");
+    expect(result.attemptedProviders?.map((a) => a.provider)).toContain("fallback/public-derivatives");
     expect(result.normalizedOutput.every((o) => o.outputClass !== "FACTUAL_OBSERVATION")).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Scenario 3-7: cross-domain injection (news/macro/timeout/rate-limit/auth)
+// Scenario 3-7: cross-domain injection (timeout/rate-limit/auth/SEC)
 // ---------------------------------------------------------------------------
 
 describe("failure injection: cross-domain recovery classes", () => {
@@ -127,19 +112,20 @@ describe("failure injection: cross-domain recovery classes", () => {
     const registry = new CapabilityRegistry();
     registry.register(failingPrimary("DERIVATIVES_ANALYSIS", "fake/deriv-primary", "The operation was aborted"), 100);
     registry.register(
-      createHeuristFundingRateAdapter(
-        new HeuristMeshTransport({
-          apiKey: "heu_test",
-          fetchImpl: fakeFetch([{ result: [{ fundingRate: 0.00012, openInterest: 9_500_000_000 }] }]).fetch,
-        }),
-      ),
+      new PublicDerivativesAdapter({
+        fetchImpl: fakeFetch([
+          { retCode: 0, result: { list: [{ symbol: "BTCUSDT", fundingRate: "0.00012", fundingRateTimestamp: "1791180000000" }] } },
+          { retCode: 0, result: { list: [{ symbol: "BTCUSDT", openInterest: "9500000000", timestamp: "1791180000000" }] } },
+          { retCode: 0, result: { list: [{ symbol: "BTCUSDT", buyRatio: "0.58", sellRatio: "0.42", timestamp: "1791180000000" }] } },
+        ]).fetch,
+      }),
       300,
     );
 
     const result = await registry.execute("DERIVATIVES_ANALYSIS", { asset: "BTCUSDT" }, origin);
 
     expect(result.failure.type).toBe("NONE");
-    expect(result.tool).toContain("heurist/FundingRateAgent");
+    expect(result.tool).toContain("fallback/public-derivatives");
     expect(result.limitations.join(" ")).toContain("fake/deriv-primary");
   });
 
@@ -167,12 +153,13 @@ describe("failure injection: cross-domain recovery classes", () => {
     };
     registry.register(rateLimited, 100);
     registry.register(
-      createHeuristFundingRateAdapter(
-        new HeuristMeshTransport({
-          apiKey: "heu_test",
-          fetchImpl: fakeFetch([{ result: [{ fundingRate: 0.0001, openInterest: 8_000_000_000 }] }]).fetch,
-        }),
-      ),
+      new PublicDerivativesAdapter({
+        fetchImpl: fakeFetch([
+          { retCode: 0, result: { list: [{ symbol: "BTCUSDT", fundingRate: "0.0001", fundingRateTimestamp: "1791180000000" }] } },
+          { retCode: 0, result: { list: [{ symbol: "BTCUSDT", openInterest: "8000000000", timestamp: "1791180000000" }] } },
+          { retCode: 0, result: { list: [{ symbol: "BTCUSDT", buyRatio: "0.55", sellRatio: "0.45", timestamp: "1791180000000" }] } },
+        ]).fetch,
+      }),
       300,
     );
 
@@ -181,25 +168,87 @@ describe("failure injection: cross-domain recovery classes", () => {
     // Insufficient-coverage failover: the rate-limited primary produced no usable
     // outputs, so the fallback serves — and the rate limit stays in the trail.
     expect(result.failure.type).toBe("NONE");
-    expect(result.tool).toContain("heurist/FundingRateAgent");
+    expect(result.tool).toContain("fallback/public-derivatives");
     expect(JSON.stringify(result.limitations) + JSON.stringify(result.attemptedProviders)).toContain("fake/rate-limited");
   });
 
-  it("auth failure (missing credential) skips the provider for the request; next fallback still serves", async () => {
-    const registry = new CapabilityRegistry();
-    registry.register(failingPrimary("DERIVATIVES_ANALYSIS", "fake/primary-down", "connect timeout"), 100);
-    registry.register(
-      createHeuristFundingRateAdapter(new HeuristMeshTransport({ fetchImpl: fakeFetch([]).fetch })), // no apiKey
-      300,
-    );
+  it("a body-embedded error (HTTP 200) is a provider failure, never evidence", async () => {
+    // The live failure this law encodes: a paid agent answered HTTP 200 with
+    // `{error: "402 Payment Required"}`, which parsed as an observation and produced a
+    // false "COMPLETE". The keyless exchange surfaces the same shape on quota/billing
+    // rejection, so the guard must hold here too.
+    const adapter = new PublicDerivativesAdapter({
+      fetchImpl: fakeFetch([
+        { error: "API request failed: 402, message='Payment Required'" },
+        { error: "API request failed: 402, message='Payment Required'" },
+        { error: "API request failed: 402, message='Payment Required'" },
+      ]).fetch,
+    });
 
-    const result = await registry.execute("DERIVATIVES_ANALYSIS", { asset: "BTCUSDT" }, origin);
+    const result = await adapter.execute("DERIVATIVES_ANALYSIS", { asset: "BTCUSDT" });
 
-    // The unkeyed Heurist adapter throws AUTHENTICATION_FAILURE -> registry records the
-    // attempt and fails over; with no further provider the result is honest EMPTY with
-    // the primary headlined and the auth-skipped fallback in the trail.
     expect(result.completeness).toBe("EMPTY");
-    expect(result.tool).toContain("fake/primary-down");
-    expect(result.attemptedProviders?.map((a) => a.provider)).toContain("heurist/FundingRateAgent");
+    expect(result.outputs.every((o) => o.outputClass === "UNAVAILABLE")).toBe(true);
+    // The rejection reason survives into the attempt trail for an operator...
+    expect(JSON.stringify(result.limitations)).toContain("402");
+    // ...and the content states this is a retrieval gap, NOT evidence that positioning
+    // was absent or unchanged. A billing failure must never read as a market finding.
+    expect(result.outputs[0]!.content).toContain("NOT evidence");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SEC EDGAR: the keyless SOURCE_VALIDATION replacement
+// ---------------------------------------------------------------------------
+
+describe("failure injection: SEC EDGAR chain", () => {
+  const TICKER_FILE = { "0": { cik_str: 320193, ticker: "AAPL", title: "Apple Inc." } };
+  const SUBMISSIONS = {
+    cik: "0000320193",
+    name: "Apple Inc.",
+    tickers: ["AAPL"],
+    exchanges: ["Nasdaq"],
+    sic: "3571",
+    sicDescription: "Electronic Computers",
+    filings: {
+      recent: {
+        accessionNumber: ["0000320193-25-000079"],
+        filingDate: ["2025-11-01"],
+        form: ["10-K"],
+        primaryDocument: ["aapl-20250927.htm"],
+        reportDate: ["2025-09-27"],
+      },
+    },
+  };
+
+  it("resolves a real filing with its EDGAR URL as provenance (keyless, no credential)", async () => {
+    const adapter = new SecEdgarAdapter({ fetchImpl: fakeFetch([TICKER_FILE, SUBMISSIONS]).fetch });
+    const result = await adapter.execute("SOURCE_VALIDATION", { symbol: "AAPL" });
+    const filing = result.outputs.find((o) => (o.content as { kind?: string }).kind === "filing_index_record");
+    expect(filing).toBeDefined();
+    const content = filing!.content as { edgarUrl?: string; form?: string; isPrimarySource?: boolean };
+    expect(content.form).toBe("10-K");
+    expect(content.isPrimarySource).toBe(true);
+    // The URL is what makes the reference checkable — it is the provenance, not the payload.
+    expect(content.edgarUrl).toContain("sec.gov/Archives/edgar/data/320193/000032019325000079/");
+  });
+
+  it("a non-registrant subject resolves to honest UNAVAILABLE, never an unrelated issuer's filings", async () => {
+    // The class of bug that produced production garbage elsewhere: an unknown token resolved
+    // to SOME company's filings. A crypto asset must not reach SEC registrant data.
+    const adapter = new SecEdgarAdapter({ fetchImpl: fakeFetch([]).fetch });
+    const result = await adapter.execute("SOURCE_VALIDATION", { symbol: "BTC" });
+    expect(result.outputs.every((o) => o.outputClass === "UNAVAILABLE")).toBe(true);
+    expect(result.outputs[0]!.content).toContain("registrant");
+  });
+
+  it("an upstream error yields honest EMPTY with the reason preserved", async () => {
+    const adapter = new SecEdgarAdapter({ fetchImpl: fakeFetch([new Error("network unreachable")]).fetch });
+    const registry = new CapabilityRegistry();
+    registry.register(adapter, 300);
+    const result = await registry.execute("SOURCE_VALIDATION", { symbol: "AAPL" });
+    expect(result.completeness).toBe("EMPTY");
+    expect(result.failure.type).not.toBe("NONE");
+    expect(result.normalizedOutput.every((o) => o.outputClass !== "FACTUAL_OBSERVATION")).toBe(true);
   });
 });

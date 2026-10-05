@@ -8,9 +8,9 @@
  *   local; ids never collide.
  * - SCOPED CURRENT JUDGMENT: the continuity snapshot's currentJudgment belongs to the
  *   ACTIVE research target; a previous run's verdict must never render for a new run.
- * - HEURIST ERROR-PAYLOAD LAW: an HTTP-200 body with an embedded error object is a
- *   PROVIDER failure, never evidence (live: Caesar 402 became ev_000616 and produced a
- *   false "COMPLETE").
+ * - EMBEDDED ERROR-PAYLOAD LAW: an HTTP-200 body with an embedded error object is a
+ *   PROVIDER failure, never evidence (live: a 402 from a paid agent became ev_000616 and
+ *   produced a false "COMPLETE"). Now enforced by every keyless public adapter.
  */
 import { describe, expect, it } from "vitest";
 import { Workspace } from "../../src/domain/workspace.js";
@@ -18,8 +18,7 @@ import { mergeSnapshots } from "../../src/domain/merge.js";
 import { resetIdCounters } from "../../src/domain/ids.js";
 import { normalizedResult, type ToolResult } from "../../src/domain/tool-result.js";
 import { evidenceFromToolResult } from "../../src/domain/evidence.js";
-import { parseHeuristOutputs } from "../../src/adapters/heurist.js";
-import { TransportError } from "../../src/adapters/transports/resilience.js";
+import { embeddedErrorOf } from "../../src/adapters/public-derivatives.js";
 
 const origin = { kind: "agent" as const, detail: "test" };
 
@@ -157,21 +156,19 @@ describe("continuity judgment scoping", () => {
   });
 });
 
-describe("Heurist error-payload law", () => {
-  it("an embedded error object is a TransportError, never a parseable observation", () => {
-    expect(() =>
-      parseHeuristOutputs({ error: "API request failed: 402, message='Payment Required', url='https://api.caesar.xyz/research'" }, "caesar-research"),
-    ).toThrow(TransportError);
+describe("embedded-error-payload law", () => {
+  it("an embedded error object is detected as a provider failure, never a parseable observation", () => {
+    expect(
+      embeddedErrorOf({ error: "API request failed: 402, message='Payment Required'" }),
+    ).toContain("402");
   });
 
   it("status:error payloads are provider failures too", () => {
-    expect(() => parseHeuristOutputs({ status: "error", message: "upstream unavailable" }, "ask-heurist")).toThrow(TransportError);
+    expect(embeddedErrorOf({ status: "error", message: "upstream unavailable" })).toContain("upstream unavailable");
   });
 
-  it("legitimate data payloads still parse after the guard", () => {
-    const outputs = parseHeuristOutputs({ content: "AAPL earnings are expected November 2026" }, "caesar-research");
-    expect(outputs.length).toBe(1);
-    expect(outputs[0]!.outputClass).toBe("ANALYST_INTERPRETATION");
+  it("legitimate data payloads carry no embedded error", () => {
+    expect(embeddedErrorOf({ result: { list: [{ symbol: "BTCUSDT", openInterest: "1" }] } })).toBeUndefined();
   });
 });
 

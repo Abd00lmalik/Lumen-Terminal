@@ -14,7 +14,8 @@ import { NewsFallbackAdapter, SentimentFallbackAdapter, MacroFallbackAdapter } f
 import { BitgetSkillAdapter, type SkillDescriptor, type OutputMapping } from "./bitget-skill-adapter.js";
 import { registerEquityAdapters } from "./equity.js";
 import { MarketRegimeAdapter } from "./market-regime.js";
-import { registerHeuristAdapters } from "./heurist.js";
+import { SecEdgarAdapter } from "./sec-edgar.js";
+import { PublicDerivativesAdapter } from "./public-derivatives.js";
 import { CoinGeckoMarketDataAdapter } from "./coingecko.js";
 import { LocalKnowledgeAdapter } from "./local-knowledge.js";
 import { McpTransport } from "./transports/mcp.js";
@@ -123,6 +124,73 @@ const NEWS_MAPPING: OutputMapping = {
   narrativeClass: "ANALYST_INTERPRETATION",
   dataClass: "FACTUAL_OBSERVATION",
 };
+
+/**
+ * Keyless research-surface adapter: the capabilities the retired paid agent tier used to be
+ * the ONLY provider for, now served by the official public MCP data surface.
+ *
+ * 2026-10-05: removing Heurist left ONCHAIN_ANALYSIS, DEFI_ANALYSIS and PROJECT_RESEARCH
+ * with ZERO registered providers — the planner could still name them, which is exactly the
+ * dead-end the zero-dead-end conformance test exists to prevent. Each is served by a public,
+ * keyless MCP tool VERIFIED LIVE on market-data-mcp v1.26.0:
+ *   - ONCHAIN_ANALYSIS -> `network_status`   (ETH gas, BTC recommended fees, mempool, blocks)
+ *   - DEFI_ANALYSIS    -> `defi_analytics`  (DeFiLlama TVL/protocol/chain/fees/yields)
+ *   - PROJECT_RESEARCH -> `crypto_market`   (CoinGecko search/price/markets/trending)
+ *
+ * EPISTEMIC HONESTY (this is the important part): `network_status` is public chain
+ * telemetry, NOT the whale-tracking/exchange-reserve/token-unlock intelligence the on-chain
+ * capability is usually imagined to mean. The limitation travels with every output, and the
+ * outputs stay observation-class — a gas price is an observation, a "whale accumulation
+ thesis" is not something this surface can support at all.
+ */
+export const KEYLESS_RESEARCH_SURFACE: SkillDescriptor = {
+  providerId: "bitget/keyless-research-surface",
+  capabilities: ["ONCHAIN_ANALYSIS", "DEFI_ANALYSIS", "PROJECT_RESEARCH"],
+  limitations: [
+    "ONCHAIN_ANALYSIS here means public chain telemetry (gas, fees, mempool, recent blocks) only — NOT whale tracking, exchange reserves, token unlocks or ETF flows, none of which this surface observes",
+    "DEFI_ANALYSIS is DeFiLlama aggregates (TVL/fees/yields), not protocol-level internals or positions",
+    "PROJECT_RESEARCH is public market/project metadata (price, market cap, rankings, trending), not due-diligence or team/contract analysis",
+    "a provider outage returns an honest EMPTY with the attempt trail, never an inferred figure",
+  ],
+  freshnessProfile: "marketStructure",
+  dataClasses: ["chain gas/fees/mempool", "DeFi TVL/fees/yields", "project market metadata"],
+};
+
+const KEYLESS_RESEARCH_MAPPING: OutputMapping = {
+  narrativeClass: "INFERENCE",
+  dataClass: "QUANTITATIVE_OBSERVATION",
+};
+
+/** Default tool/action per capability — every value a VERIFIED public enum member. */
+const KEYLESS_RESEARCH_TOOLS: Readonly<Record<string, { toolName: string; action: string }>> = {
+  ONCHAIN_ANALYSIS: { toolName: "network_status", action: "eth_gas" },
+  DEFI_ANALYSIS: { toolName: "defi_analytics", action: "tvl_rank" },
+  PROJECT_RESEARCH: { toolName: "crypto_market", action: "trending" },
+};
+
+/** Adapters that close the three dead ends the paid agent tier used to cover. */
+export function createKeylessResearchSurfaceAdapters(transport: McpTransport): BitgetSkillAdapter[] {
+  return Object.entries(KEYLESS_RESEARCH_TOOLS).map(([capability, { toolName, action }]) =>
+    new BitgetSkillAdapter({
+      descriptor: { ...KEYLESS_RESEARCH_SURFACE, providerId: `bitget/keyless-research-surface`, capabilities: [capability] },
+      transport,
+      toolFor: (requested) =>
+        requested === capability
+          ? {
+              toolName,
+              buildArgs: (params) => {
+                const p = params as Record<string, unknown>;
+                // The engine plans CAPABILITIES, not tool args; an unset action must still
+                // produce a valid request, so each capability carries a sane verified default.
+                const extra = actionArgs(["action", "protocol", "chain", "limit", "query", "page", "per_page"])(params);
+                return { ...extra, action: (p.action as string | undefined) ?? action };
+              },
+            }
+          : undefined,
+      outputMapping: KEYLESS_RESEARCH_MAPPING,
+    }),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Concrete MCP-backed adapters (tool names CONFIRMED in FINDINGS.md §2/§6)
@@ -561,6 +629,10 @@ export function createBitgetAdapterSet(options: BitgetAdapterSetOptions = {}): {
   registry.register(createSentimentAnalystAdapter(mcp));
   registry.register(createNewsBriefingAdapter(mcp));
   registry.register(new TechnicalAnalysisAdapter(rest, mcp));
+  // Keyless research surface (2026-10-05): the three research domains the retired paid agent
+  // tier was the sole provider for. Registered here, at the PRIMARY priority, because these
+  // tools are public and free — they are not a fallback, they are the answer.
+  for (const adapter of createKeylessResearchSurfaceAdapters(mcp)) registry.register(adapter);
   // G1 (vendor selected 2026-09-15): real historical OHLCV; Bitget REST primary,
   // Binance Vision public mirror fallback. Tests may override via options.historical.
   registry.register(options.historical ?? new G1HistoricalDataAdapter(rest, new RestTransport({ baseUrl: BINANCE_VISION_BASE_URL })));
@@ -592,13 +664,20 @@ export function createBitgetAdapterSet(options: BitgetAdapterSetOptions = {}): {
   if (options.fallbacks !== false) {
     registry.register(new MarketRegimeAdapter(), 150);
   }
-  // Heurist Mesh (2026-09-18): specialized agent/data-provider fallbacks at priority 300 —
-  // options chains (the only working source), technical snapshots, SEC filings, FRED macro,
-  // funding/OI. Credit-based service: serves only when the direct chain cannot; lineage
-  // (upstreamSource) is preserved so the same upstream never double-counts as corroboration.
-  // Gated by the same flag as the other fallback tiers (primary-only wiring law in tests).
+  // Keyless replacements for the two capabilities Heurist Mesh used to serve, now that the
+  // credit-based Mesh agent tier is removed from the research path entirely (2026-10-05).
+  // Both are PUBLIC data (no account, no API key, no credits) and sit in the same low-priority
+  // failover tier Heurist occupied, so capability availability is unchanged from the engine's
+  // point of view while the per-run credit cost drops to zero.
+  //  - DERIVATIVES_ANALYSIS (funding rate / open interest / long-short): the Bitget MCP's own
+  //    `derivatives_sentiment` tool is broken (empty `{"error":""}` after ~15s on every
+  //    action, verified twice), so this reads the public exchange REST API directly and
+  //    degrades to an honest EMPTY rather than an inferred number.
+  //  - SOURCE_VALIDATION / EQUITY_FUNDAMENTALS: SEC EDGAR needs no credential at all (only an
+  //    identifying User-Agent). Bitget exposes no SEC surface, so EDGAR is the whole answer.
   if (options.fallbacks !== false) {
-    registerHeuristAdapters(registry);
+    registry.register(new PublicDerivativesAdapter(), 300);
+    registry.register(new SecEdgarAdapter(), 300);
   }
 
   // Local knowledge (trader-owned workspace context) is a first-class capability served by

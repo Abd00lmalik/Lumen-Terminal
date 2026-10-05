@@ -481,7 +481,7 @@ export async function runFlow(
 
   // 4. Deep-research backstop (engine-owned): INSUFFICIENT_EVIDENCE or a mechanical budget
   // stop means the direct chain could not answer THIS question. Before concluding, fire the
-  // last-resort tier (Caesar/AskHeurist, then Exa) once with the EXACT objective plus the
+  // last-resort tier (bounded retrieval) once with the EXACT objective plus the
   // REQUIREMENT-SCOPED retrieval brief — same law as the adaptive loop. Evidence relevance,
   // not provider existence, decides sufficiency.
   const budgetStopped = stoppedBecause === "TIME_BUDGET_EXHAUSTED" || stoppedBecause === "ROUND_BUDGET_EXHAUSTED";

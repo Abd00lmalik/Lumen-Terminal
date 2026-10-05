@@ -282,11 +282,32 @@ export { RESEARCH_PLAN_SCHEMA_DESC, ADAPTIVE_DECISION_SCHEMA_DESC };
 export const PLANNER_CAPABILITIES: readonly string[] = [
   "MARKET_DATA_ANALYSIS", "TECHNICAL_ANALYSIS", "SENTIMENT_ANALYSIS", "NEWS_ANALYSIS", "MACRO_ANALYSIS",
   "DERIVATIVES_ANALYSIS", "HISTORICAL_COMPARISON", "FALSIFICATION", "SOURCE_VALIDATION", "WEB_SEARCH",
-  "CROSS_DOMAIN_SYNTHESIS", "ONCHAIN_ANALYSIS", "DEFI_ANALYSIS", "PROJECT_RESEARCH",
-  "EQUITY_MARKET_DATA", "EQUITY_FUNDAMENTALS", "EARNINGS_CALENDAR", "OPTIONS_CHAIN_ANALYSIS", "EQUITY_NEWS",
+  "ONCHAIN_ANALYSIS", "DEFI_ANALYSIS", "PROJECT_RESEARCH",
+  "EQUITY_MARKET_DATA", "EQUITY_FUNDAMENTALS", "EARNINGS_CALENDAR", "EQUITY_NEWS",
   "LOCAL_KNOWLEDGE_RETRIEVAL",
   "CRYPTO_MARKET_DATA", "COMMODITY_MARKET_DATA", "FX_MARKET_DATA",
 ];
+/*
+ * REMOVED FROM THE PLANNER VOCABULARY (2026-10-05), with the reasoning kept rather than
+ * the name quietly dropped:
+ *
+ * - CROSS_DOMAIN_SYNTHESIS was a "buy a generated answer from a paid research agent"
+ *   capability (Heurist Caesar/AskHeurist, 10 credits a call). It was the last capability
+ *   whose only provider COST MONEY PER CALL, and it was being invoked as an automatic
+ *   last-resort backstop — which is how the credit budget was destroyed. With the Mesh tier
+ *   gone there is deliberately NO provider: a research run may never purchase an answer
+ *   instead of gathering evidence, so the capability can no longer be planned at all.
+ *   Declaring it here without a provider is precisely the dead-end the conformance test
+ *   forbids, so it leaves the vocabulary instead.
+ *
+ * - OPTIONS_CHAIN_ANALYSIS has no keyless source anywhere in the stack. Bitget's public
+ *   surface carries no options data, the market-data MCP exposes none, and no other
+ *   existing provider covers it. It is removed for the same reason: the planner must not
+ *   be able to request a capability that can only ever come back empty.
+ *
+ * Both names remain valid `CapabilityName` values in the domain vocabulary, so either can
+ * be reintroduced the day a real provider exists — with a provider, never before.
+ */
 /**
  * The planner's capability vocabulary lives here and ONLY here; the zero-dead-end
  * conformance test imports it to prove every name below resolves to a registered provider.
@@ -296,8 +317,8 @@ export const PLAN_SYSTEM = [
   `The system executes capabilities on your behalf and returns validated evidence. Available capabilities: ${PLANNER_CAPABILITIES.join(", ")}.
   Plan rules:`,
   "- Request CAPABILITIES. Never name providers or vendor tools.",
-  "- Crypto assets: CRYPTO_MARKET_DATA (spot/derivatives price, volume, funding) or MARKET_DATA_ANALYSIS, TECHNICAL_ANALYSIS, SENTIMENT_ANALYSIS, NEWS_ANALYSIS, MACRO_ANALYSIS, DERIVATIVES_ANALYSIS (funding/open interest), HISTORICAL_COMPARISON, FALSIFICATION, SOURCE_VALIDATION or WEB_SEARCH (same discovery capability), CROSS_DOMAIN_SYNTHESIS.",
-  "- Equities and listed instruments (stocks, ETFs): EQUITY_MARKET_DATA (price, OHLCV, volume), EQUITY_FUNDAMENTALS (revenue, margins, valuation, shares), EARNINGS_CALENDAR (next/last earnings dates and consensus estimates), OPTIONS_CHAIN_ANALYSIS (options chains, only when options are explicitly relevant), EQUITY_NEWS (company headlines), plus the shared NEWS_ANALYSIS / MACRO_ANALYSIS / HISTORICAL_COMPARISON / FALSIFICATION / SOURCE_VALIDATION capabilities.",
+  "- Crypto assets: CRYPTO_MARKET_DATA (spot/derivatives price, volume, funding) or MARKET_DATA_ANALYSIS, TECHNICAL_ANALYSIS, SENTIMENT_ANALYSIS, NEWS_ANALYSIS, MACRO_ANALYSIS, DERIVATIVES_ANALYSIS (funding/open interest), HISTORICAL_COMPARISON, FALSIFICATION, SOURCE_VALIDATION or WEB_SEARCH (same discovery capability), ONCHAIN_ANALYSIS, DEFI_ANALYSIS, PROJECT_RESEARCH.",
+  "- Equities and listed instruments (stocks, ETFs): EQUITY_MARKET_DATA (price, OHLCV, volume), EQUITY_FUNDAMENTALS (revenue, margins, valuation, shares), EARNINGS_CALENDAR (next/last earnings dates and consensus estimates), EQUITY_NEWS (company headlines), plus the shared NEWS_ANALYSIS / MACRO_ANALYSIS / HISTORICAL_COMPARISON / FALSIFICATION / SOURCE_VALIDATION capabilities.",
   "- Commodities (gold, silver, oil), FX pairs, indexes (SPX, VIX, DXY) and broad cross-asset questions: COMMODITY_MARKET_DATA (gold/silver/oil/copper price, OHLCV) and FX_MARKET_DATA (EUR/USD, USD/JPY and other pairs) carry market data when a concrete tradable target is named; NEWS_ANALYSIS and MACRO_ANALYSIS carry the narrative. Do NOT request asset-class market-data capabilities when no target is resolvable; a capability without a target only produces provider-failure noise.",
   "- On-chain and DeFi questions (wallet/token activity, protocol TVL, L2 metrics, DEX structure): ONCHAIN_ANALYSIS (address/holder/trade observations where an address is resolvable) and DEFI_ANALYSIS (protocol/chain/L2 metrics); PROJECT_RESEARCH covers project descriptions, DEX pair discovery, and narrative/trending context.",
   "- Broad synthesis questions that may span domains: CROSS_DOMAIN_SYNTHESIS is available as a deep-research capability of last resort; prefer specific capabilities first. WEB_SEARCH (bounded source discovery) is available when narrative or primary-source hunting matters.",
@@ -982,7 +1003,7 @@ export async function runAdaptiveResearch(
   // Deep-research fallback (engine-owned, never planner-dependent): when the loop concluded
   // with INSUFFICIENT_EVIDENCE, the direct capability chain failed the question — whether or
   // not unrelated archived evidence happened to be gathered along the way. Before concluding,
-  // fire the last-resort deep-research tier (Caesar/AskHeurist, then Exa search) ONCE with
+  // fire the last-resort deep-research tier (bounded web/primary-source retrieval) ONCE with
   // the EXACT question and await their response. The model never decides this (it does not
   // know provider coverage); the engine knows when the direct chain could not answer. Outputs
   // remain classified by the evidence layer (agent analysis, never direct observation).
@@ -996,9 +1017,12 @@ export async function runAdaptiveResearch(
     options.registry.resolve("CROSS_DOMAIN_SYNTHESIS").length > 0 &&
     hasWaveBudget(options.deadlineMs, at, options.taskWindowMs ?? RESEARCH_TASK_WINDOW_MS);
   if (deepResearchFired) {
-    // Tier 1: research agents (Caesar -> AskHeurist via the registry's provider chain).
-    // Tier 2: bounded Exa search when the research agents returned nothing usable. The
-    // engine awaits the agent response; its findings are ingested as classified evidence
+    // Tier 1: any registered deep-research provider (after the credit-based Mesh agent tier was
+    // removed 2026-10-05, `CROSS_DOMAIN_SYNTHESIS` has no generated-analysis provider, so this
+    // list resolves to web/primary-source retrieval only and the whole backstand is skipped by
+    // the `resolve(...).length > 0` guard above — which is the intended state: a run must never
+    // buy a generated "answer" from a paid agent to cover an evidence gap).
+    // The engine awaits the agent response; its findings are ingested as classified evidence
     // (agent analysis / secondary reporting, never upgraded to direct observation).
     const deepRound: RoundExecution[] = [];
     const deepCapabilities: { capability: "CROSS_DOMAIN_SYNTHESIS" | "WEB_SEARCH"; label: string }[] = [

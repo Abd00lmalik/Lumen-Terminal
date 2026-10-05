@@ -25,24 +25,29 @@ Verification labels: **VERIFIED LIVE** (real endpoint probed from this environme
 | EQUITY_NEWS | equities | equity/yahoo-headlines (per-ticker RSS) | registry-level: any NEWS_ANALYSIS provider | headlines | minutes | feed archive | none | VERIFIED LIVE | secondary reporting; company announcements need primary-source confirmation |
 | EVENT_RECONSTRUCTION | causal | engine-composed (news + timeline capabilities) | - | derived | - | - | - | PARTIAL | composed from news capabilities; no dedicated event DB |
 | CAUSAL_INVESTIGATION | causal | engine-composed | - | derived | - | - | - | PARTIAL | causality is never asserted from correlation; LUI boundary |
-| ONCHAIN_ANALYSIS | on-chain | none | none | - | - | - | - | UNAVAILABLE | no real on-chain provider; proxies stay PROXY_EVIDENCE (never labeled on-chain) |
-| DERIVATIVES_ANALYSIS | derivatives | none (crypto, exchange-native) | heurist/FundingRateAgent (priority 300; Binance USDⓈ-M funding + OI; requires HEURIST_API_KEY) | funding, open interest | minutes | agent-limited | Heurist credits | PARTIAL | Bitget-primary positioning views remain UNAVAILABLE; Heurist data is Binance-sourced (provenance states this); liquidations still have no provider and are never invented |
+| ONCHAIN_ANALYSIS | on-chain | bitget/keyless-research-surface (`network_status`; no credential) | none | chain gas, BTC fees, mempool, recent blocks | seconds | public chain | none | VERIFIED LIVE | PUBLIC CHAIN TELEMETRY ONLY — not whale tracking, exchange reserves, token unlocks or ETF flows; those remain UNAVAILABLE and are never proxied into a claim |
+| DERIVATIVES_ANALYSIS | derivatives | fallback/public-derivatives (public exchange REST; no credential) | none | funding rate, open interest, long/short account ratio | seconds | exchange API | none | VERIFIED DETERMINISTICALLY | venue-specific (the exchange is part of the observation); long/short counts ACCOUNTS not notional; liquidations still have no provider and are never invented. The Bitget MCP `derivatives_sentiment` tool is BROKEN (empty `{"error":""}` after ~15s on every action) and is not relied on |
 | FALSIFICATION | thesis challenge | engine-composed (news + falsification planning) | - | derived | - | - | - | PARTIAL | disconfirming evidence sought via NEWS/HISTORICAL capabilities |
-| CROSS_DOMAIN_SYNTHESIS | synthesis | engine-composed | - | derived | - | - | - | PARTIAL | Flow 6 composition; no new data source |
-| OPTIONS_CHAIN_ANALYSIS | options | heurist/YahooFinanceAgent (options_chain tool; requires HEURIST_API_KEY) | none | strikes, prices, volume, OI, IV where present | intraday | chain snapshot | Heurist credits | UNVERIFIED LIVE | adapter + registry chain VERIFIED DETERMINISTICALLY; direct Yahoo options API is BLOCKED-EXTERNAL (401), so Heurist is the only viable source; without HEURIST_API_KEY the capability returns honest UNAVAILABLE; same Yahoo upstream as the equity adapter (never counted as independent corroboration) |
-| MACRO_ANALYSIS (FRED series) | macro | fallback/world-bank (priority 200) | heurist/FredMacroAgent (priority 300; CPI/rates/labor/credit/growth + release calendar + ALFRED vintage; requires HEURIST_API_KEY) | series observations | release-cycle | provider archive | Heurist credits | UNVERIFIED LIVE | World Bank fallback VERIFIED LIVE; FRED agent adds US series semantics and vintage history; observation dates are FRED-reported |
-| SOURCE_VALIDATION (SEC filings) | equities/primary-source | g2/web-retrieval | heurist/SecEdgarAgent (priority 300; filing timelines, XBRL facts, insider/13F; requires HEURIST_API_KEY) | filing metadata + links | as-filed | EDGAR archive | Heurist credits | UNVERIFIED LIVE | the filing itself is the primary source; Heurist's summary is secondary treatment; filing URLs preserved as provenance |
+| CROSS_DOMAIN_SYNTHESIS | synthesis | none (deliberately) | none | - | - | - | - | WITHDRAWN | Its only providers purchased GENERATED research answers at 10 credits/call and were invoked as an automatic backstop. A run must never buy an answer instead of gathering evidence, so this is unreachable by design; the deep-research backstops self-gate and never fire |
+| OPTIONS_CHAIN_ANALYSIS | options | none | none | - | - | - | - | UNAVAILABLE | NO keyless source exists anywhere in the stack. Removed from the planner vocabulary 2026-10-05 so the planner cannot request a capability that can only come back empty |
+| MACRO_ANALYSIS (FRED series) | macro | fallback/world-bank (priority 200) | bitget-signal/macro-analyst (`rates_yields`, `macro_indicators`) | series observations, yield curve, cross-asset correlation | minutes-hours | provider archive | none | VERIFIED LIVE | Bitget MCP macro tools answer keyless and cover US rates/curve/correlation directly, superseding the retired FRED agent; World Bank remains the slow-moving fallback |
+| SOURCE_VALIDATION (SEC filings) | equities/primary-source | g2/web-retrieval | fallback/sec-edgar (SEC EDGAR REST; no credential — User-Agent only) | filing index records with EDGAR URLs | days-to-weeks | EDGAR archive | none | VERIFIED LIVE | VERIFIED LIVE 2026-10-05 (`company_tickers.json`, `submissions/CIK….json`, full-text search all HTTP 200 with real data). The filing plus its URL is the primary source; EDGAR's own metadata is a fact ABOUT the filing, never a fact ABOUT the company |
 
-## Heurist Mesh
+## Paid agent tier — removed 2026-10-05
 
-Heurist Mesh agents (`src/adapters/heurist.ts`) register at priority 300 as the LAST tier:
-credit-based paid service, so direct keyless providers always serve first. All Heurist
-outputs carry `upstreamSource` lineage (yahoo-finance / sec-edgar / fred / binance-usdm)
-so the same upstream served via Heurist and directly can never count as independent
-corroboration (no-double-count law). Agent prose is classified ANALYST_INTERPRETATION
-with an interpretation basis; it can never self-upgrade to observation. Full research:
-docs/integrations/heurist.md.
+The Heurist Mesh agent tier (`src/adapters/heurist.ts`, deleted) registered **12 adapters
+across 9 capabilities** at priority 300 as the last-resort tier. It was removed because a
+single research question could invoke it several times — one independent fall-through per
+requested capability — and its `CROSS_DOMAIN_SYNTHESIS` providers *purchased generated
+research answers* at 10 credits/call while being wired as an automatic backstop. The observed
+`HTTP 402 {"detail":"Insufficient credits"}` was the symptom; the per-run cost multiplier was
+the cause, and it would recur with any paid agent in the same chain position.
 
+Every capability it served now has a **free, keyless** source, and two capabilities with no
+source at all (`CROSS_DOMAIN_SYNTHESIS`, `OPTIONS_CHAIN_ANALYSIS`) were removed from the
+planner vocabulary rather than left as dead ends. See
+docs/integrations/provider-selection.md for the full migration matrix and the live
+verification results.
 ## Provider reachability
 
 Tracked per provider as `LOCAL_ONLY | PRODUCTION_REACHABLE | PRODUCTION_BLOCKED | UNKNOWN`.

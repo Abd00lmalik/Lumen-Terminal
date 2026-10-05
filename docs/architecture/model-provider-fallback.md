@@ -73,7 +73,7 @@ state/counters for diagnostics. No distributed state, no background processes.
   `{ attemptedModels: [{providerId, modelId, failureType, failureReason}], selectedModel }`.
   Primary-only responses are untouched.
 - `/api/health` reports credential PRESENCE booleans only (never values):
-  `geminiKeyDefined/NonEmpty`, `groqKeyDefined/NonEmpty`, `heuristKeyDefined/NonEmpty`.
+  `geminiKeyDefined/NonEmpty`, `groqKeyDefined/NonEmpty`.
 - Keys travel only in TLS-protected auth headers inside their provider adapters; they
   never appear in logs, errors, snapshots, provenance, or test output.
 
@@ -84,7 +84,6 @@ state/counters for diagnostics. No distributed state, no background processes.
 | `GEMINI_API_KEY` | yes (primary) | Gemini access; server-side only |
 | `GROQ_API_KEY` | optional | Enables the fallback chain; absent = Gemini-only |
 | `GROQ_MODEL` | optional | Groq model override |
-| `HEURIST_API_KEY` | optional | Heurist Mesh data-provider fallbacks (separate concern; see docs/integrations/heurist.md) |
 
 ## 7. Test coverage (VERIFIED DETERMINISTICALLY)
 

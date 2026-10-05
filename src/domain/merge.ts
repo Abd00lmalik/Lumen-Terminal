@@ -58,6 +58,32 @@ export function mergeSnapshots(local: WorkspaceSnapshot, remote: WorkspaceSnapsh
   );
   for (const r of local.researchResponses ?? []) mergedResponses.set(r.researchId, r.response);
 
+  // CURRENT INVESTIGATION (working-state pointer, single-trader workbench).
+  //
+  // This pointer was previously omitted from the merged result on the theory that "which
+  // thread the trader is in" is local state and one instance must not drag another into it.
+  // That reasoning is sound for a MULTI-TRADER system and wrong for this one: omitting the
+  // field does not make it instance-local, it makes it UNREACHABLE. Every persisted write
+  // goes through this merge, so the pointer was dropped on EVERY production save — after the
+  // first completed run the restored workspace had no current investigation, so no
+  // investigation reported `isCurrent`, so the UI read the thread as absent and showed
+  // "Research" + "No active research" over a live investigation with completed runs.
+  // Measured: local `inv_000001` → merged `undefined` → every `isCurrent` false.
+  //
+  // The pointer is resolved the same way as every other selection field: the LOCAL side wins
+  // when it names an investigation that exists in the union, because the local instance is
+  // the one that just acted on the trader's behalf (the write that triggered this merge).
+  // Otherwise the remote pointer is kept if its investigation survives the union. A pointer
+  // naming an investigation neither side still holds is dropped rather than resurrected into
+  // a dangling thread — this can only happen if that investigation was deleted.
+  const mergedInvestigationIds = new Set(mergeById(local.investigations ?? [], remote.investigations ?? []).map((i) => i.id));
+  const currentInvestigationId =
+    local.currentInvestigationId !== undefined && mergedInvestigationIds.has(local.currentInvestigationId)
+      ? local.currentInvestigationId
+      : remote.currentInvestigationId !== undefined && mergedInvestigationIds.has(remote.currentInvestigationId)
+        ? remote.currentInvestigationId
+        : undefined;
+
   // Active-thesis selection: prefer the side whose chosen thesis exists in the union.
   const mergedTheses = mergeById(local.theses, remote.theses);
   const thesisIds = new Set(mergedTheses.map((t) => t.id));
@@ -102,10 +128,12 @@ export function mergeSnapshots(local: WorkspaceSnapshot, remote: WorkspaceSnapsh
     // CONVERSATION MERGE: investigations are append-only threads (union by id, the more-revised
     // object wins); turns are immutable records (union by id). Merging by ARRAY CONCAT would
     // duplicate every turn on each multi-instance merge — the exact bug Phase G hit with thesis
-    // assessments. `currentInvestigationId` is deliberately NOT merged: which thread the trader
-    // is in is local working state, and one instance must not drag another into its thread.
+    // assessments. `currentInvestigationId` IS merged (see the CURRENT INVESTIGATION block
+    // above): it is a single-trader workbench pointer, and dropping it on write made every
+    // persisted investigation un-current after a reload.
     investigations: mergeById(local.investigations ?? [], remote.investigations ?? []),
     conversationTurns: mergeById(local.conversationTurns ?? [], remote.conversationTurns ?? []),
+    ...(currentInvestigationId !== undefined ? { currentInvestigationId } : {}),
     ...(activeThesisId !== undefined ? { activeThesisId } : {}),
     ...(mergedResponses.size > 0
       ? { researchResponses: [...mergedResponses.entries()].map(([researchId, response]) => ({ researchId, response })) }

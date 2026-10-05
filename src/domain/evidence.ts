@@ -189,7 +189,7 @@ export function evidenceFromToolResult(
       toolResultRef: result.id,
       // Provenance-derived source identity/kind for the evidence-quality assessment
       // (research contract §evidence quality): a requirement's sourceDiversity counts DISTINCT
-      // origins, and G2/Heurist payloads that declare publisher/upstream are honored so the
+      // origins, and G2 payloads that declare publisher/upstream are honored so the
       // same upstream reached via different paths is never counted as independent corroboration.
       sourceProvider: sourceProviderForOutput(result, output),
       sourceType: sourceTypeForOutput(output),

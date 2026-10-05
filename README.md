@@ -108,7 +108,7 @@ flowchart TD
     FLOW[Flow requests a capability<br/>never names a provider] --> REG[Capability Registry<br/>priority-ordered providers]
     REG --> P1[Primary: Bitget MCP/REST · Yahoo direct]
     REG --> P2[Fallback: news RSS · Fear&Greed · World Bank · Stooq]
-    REG --> P3[Last tier: Heurist Mesh agents<br/>options chains · funding/OI · SEC · FRED<br/>credit-based, upstream lineage preserved]
+    REG --> P3[Last tier: keyless public sources<br/>SEC EDGAR · public exchange REST<br/>no credential, no credits]
     P1 -->|typed failure OR empty coverage| REG
     P2 -->|serves| TR[TOOL_RESULT + attemptedProviders trail<br/>+ fallback limitation]
     P3 -->|serves| TR3[TOOL_RESULT + upstreamSource lineage<br/>no double-counting with direct providers]
@@ -158,7 +158,7 @@ flowchart LR
 - **Bitget (M1/M2)**; MCP + REST transports with throttling, bounded retry, freshness, and `TOOL_RESULT` normalization. Live-verified: real technical-analysis evidence (RSI/MACD/Bollinger) with conflicting interpretations preserved as genuine disagreement. Live-verified from production Vercel: real kline-derived technical evidence flowing end to end.
 - **G1 historical data**; engine-selected `HistoricalQuery` (symbol, metric, window, interval) served by **Bitget REST when reachable**, with **Binance Vision** (`data-api.binance.vision`, Binance's official keyless market-data mirror) as the live fallback; the serving venue is recorded in provenance. OHLCV is real and multi-year; funding/open-interest/liquidations are honestly `UNAVAILABLE` (mirrored nowhere reachable; never fabricated).
 - **G2 web/primary sources**; bounded retrieval with URL validation (SSRF-safe), HTML-to-text extraction, source classification (**primary / secondary / commentary / community**), and source/evidence separation: a web page is a *source*, not automatically evidence. Repeated syndication of one origin is not counted as independent corroboration.
-- **Heurist Mesh agents** (optional, `HEURIST_API_KEY`); specialized data-provider fallbacks registered at the lowest registry tier: Yahoo options chains, Binance funding/OI, SEC EDGAR filings, FRED macro series. Every output carries `upstreamSource` lineage so the same upstream served via Heurist and directly is never double-counted as corroboration; agent-generated prose is classified as external analysis, never as direct observation. See `docs/integrations/heurist.md`.
+- **Keyless public data** (no account, API key, secret or passphrase required): the Bitget market-data MCP surface (verified live: 19 tools, HTTP 200, no auth), **SEC EDGAR** for primary-source filings, and **public exchange REST** for funding rate / open interest / long-short. Every capability in the research path is now served by a free source: the credit-based agent tier that multiplied cost per question was removed on 2026-10-05. See `docs/integrations/provider-selection.md`.
 
 ### Provider fallback (registry-owned)
 

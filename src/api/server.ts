@@ -261,8 +261,6 @@ export async function buildApi(deps: ApiDeps): Promise<{ app: FastifyInstance; r
       geminiKeyNonEmpty: process.env.GEMINI_API_KEY !== undefined && process.env.GEMINI_API_KEY !== "",
       groqKeyDefined: process.env.GROQ_API_KEY !== undefined,
       groqKeyNonEmpty: process.env.GROQ_API_KEY !== undefined && process.env.GROQ_API_KEY !== "",
-      heuristKeyDefined: process.env.HEURIST_API_KEY !== undefined,
-      heuristKeyNonEmpty: process.env.HEURIST_API_KEY !== undefined && process.env.HEURIST_API_KEY !== "",
     },
     // Phase F: identity configuration PRESENCE only (never values). Makes "the deployment
     // was built without its auth env" diagnosable without exposing anything secret.

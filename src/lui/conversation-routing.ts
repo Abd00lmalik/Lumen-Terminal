@@ -123,6 +123,47 @@ function statedSubject(message: string): string | undefined {
 }
 
 /**
+ * A DEFINITE BACK-REFERENCE: the trader's words point at something this conversation already
+ * established, without naming a new subject of their own.
+ *
+ * THE PRODUCTION FAILURE THIS ENCODES: after "Why did Bitcoin move down today?" answered with
+ * the liquidity explanation, the follow-up "What evidence would most strongly support or
+ * weaken the liquidity explanation?" was routed as a NEW investigation. It contains no anaphor
+ * the short-turn test could see, because it is a thirteen-word, fully-formed question — and
+ * `isAnaphoricQuestion` only fires at <=6 words. The phrase "the liquidity explanation" is a
+ * reference to the PRIOR RUN's leading explanation; reading it as a self-contained question
+ * silently dropped a completed investigation and every run in it.
+ *
+ * The test is therefore on the REFERENCE itself, not on the length of the sentence. It matches
+ * a definite noun phrase built on a demonstrative or possessive determiner ("the/that/this/
+ * those ... explanation|view|mechanism|reading|thesis|hypothesis|story|answer|cause") and on
+ * explicit references to earlier turns ("the previous answer", "what you said", "your last
+ * finding").
+ *
+ * Deliberately NOT matched: any phrase naming a real asset or instrument. That is the
+ * topic-switch law's territory and it runs FIRST — a turn that says "the Ethereum thesis is
+ * wrong" is a topic switch, not a back-reference, and must never be captured by this rule.
+ */
+const BACK_REFERENCE_DEFERRENT =
+  /\b(?:the|that|this|those|these|your|our|my)\s+(?:liquidity\s+|previous\s+|prior\s+|earlier\s+|last\s+|original\s+|leading\s+|main\s+)?(?:explanation|view|mechanism|reading|thesis|hypothesis|story|answer|conclusion|narrative|reasoning|account|logic)\b/i;
+
+/** An explicit pointer at earlier conversational turns rather than at a new subject. */
+const BACK_REFERENCE_TURN =
+  /\b(?:what\s+you\s+said|as\s+you\s+said|the\s+previous\s+(?:answer|run|research|response|question)|the\s+last\s+(?:answer|run|run's|response)|your\s+last\s+(?:answer|finding)|earlier\s+(?:turn|answer|run))\b/i;
+
+/**
+ * Does this turn refer back to what the conversation already established, at ANY length?
+ *
+ * Used IN ADDITION TO the short-turn anaphora test, never instead of it: a bare "why?" is
+ * still the clearest follow-up there is, and a long question can still be a back-reference.
+ * Callers must have already run the topic-switch test, because a named new subject outranks
+ * any back-reference reading.
+ */
+export function referencesPriorFindings(message: string): boolean {
+  return BACK_REFERENCE_DEFERRENT.test(message) || BACK_REFERENCE_TURN.test(message);
+}
+
+/**
  * TOPIC-SWITCH LAW: a turn that names a subject the current investigation is NOT about does not
  * silently continue that investigation.
  *
@@ -265,7 +306,26 @@ export function routeConversation(input: RouteInput): ConversationRoute {
     };
   }
 
-  // 6. Conversational defaults: with a live thread, a short or referential turn is understood
+  // 6. DEFINITE BACK-REFERENCE inside a live thread, at ANY length. Deliberately AFTER the
+  //    topic-switch test: "the Ethereum explanation is wrong" names a subject and is a switch,
+  //    while "the liquidity explanation" names none and is a reference to what this thread
+  //    already established. A fully-formed question can be a follow-up; sentence length is
+  //    not evidence of independence. It classifies as FALSIFICATION when it asks what would
+  //    support OR weaken the prior reading, because that is a counterevidence question about
+  //    this conversation's own finding, not a fresh research question.
+  if (hasThread && referencesPriorFindings(message)) {
+    const challenges = FALSIFICATION.test(message) || /\b(?:support|weaken|undermine|confirm|validate)\w*\b/i.test(message);
+    return {
+      action: "CONTINUE",
+      intent: challenges ? "FALSIFICATION" : "FOLLOW_UP",
+      continuedInvestigation: true,
+      reason: challenges
+        ? "the turn refers back to what this investigation established and asks what would support or weaken it"
+        : "the turn refers back to what this investigation established",
+    };
+  }
+
+  // 7. Conversational defaults: with a live thread, a short or referential turn is understood
   //    against it; without one, the same words are simply a new question.
   if (hasThread && isAnaphoricQuestion(message)) {
     const deeper = DEEPER.test(message);
@@ -287,7 +347,7 @@ export function routeConversation(input: RouteInput): ConversationRoute {
     };
   }
 
-  // 7. No thread, or a self-contained question: start a new investigation.
+  // 8. No thread, or a self-contained question: start a new investigation.
   return {
     action: "START",
     intent: "NEW_INVESTIGATION",

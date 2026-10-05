@@ -6,7 +6,7 @@
  *   one registered provider. This is the architectural guard: adding a capability to the
  *   planner prompts without a provider fails HERE, deterministically — "no provider
  *   registered for capability X" can never reach a user for a planned capability.
- * - EXTENDED HEURIST TIER: ONCHAIN_ANALYSIS, DEFI_ANALYSIS, PROJECT_RESEARCH, WEB_SEARCH
+ * - EXTENDED RESEARCH TIERS: ONCHAIN_ANALYSIS, DEFI_ANALYSIS, PROJECT_RESEARCH, WEB_SEARCH
  *   all resolve through the generic registry (no Flow→provider hardcoding).
  * - EPISTEMIC HONESTY: search output stays secondary; on-chain observations carry upstream
  *   lineage; subjectless tools (L2Beat, TrendingToken) never fabricate a subject.
@@ -35,20 +35,24 @@ describe("zero-dead-end vocabulary conformance", () => {
     expect(unresolved, `planner names these capabilities but NO provider is registered: ${unresolved.join(", ")}`).toEqual([]);
   });
 
-  it("extended Heurist research domains resolve through the generic registry", () => {
+  it("extended research domains resolve through the generic registry", () => {
     const registry = fullRegistry();
+    // The commercial search-agent tier was removed with Heurist (2026-10-05). These domains
+    // are served by the keyless Bitget MCP surface (crypto_market / dex_market /
+    // defi_analytics / network_status / news_feed), so they must still resolve — the removal
+    // must not have left the planner naming a capability no provider serves.
     for (const capability of ["ONCHAIN_ANALYSIS", "DEFI_ANALYSIS", "PROJECT_RESEARCH", "WEB_SEARCH"] as const) {
       const providers = registry.resolve(capability);
       expect(providers.length, capability).toBeGreaterThan(0);
-      expect(providers.some((p) => p.adapter.providerId.startsWith("heurist/")), `${capability} should have a Heurist-tier provider`).toBe(true);
+      expect(providers.some((p) => p.adapter.providerId.startsWith("heurist/")), `${capability} must NOT resolve to a removed Heurist provider`).toBe(false);
     }
   });
 
-  it("WEB_SEARCH prefers G2 bounded discovery over commercial search agents", () => {
+  it("WEB_SEARCH prefers G2 bounded discovery and serves the remaining chain keylessly", () => {
     const registry = fullRegistry();
     const chain = registry.resolve("WEB_SEARCH").map((p) => p.adapter.providerId);
     expect(chain[0]).toBe("g2/web-retrieval");
-    expect(chain).toContain("heurist/ExaSearchAgent");
-    expect(chain).toContain("heurist/DuckDuckGoSearchAgent");
+    // No commercial/credit-based search agent may remain in the research path.
+    expect(chain.some((id) => id.startsWith("heurist/"))).toBe(false);
   });
 });
