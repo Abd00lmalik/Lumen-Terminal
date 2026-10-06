@@ -28,6 +28,7 @@ import type { CapabilityName, HistoricalQuery, HistoricalDataProvider } from "./
 import { RestTransport } from "./transports/rest.js";
 import { TransportError } from "./transports/resilience.js";
 import type { ToolOutput, ToolResultInput } from "../domain/tool-result.js";
+import { intervalTokenFor, isResolution } from "../research/resolution.js";
 
 /**
  * Capabilities G1 can satisfy once connected.
@@ -305,7 +306,10 @@ export class G1HistoricalDataAdapter implements HistoricalDataProvider {
 
   /** Fill unset query fields with capability defaults; explicit values are never overridden. */
   private withDefaults(params: Record<string, unknown>): HistoricalQuery {
-    const p = params as Partial<HistoricalQuery> & { asset?: string };
+    const p = params as Partial<HistoricalQuery> & { asset?: string; requiredResolution?: unknown };
+    // GRANULARITY: the engine asks for a resolution (HOUR/DAY/WEEK...), not a hardcoded daily
+    // bar. An explicit `interval` still wins; with neither, the historical default stays daily.
+    const requestedInterval = p.interval ?? (isResolution(p.requiredResolution) ? intervalTokenFor(p.requiredResolution) : undefined);
     // Canonical-asset law: the engine's `asset` param may be a canonical instrument symbol
     // (GC=F for gold, CL=F for crude, ^GSPC for SPX) because the same value flows to the
     // equity/capability chain. Those are OUTSIDE this crypto venue's universe: serving them
@@ -327,7 +331,7 @@ export class G1HistoricalDataAdapter implements HistoricalDataProvider {
       metric: p.metric ?? "ohlcv",
       from: p.from ?? new Date(nowMs - 3 * 365 * 86_400_000).toISOString(),
       to: p.to ?? new Date(nowMs).toISOString(),
-      ...(p.interval !== undefined ? { interval: p.interval } : { interval: "1d" }),
+      ...(requestedInterval !== undefined ? { interval: requestedInterval } : { interval: "1d" }),
     };
   }
 

@@ -45,6 +45,7 @@ import {
   type ContractViolation,
 } from "./contract-checks.js";
 import type { EvidenceQuality } from "./requirements.js";
+import { contractFor, type CanonicalFlow } from "./flow-contract.js";
 
 /**
  * CAUSAL CHAIN LINK (research contract): one link in the causal chain. Each link carries
@@ -161,6 +162,67 @@ const BANNED_OPENERS =
 /** Does the direct answer obey the question-first law? */
 export function opensWithTheAnswer(directAnswer: string): boolean {
   return !BANNED_OPENERS.test(directAnswer.trim());
+}
+
+/**
+ * MODE-AWARE ANSWER SHAPE: what the FINAL ANSWER of each research mode contains.
+ *
+ * The eight modes are not eight prompt templates — but they are also not one template. A
+ * factual reconstruction, a causal investigation, a thesis evaluation and a falsification test
+ * ask the reader to look at different things, and forcing them into one structure is how a
+ * "what happened" answer acquires drivers it was never asked about. The shape names the SECTIONS
+ * a mode's answer owes; the synthesis schema still carries them, so the answer stays readable
+ * prose rather than a raw provider payload.
+ */
+export interface AnswerShape {
+  readonly mode: CanonicalFlow | "GENERIC";
+  readonly sections: readonly string[];
+}
+
+const ANSWER_SHAPES: Readonly<Record<CanonicalFlow, readonly string[]>> = {
+  WHAT_HAPPENED: [
+    "a concise factual timeline: what moved, the observed levels, and the dated events inside the requested window, in order",
+  ],
+  WHY_IT_HAPPENED: [
+    "the observed drivers, with the evidence for each",
+    "competing explanations the same evidence is consistent with",
+    "confidence and what would change it",
+  ],
+  WHAT_COULD_AFFECT_IT: [
+    "the catalysts and risks ahead",
+    "the upcoming scheduled events and conditions",
+    "what would make one factor matter more than another",
+  ],
+  DOES_MY_THESIS_HOLD: [
+    "for each thesis condition: the condition, the evidence, its current status, and confidence",
+  ],
+  HAS_THIS_HAPPENED_BEFORE: [
+    "the historical analogues, then the similarities, then the differences, then how far the analogy applies",
+  ],
+  WHAT_DOES_ALL_INFORMATION_SAY: [
+    "the cross-domain synthesis: what the evidence across domains jointly supports, and where it conflicts",
+  ],
+  WHAT_COULD_PROVE_ME_WRONG: [
+    "specific falsification conditions, and the evidence to monitor for each",
+  ],
+  EVALUATE_WITH_MY_FRAMEWORK: [
+    "for each framework criterion: the criterion, the evidence, the assessment, and any unresolved item",
+  ],
+};
+
+/** The section structure the answer of this mode owes. */
+export function answerShapeFor(flow: CanonicalFlow | undefined): AnswerShape {
+  if (flow === undefined) return { mode: "GENERIC", sections: ["the direct answer to the question, in the question's own terms"] };
+  return { mode: flow, sections: ANSWER_SHAPES[flow] };
+}
+
+/** Prompt guidance for a mode's answer shape (never a fixed template, never a payload dump). */
+export function answerShapeGuidance(shape: AnswerShape): readonly string[] {
+  return [
+    `ANSWER SHAPE (${shape.mode}): the final answer must be structured as follows.`,
+    ...shape.sections.map((section, i) => ` ${i + 1}. ${section}`),
+    "Raw provider payloads, JSON and field names belong in traceability, never in the answer.",
+  ];
 }
 
 export const ANSWER_SYNTHESIS_SCHEMA_DESC = [
@@ -303,6 +365,12 @@ export interface SynthesizeAnswerOptions {
    * run's own evidence does not support.
    */
   readonly conversationContext?: string;
+  /**
+   * The RESEARCH MODE this answer belongs to (the resolved canonical flow). It selects the
+   * answer SHAPE (sections the mode owes), so a factual reconstruction is never forced into a
+   * causal or thesis template. Absent means no canonical flow was resolved.
+   */
+  readonly mode?: string;
 }
 
 /**
@@ -312,6 +380,7 @@ export interface SynthesizeAnswerOptions {
  */
 export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promise<AnswerSynthesis | undefined> {
   const { provider, question, context, contract } = options;
+  const answerShape = answerShapeFor(contractFor(options.mode)?.flow);
   let raw: string;
   try {
     const res = await provider.structured<string>({
@@ -335,6 +404,7 @@ export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promis
               options.conversationContext,
             ]
           : []),
+        ...answerShapeGuidance(answerShape),
         "---",
         renderResearchContext(context),
         "---",

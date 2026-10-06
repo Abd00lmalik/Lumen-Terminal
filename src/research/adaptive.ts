@@ -63,12 +63,16 @@ import {
   exhaustUnresolved,
   concernsSubject,
   recoveryCapabilities,
+  requiredResolutionOf,
   requirementsFromTasks,
   type CoverageEvidence,
   type ResearchRequirement,
   type SubjectMarketClass,
 } from "./requirements.js";
 import { assertFlowContract, contractFor, forbiddenDimensionsFor } from "./flow-contract.js";
+import { chainedFlowsOf } from "./modes.js";
+import { impliedResolutionForWindow, resolutionCovers, type Resolution } from "./resolution.js";
+import { requestedWindowHoursOf } from "./temporal.js";
 import { ALL_DECISION_DIMENSIONS } from "./question-resolution.js";
 import type { Evidence, Research } from "../domain/objects.js";
 import { createEvidence } from "../domain/objects.js";
@@ -358,10 +362,13 @@ const ADAPTIVE_SYSTEM = [
  * asked for the price timeline at all". So the flow's own contract is stated to the planner as
  * the METHODOLOGY it must plan within, and it decides which capabilities serve it.
  */
-function flowGuidance(flow: string | undefined): readonly string[] {
+function flowGuidance(flow: string | undefined, question?: string): readonly string[] {
   const contract = contractFor(flow);
   if (contract === undefined) return [];
-  const denied = forbiddenDimensionsFor(flow, ALL_DECISION_DIMENSIONS);
+  // MULTI-MODE: a compound question's chained flows grant their dimensions too, so the planner
+  // is not told to refuse dimensions the trader actually asked for.
+  const chain = question !== undefined ? chainedFlowsOf(question) : undefined;
+  const denied = forbiddenDimensionsFor(flow, ALL_DECISION_DIMENSIONS, chain);
   return [
     `RESOLVED FLOW: ${contract.flow} (already decided from the trader's request; plan within it, never widen it).`,
     `- This run answers a ${contract.questionType} question. Its permitted dimensions are: ${contract.grants.join(", ")}.`,
@@ -378,7 +385,7 @@ function flowGuidance(flow: string | undefined): readonly string[] {
 function planPrompt(objective: string, constraints: readonly string[], flow?: string): string {
   return [
     `Research objective: ${objective}`,
-    ...flowGuidance(flow),
+    ...flowGuidance(flow, objective),
     constraints.length > 0 ? `Trader constraints: ${constraints.join("; ")}` : "",
     "Produce a research plan as JSON conforming to schema \"research.plan\".",
     RESEARCH_PLAN_SCHEMA_DESC,
@@ -579,6 +586,7 @@ export async function runAdaptiveResearch(
   // where the trader would see a complete-looking answer built under a refused contract.
   const flowCheck = assertFlowContract({
     flow: resolvedFlow,
+    flows: chainedFlowsOf(contractQuestion),
     requirements,
     dimensionOf: dimensionOfRequirement,
   });
@@ -738,6 +746,26 @@ export async function runAdaptiveResearch(
     }
     return out;
   };
+      // THE RESOLUTION THIS RUN STILL OWES: the finest granularity any unmet shape row names
+      // ("hourly"), or — when no resolution is named — the granularity the smallest unmet
+      // window implies. Providers are asked for the RIGHT bars instead of their own default, so
+      // a 24-hour path request cannot silently return daily candles.
+      const requiredResolutionBrief = (): Resolution | undefined => {
+        let named: Resolution | undefined;
+        let smallestWindow: number | undefined;
+        for (const row of requirements) {
+          if (row.status === "SATISFIED" || row.role === "CONTEXT" || row.role === "CHALLENGE") continue;
+          if ((row.dataFacets ?? []).length === 0) continue;
+          const rowResolution = requiredResolutionOf(row);
+          if (rowResolution !== undefined && (named === undefined || resolutionCovers(named, rowResolution))) {
+            named = rowResolution;
+          }
+          const window = row.windowHours ?? requestedWindowHoursOf(row.description);
+          if (window !== undefined && (smallestWindow === undefined || window < smallestWindow)) smallestWindow = window;
+        }
+        if (named !== undefined) return named;
+        return impliedResolutionForWindow(smallestWindow);
+      };
 
       // Independent capability calls run in PARALLEL (performance mandate §32): the registry
       // executes each through its own provider chain with bounded transport timeouts, and one
@@ -757,6 +785,7 @@ export async function runAdaptiveResearch(
             // of price path came back as one instant. This is a REQUEST, never a claim about
             // what will be served — coverage is decided from the payload when it arrives.
             ...(requiredFacetBrief().length > 0 ? { requiredFacets: requiredFacetBrief() } : {}),
+            ...(requiredResolutionBrief() !== undefined ? { requiredResolution: requiredResolutionBrief() } : {}),
           },
           systemOrigin,
           at(),
@@ -1232,6 +1261,8 @@ export async function runAdaptiveResearch(
       question: currentRun()?.userQuestion ?? objective,
       context: finalContext,
       computedConfidence: confidence.level,
+      // MODE-AWARE ANSWER SHAPE: the resolved flow selects the answer's section structure.
+      ...(resolvedFlow !== undefined ? { mode: resolvedFlow } : {}),
       // RESEARCH-CONTRACT STATE (decision-quality contract): the model synthesizes, the engine
       // states what was actually covered and retrieved, so a draft cannot claim counterevidence
       // that was never searched for, a comparison period that was never retrieved, or earnings

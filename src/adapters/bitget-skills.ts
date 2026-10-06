@@ -23,6 +23,20 @@ import { RestTransport, type Candle } from "./transports/rest.js";
 import { TransportError } from "./transports/resilience.js";
 import { FRESHNESS_PROFILES, assessFreshness, type FreshnessProfile } from "./freshness.js";
 import type { ToolResultInput, ToolOutput } from "../domain/tool-result.js";
+import { intervalTokenFor, isResolution } from "../research/resolution.js";
+
+/**
+ * RESOLUTION -> the Bitget candle interval vocabulary (1min..1w; the venue has no native
+ * month bar). The engine asks for a granularity, never a hardcoded "1h": a 24-hour path wants
+ * hourly bars and a multi-year pull wants daily ones.
+ */
+function intervalForRequest(requiredResolution: unknown): string {
+  if (isResolution(requiredResolution)) {
+    const token = intervalTokenFor(requiredResolution);
+    return token === "1M" ? "1w" : token;
+  }
+  return "1h";
+}
 
 // ---------------------------------------------------------------------------
 // Descriptors; every field sourced from FINDINGS.md §2 (CONFIRMED)
@@ -259,7 +273,9 @@ export function createMarketIntelAdapter(transport: McpTransport): BitgetSkillAd
               return {
                 ...actionArgs(["action", "query", "coin_id", "coin_ids", "symbol", "interval", "limit"])(params),
                 action: (p.action as string | undefined) ?? (wantsSeries ? "ohlcv" : "global"),
-                ...(wantsSeries && p.interval === undefined ? { interval: "1h" } : {}),
+                // The bar size follows the requirement's granularity (or the horizon it implies),
+                // never a fixed default.
+                ...(wantsSeries && p.interval === undefined ? { interval: intervalForRequest(p.requiredResolution) } : {}),
               };
             },
           }

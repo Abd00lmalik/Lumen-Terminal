@@ -25,9 +25,11 @@ import {
   windowCovers,
   type DataFacet,
 } from "./data-facets.js";
-import { expandSubjectTerms } from "../domain/instruments.js";
+import { expandSubjectTerms, mentionsCryptoAsset } from "../domain/instruments.js";
 import { withoutProhibitions } from "./execution-mode.js";
 import { contractFor } from "./flow-contract.js";
+import { isResolution, namedResolutionOf, resolutionCovers, type Resolution } from "./resolution.js";
+import { chainedFlowsOf } from "./modes.js";
 
 export type TimeSensitivity = "CURRENT" | "RECENT" | "HISTORICAL" | "ANY";
 
@@ -83,6 +85,12 @@ export interface RequirementSeed {
   readonly relationshipType?: RelationshipType;
   /** Transmission targets this seed's causal link points into (question-derived links only). */
   readonly targetTerms?: readonly string[];
+  /**
+   * The data RESOLUTION this requirement asks for ("hourly", "daily"), when it names one.
+   * Distinct from the window: a request for an hourly path over 24 hours demands both a
+   * 24-hour span AND a sampling at least as fine as hourly.
+   */
+  readonly resolution?: Resolution;
 }
 
 export interface ResearchRequirement {
@@ -144,6 +152,13 @@ export interface ResearchRequirement {
    */
   readonly windowHours?: number;
   /**
+   * The GRANULARITY this requirement demands, when it names one ("hourly", "daily"). A
+   * requirement that names no resolution demands none; its window still applies. A requirement
+   * that names one may only be satisfied by equally fine or finer evidence — a daily candle
+   * never satisfies an hourly-sequence row (see resolution.ts).
+   */
+  readonly resolution?: Resolution;
+  /**
    * Evidence refs that matched but carry the SAME payload identity as another ref already on
    * this row: re-served copies, never additional facts. Kept so provenance survives while the
    * informational count stays honest.
@@ -191,6 +206,8 @@ export interface CoverageEvidence {
   readonly dataFacets?: readonly DataFacet[];
   /** Hours of time this observation spans on its own timestamps (a single print spans 0). */
   readonly coverageHours?: number;
+  /** The sampling granularity this observation carries (a candle set's bar size). */
+  readonly resolution?: Resolution;
   /** Identity of the underlying provider response: identical identity ⇒ one observation. */
   readonly payloadIdentity?: string;
 }
@@ -210,6 +227,8 @@ export interface CoverageEvidenceSource {
   readonly duplicateContent?: boolean;
   readonly dataFacets?: readonly string[];
   readonly coverageHours?: number;
+  /** The sampling granularity this observation carries, measured at ingestion. */
+  readonly resolution?: string;
   readonly payloadIdentity?: string;
 }
 
@@ -244,6 +263,9 @@ export function coverageItemOf(e: CoverageEvidenceSource): CoverageEvidence {
     // were computed from `DataFacet` constants upstream, and coverage compares them as such.
     ...(e.dataFacets !== undefined ? { dataFacets: e.dataFacets as readonly DataFacet[] } : {}),
     ...(e.coverageHours !== undefined ? { coverageHours: e.coverageHours } : {}),
+    // The sampling granularity the payload actually has. Span and resolution are different
+    // axes; a windowed requirement checks both.
+    ...(isResolution(e.resolution) ? { resolution: e.resolution } : {}),
     // Response identity: one provider response re-served under several capability names is
     // ONE observation, never the corroboration the evidence count would otherwise suggest.
     ...(e.payloadIdentity !== undefined ? { payloadIdentity: e.payloadIdentity } : {}),
@@ -557,6 +579,10 @@ function observationalFieldSpecs(
   const facets = new Set<DataFacet>(facetsOfRequirementText(question));
   if (facets.size === 0) return [];
   const window = requestedWindowHours(question);
+  // The granularity the trader NAMED ("hourly", "daily"). A window alone does not raise the
+  // gate: "the last 24 hours" is satisfied by any resolution fine enough to reach it, while
+  // "hourly" is satisfied only by hourly-or-finer data.
+  const resolution = namedResolutionOf(question);
   const scope = window !== undefined ? ` over the last ${window} hours` : "";
   const out: EngineRequirementSpec[] = [];
   for (const facet of facets) {
@@ -569,6 +595,7 @@ function observationalFieldSpecs(
       timeSensitivity: "CURRENT",
       evidenceClasses: fieldEvidenceClassesFor(facet),
       dataFacets: [facet],
+      ...(resolution !== undefined ? { resolution } : {}),
       covers: fieldCoverPattern(facet),
     });
   }
@@ -646,6 +673,7 @@ export function decomposeFieldRequirements(rows: readonly ResearchRequirement[])
       continue;
     }
     const windowHours = requestedWindowHours(row.description);
+    const resolution = row.resolution ?? namedResolutionOf(row.description);
     const subject = /\bfor ([A-Z]{2,6})\b/.exec(row.description)?.[1];
     for (const facet of facets) {
       out.push({
@@ -654,6 +682,7 @@ export function decomposeFieldRequirements(rows: readonly ResearchRequirement[])
         description: atomicDescriptionFor(row.description, facet, subject),
         dataFacets: [facet],
         ...(windowHours !== undefined ? { windowHours } : {}),
+        ...(resolution !== undefined ? { resolution } : {}),
         recoveryAttempts: 0,
         status: "PENDING",
         evidenceRefs: [],
@@ -673,10 +702,12 @@ function withDerivedShape(row: ResearchRequirement, facets: readonly DataFacet[]
     return row.dataFacets === undefined ? row : row;
   }
   const windowHours = requestedWindowHours(row.description);
+  const resolution = row.resolution ?? namedResolutionOf(row.description);
   return {
     ...row,
     ...(row.dataFacets !== undefined ? {} : { dataFacets: [...facets] }),
     ...(row.windowHours !== undefined || windowHours === undefined ? {} : { windowHours }),
+    ...(resolution !== undefined ? { resolution } : {}),
   };
 }
 
@@ -767,6 +798,7 @@ export function buildRequirements(seeds: readonly RequirementSeed[]): readonly R
       staleOnlyRefs: [],
       recoveryAttempts: 0,
       ...(seed.calculation !== undefined ? { calculation: seed.calculation } : {}),
+      ...(seed.resolution !== undefined ? { resolution: seed.resolution } : {}),
       ...(seed.evidenceClasses !== undefined && seed.evidenceClasses.length > 0
         ? { evidenceClasses: [...seed.evidenceClasses] }
         : {}),
@@ -817,7 +849,12 @@ export function subjectMarketClassOf(question: string): SubjectMarketClass {
   const q = question.toLowerCase();
   if (/\bvolatility index\b|\bvix\b/.test(q)) return "VOLATILITY";
   if (/\byield|\btreasur|\bbond|\brates?\b|\bcurve\b|\bfed funds\b/.test(q)) return "RATES";
-  if (/\bcrypto|\bbitcoin|\bbtc\b|\bether|\beth\b|\bsolana|\bsol\b|\btoken\b|\bonchain\b/.test(q)) return "CRYPTO";
+  // CRYPTO IS A CLASS, NOT A LIST OF THE ASSETS THE PRODUCT HAS SEEN. The crypto vocabulary
+  // below plus the shared asset registry (any known ticker/name) decide the class, so a
+  // question about XRP, DOGE or an asset not enumerated here still resolves to CRYPTO and its
+  // market-data requirements reach the crypto provider chain instead of the commodity one.
+  if (/\bcrypto|\bcryptocurrency|\btoken\b|\bonchain\b|\bon-chain\b|\baltcoin\b|\bdefi\b|\bhalving\b|\bmemecoin\b|\bstablecoin\b/.test(q)) return "CRYPTO";
+  if (mentionsCryptoAsset(question)) return "CRYPTO";
   if (/\bgold|\bsilver|\bcopper|\bplatinum|\bpalladium|\bmetal/.test(q)) return "METAL";
   if (/\boil\b|\bcrude|\bbrent|\bwti\b|\bgas\b|\bcommodit|\bbarrel/.test(q)) return "COMMODITY";
   if (/\bdollar|\bdxy\b|\beur|\busd\b|\bjpy\b|\bgbp\b|\bcurrency|\bforex|\bfx\b|\bpair\b|\byen\b|\bpound\b|\beuro\b/.test(q)) return "FX";
@@ -923,6 +960,8 @@ interface EngineRequirementSpec {
    * matched exactly as they always were.
    */
   readonly dataFacets?: readonly DataFacet[];
+  /** The granularity this dimension demands, when it names one. */
+  readonly resolution?: Resolution;
   /** When present, the domain applies only to these subject market classes. */
   readonly markets?: readonly SubjectMarketClass[];
 }
@@ -1188,9 +1227,26 @@ export function completeRequirements(
   // flow legitimately owns).
   const contract = contractFor(opts.flow);
   const questionType = contract?.pinnedQuestionType ?? questionTypeOf(question);
-  const specs: EngineRequirementSpec[] = [...ENGINE_REQUIRED[questionType]].filter(
-    (spec) => spec.markets === undefined || spec.markets.includes(marketClass),
+  // MULTI-MODE CHAINING (modes.ts): a compound question legitimately invokes several modes
+  // ("why did BTC fall, and does my thesis hold?"). Every chained mode contributes its
+  // engine-required dimensions and its granted dimensions, so the run acquires the UNION the
+  // trader actually asked for instead of only the primary mode's slice. Detection is
+  // deterministic and conjunction-gated, so an ordinary single-mode question is untouched.
+  const chainFlows = contract !== undefined ? chainedFlowsOf(question) : [];
+  const chainContracts = chainFlows
+    .map((flow) => contractFor(flow))
+    .filter((c): c is NonNullable<typeof c> => c !== undefined);
+  const chainedQuestionTypes: readonly QuestionType[] = chainContracts.map(
+    (c) => c.pinnedQuestionType ?? c.questionType,
   );
+  const modeTypes: readonly QuestionType[] = [...new Set<QuestionType>([questionType, ...chainedQuestionTypes])];
+  const specs: EngineRequirementSpec[] = [];
+  for (const type of modeTypes) {
+    for (const spec of ENGINE_REQUIRED[type]) {
+      if (spec.markets !== undefined && !spec.markets.includes(marketClass)) continue;
+      specs.push(spec);
+    }
+  }
   // FLOW-OWNED EVIDENCE: a resolved flow adds the observations its OWN methodology needs. This
   // is the step that makes "what happened over 24 hours" retrieve a price timeline instead of
   // whatever headlines happen to be available — the reproduction's evidence failure.
@@ -1210,13 +1266,18 @@ export function completeRequirements(
   // still genuinely wants a current reading of its subject, and dropping it would weaken the
   // ledger rather than sharpen it.
   const observationalSpecs =
-    contract?.flow === "WHAT_HAPPENED" || questionType === "OBSERVATION"
+    contract?.flow === "WHAT_HAPPENED" || modeTypes.includes("OBSERVATION")
       ? observationalFieldSpecs(question, subject)
       : [];
   // CHALLENGE is required only where the question asks for a conclusion to be tested.
   // The FLOW decides this when one is resolved: WHAT_HAPPENED owes no counterevidence row.
+  // A CHAINED mode that owes disconfirmation makes the run owe it too: a causal leg inside a
+  // compound question still needs its counterevidence attempt.
+  const modeOwesCounterevidence = contract !== undefined
+    ? contract.requiresCounterevidence || chainContracts.some((c) => c.requiresCounterevidence)
+    : challengeEarnedBy(questionType);
   const challengeRequired = contract !== undefined
-    ? contract.requiresCounterevidence && (opts.challengeRequired ?? true)
+    ? modeOwesCounterevidence && (opts.challengeRequired ?? true)
     : (opts.challengeRequired ?? challengeEarnedBy(questionType));
   if (challengeRequired) {
     specs.push({
@@ -1248,6 +1309,7 @@ export function completeRequirements(
       engineRequired: true,
       evidenceClasses: [...spec.evidenceClasses],
       ...(spec.dataFacets !== undefined ? { dataFacets: [...spec.dataFacets] } : {}),
+      ...(spec.resolution !== undefined ? { resolution: spec.resolution } : {}),
       ...(requestedWindowHours(question) !== undefined ? { windowHours: requestedWindowHours(question)! } : {}),
       retrievalObjective: retrievalObjectiveFor(description, spec.timeSensitivity, spec.role),
     });
@@ -1274,6 +1336,7 @@ export function completeRequirements(
       recoveryAttempts: 0,
       engineRequired: true,
       ...(spec.calculation !== undefined ? { calculation: spec.calculation } : {}),
+      ...(spec.resolution !== undefined ? { resolution: spec.resolution } : {}),
       evidenceClasses: [...spec.evidenceClasses],
       retrievalObjective: retrievalObjectiveFor(description, spec.timeSensitivity, spec.role),
     });
@@ -1362,7 +1425,7 @@ export function completeRequirements(
     // CAUSAL CHAIN REQUIREMENTS (research contract): for CAUSAL questions, add requirements
     // that represent the causal chain structure. This ensures the engine retrieves evidence
     // for each link in the chain, not just the observation.
-    if (questionType === "CAUSAL") {
+    if (modeTypes.includes("CAUSAL")) {
       const chainSeeds = causalChainRequirements(question, subject);
       const existingCoreRoles = new Set(out.filter((r) => r.role === "CORE").map((r) => r.role));
       const existingCoreEvidenceClasses = new Set(
@@ -1464,7 +1527,12 @@ export function completeRequirements(
     // row. A filter placed before those were appended would have passed the WHAT_HAPPENED
     // reproduction tests while still handing the run causal rows.
     if (contract !== undefined) {
-      const granted = new Set(contract.grants);
+      // Every CHAINED mode grants its own dimensions too; the union is what the compound
+      // question asks for, and the primary mode still owns the answer shape.
+      const granted = new Set<string>([
+        ...contract.grants,
+        ...chainContracts.flatMap((c) => [...c.grants]),
+      ]);
       for (let i = out.length - 1; i >= 0; i -= 1) {
         const row = out[i];
         if (row === undefined || row.role === "CONTEXT") continue;
@@ -1726,6 +1794,16 @@ export function requirementWindowHours(req: Pick<ResearchRequirement, "windowHou
   return req.windowHours ?? requestedWindowHours(req.description);
 }
 
+/**
+ * The resolution a requirement demands, when it demands one; an explicit declaration wins over
+ * wording. Undefined means the requirement names no granularity and is not gated on it.
+ */
+export function requiredResolutionOf(
+  req: Pick<ResearchRequirement, "resolution" | "description">,
+): Resolution | undefined {
+  return req.resolution ?? namedResolutionOf(req.description);
+}
+
 /** Is the observation fresh enough for this requirement's time sensitivity? */
 export function freshnessSufficient(req: Pick<ResearchRequirement, "timeSensitivity" | "description">, item: CoverageEvidence, now: Date): boolean {
   if (req.timeSensitivity === "ANY") return true;
@@ -1887,9 +1965,24 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
       newsDomain: itemDomain === "NEWS",
     });
     if (facetCoverage(demandedFacets, served) !== "FULL") return "NO_MATCH";
-    const windowHours = req.windowHours ?? requestedWindowHours(req.description);
-    if (windowHours !== undefined && demandsSpan(demandedFacets) && !windowCovers(windowHours, item.coverageHours)) {
-      return "NO_MATCH";
+    // SPAN LAWS apply only to a row that actually asks for a window of data (a series, a
+    // candle, a high/low/open/close, a volume series). A REPORTED_EVENT row asks for a dated
+    // claim inside the window, and a claim has neither span nor granularity: gating it here
+    // would make every news requirement unsatisfiable (the freshness law already governs it).
+    if (demandsSpan(demandedFacets)) {
+      const windowHours = req.windowHours ?? requestedWindowHours(req.description);
+      if (windowHours !== undefined && !windowCovers(windowHours, item.coverageHours)) {
+        return "NO_MATCH";
+      }
+      // GRANULARITY LAW (resolution.ts): when the row NAMES a resolution ("hourly", "daily"),
+      // only evidence sampled at least that finely can establish it. Span and resolution are
+      // separate axes: 24 hourly candles and 2 daily candles both reach 24 hours, and only the
+      // first answers "the hourly price path". A row naming no resolution keeps its window law
+      // and is untouched here.
+      const requiredResolution = requiredResolutionOf(req);
+      if (requiredResolution !== undefined && !resolutionCovers(requiredResolution, item.resolution)) {
+        return "NO_MATCH";
+      }
     }
   }
   // ARROW ADMISSION LAW (research contract §3): an arrow row has its OWN admission law and never

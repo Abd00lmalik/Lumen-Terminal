@@ -22,6 +22,7 @@ import type { Challenge } from "../domain/challenge.js";
 import type { MonitoringAssessment, MonitorNotification } from "../domain/monitoring.js";
 import type { Provenance, ProvenanceOrigin } from "../domain/provenance.js";
 import { readableObservation } from "../research/observation-text.js";
+import { isResolution, type Resolution } from "../research/resolution.js";
 
 // ---------------------------------------------------------------------------
 // Shared primitives
@@ -103,6 +104,12 @@ export interface EvidenceDTO {
   /** Hours of time this observation spans on its own timestamps (a single print spans 0). */
   readonly coverageHours?: number;
   /**
+   * The sampling granularity this observation carries (TICK/MINUTE/HOUR/DAY/WEEK/MONTH).
+   * SPAN and RESOLUTION are different axes: 24 hourly candles and 2 daily candles both span
+   * 24 hours, and only the first establishes an hourly-sequence requirement.
+   */
+  readonly resolution?: Resolution;
+  /**
    * Identity of the underlying provider response. Two evidence objects sharing it are ONE
    * observation re-served through the capability fan-out, never independent corroboration —
    * exposed so a client can audit the informational count instead of taking it on trust.
@@ -137,6 +144,7 @@ export function evidenceToDTO(e: Evidence): EvidenceDTO {
     // rather than inferring coverage from a provider name or a count.
     ...(e.dataFacets !== undefined ? { dataFacets: [...e.dataFacets] } : {}),
     ...(e.coverageHours !== undefined ? { coverageHours: e.coverageHours } : {}),
+    ...(isResolution(e.resolution) ? { resolution: e.resolution } : {}),
     ...(e.payloadIdentity !== undefined ? { payloadIdentity: e.payloadIdentity } : {}),
     ...(e.duplicateContent === true ? { duplicateContent: true } : {}),
     supports: idRefs(e.supports),

@@ -140,6 +140,13 @@ export interface Evidence {
    */
   readonly coverageHours?: number;
   /**
+   * THE GRANULARITY OF THIS OBSERVATION (resolution.ts): how finely its window is sampled
+   * (a candle set's bar size, bucketed to TICK/MINUTE/HOUR/DAY/WEEK/MONTH). SPAN and
+   * RESOLUTION are different axes: 24 hourly candles and 2 daily candles both span 24 hours,
+   * and only the first establishes an hourly-sequence requirement.
+   */
+  readonly resolution?: string;
+  /**
    * IDENTITY OF THE UNDERLYING PROVIDER RESPONSE: stable across the evidence objects produced
    * when one provider response is routed through more than one capability. Two objects with
    * the same identity are ONE observation re-served, never independent corroboration, and
@@ -181,6 +188,7 @@ export function createEvidence(
     duplicateContent?: boolean;
     dataFacets?: readonly string[];
     coverageHours?: number;
+    resolution?: string;
     payloadIdentity?: string;
   },
   origin: ProvenanceOrigin,
@@ -210,6 +218,7 @@ export function createEvidence(
     ...(input.subject !== undefined ? { subject: input.subject } : {}),
     ...(input.dataFacets !== undefined ? { dataFacets: Object.freeze([...input.dataFacets]) } : {}),
     ...(input.coverageHours !== undefined ? { coverageHours: input.coverageHours } : {}),
+    ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
     ...(input.payloadIdentity !== undefined ? { payloadIdentity: input.payloadIdentity } : {}),
     ...(input.researchRef !== undefined ? { researchRef: input.researchRef } : {}),
     provenance: createProvenance(origin, `evidence classified as ${input.evidenceClass}`, at),

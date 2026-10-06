@@ -110,6 +110,26 @@ const CRYPTO_ALIASES: readonly (readonly [name: string, ticker: string])[] = [
 ];
 
 /**
+ * Does this text name a known crypto asset (by ticker or long name)?
+ *
+ * The crypto asset class is a CLASS, not the short list the classifier happened to enumerate: a
+ * question about XRP or DOGE is a crypto question even though neither was hardcoded. Answers
+ * ONLY the entity question ("does this text name a crypto asset"), never the research direction.
+ * Ticker matching is word-bounded and case-sensitive on the raw text so "method" never matches
+ * ETH and a lowercased "dot" never matches DOT (a colon/space/quote boundary is required).
+ */
+export function mentionsCryptoAsset(text: string | undefined): boolean {
+  if (text === undefined || text.trim() === "") return false;
+  // Token-exact matching on the uppercased text: "XRP" matches, "ETH" inside "method" never
+  // does (the tokenizer splits on non-alphanumerics, so a ticker must be a standalone token).
+  const tokens = new Set(text.toUpperCase().split(/[^A-Z0-9]+/).filter((t) => t !== ""));
+  for (const [name, ticker] of CRYPTO_ALIASES) {
+    if (tokens.has(ticker) || tokens.has(name)) return true;
+  }
+  return false;
+}
+
+/**
  * Names/tickers of an asset as a question would legitimately spell them (asset -> terms).
  * Used by the target law to decide whether the QUESTION TEXT itself names a candidate asset.
  * Deliberately narrow: "favor" must never match "BTC"; conversely "risk-on Bitcoin rally"
