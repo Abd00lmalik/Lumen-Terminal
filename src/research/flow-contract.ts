@@ -271,10 +271,19 @@ export function isCanonicalFlow(flow: string | undefined): flow is CanonicalFlow
  * Derived as "everything the engine can produce, minus what the flow grants", so a dimension
  * added to the engine later is denied here automatically rather than silently leaking in.
  */
-export function forbiddenDimensionsFor(flow: string | undefined, allDimensions: readonly string[]): readonly string[] {
+export function forbiddenDimensionsFor(
+  flow: string | undefined,
+  allDimensions: readonly string[],
+  flows?: readonly string[],
+): readonly string[] {
   const contract = contractFor(flow);
   if (contract === undefined) return []; // no resolved flow: nothing to enforce
   const granted = new Set(contract.grants);
+  for (const chained of flows ?? []) {
+    const c = contractFor(chained);
+    if (c === undefined) continue;
+    for (const dimension of c.grants) granted.add(dimension);
+  }
   return allDimensions.filter((d) => !granted.has(d));
 }
 
@@ -306,6 +315,13 @@ export interface FlowContractCheck {
  */
 export function assertFlowContract(input: {
   readonly flow: string | undefined;
+  /**
+   * ADDITIONAL CHAINED FLOWS (multi-mode questions): a compound question ("why did BTC fall,
+   * and does my thesis hold?") legitimately invokes several flows, and its ledger is the UNION
+   * of their grants. Passing the chain here keeps the assertion honest for compound runs while
+   * a single-flow run is checked exactly as before.
+   */
+  readonly flows?: readonly string[];
   readonly requirements: readonly {
     readonly id: string;
     readonly description: string;
@@ -317,6 +333,11 @@ export function assertFlowContract(input: {
   if (contract === undefined) return { flow: input.flow ?? "UNRESOLVED", ok: true, violations: [] };
 
   const granted = new Set(contract.grants);
+  for (const flow of input.flows ?? []) {
+    const chained = contractFor(flow);
+    if (chained === undefined) continue;
+    for (const dimension of chained.grants) granted.add(dimension);
+  }
   const violations: FlowContractViolation[] = [];
 
   for (const req of input.requirements) {

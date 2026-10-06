@@ -90,6 +90,13 @@ export interface ToolOutput {
    */
   readonly dataFacets?: readonly string[];
   /**
+   * The GRANULARITY this output carries (a candle set's bar size: "1h", "1d"), when the
+   * adapter declares one. Distinct from span: 24 hourly candles and 2 daily candles both span
+   * 24 hours, and only the first answers "the hourly price path". When absent the ingestion
+   * boundary measures resolution from the payload's own timestamps.
+   */
+  readonly resolution?: string;
+  /**
    * Hours of TIME this output spans, measured on its own timestamps. A single print spans 0.
    * This is what makes "the last 24 hours" answerable: an instantaneous snapshot is fresh
    * (a freshness fact) and still reaches back over zero hours (a coverage fact).

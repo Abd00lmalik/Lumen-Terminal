@@ -15,6 +15,14 @@ Converted 2026-09-12 from the 39 root `*.txt` specification files (one-to-one; o
 5. [`tool-skill-orchestration.md`](tool-skill-orchestration.md) + [`data-market-intelligence.md`](data-market-intelligence.md); capability/tool/provider model
 6. [`safety-boundaries.md`](safety-boundaries.md); decision boundary and confirmation rules
 
+## Engine implementation notes
+
+The documents above are the product specification. The research ENGINE's own generalization laws
+(the axes the engine must handle without bespoke code paths) are recorded in
+[`research-generalization.md`](research-generalization.md): data RESOLUTION, general temporal
+intent, multi-mode chaining, mode-aware answer shapes, and asset-class generalization. Requirement
+coverage and the capability floor are recorded in [`requirement-engine.md`](requirement-engine.md).
+
 ## Document map
 
 ### Flows & shared intelligence

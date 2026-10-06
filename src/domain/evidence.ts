@@ -16,6 +16,7 @@ import type { ToolOutput, ToolResult } from "./tool-result.js";
 import { isInterpretationClass } from "./tool-result.js";
 import type { ProvenanceOrigin } from "./provenance.js";
 import { facetsOfPayload, type DataFacet } from "../research/data-facets.js";
+import { resolutionOfStamps, resolutionOfTimeframe, type Resolution } from "../research/resolution.js";
 import { payloadIdentityOf } from "./payload-identity.js";
 
 /** Mapping from normalized tool-output class to evidence class. */
@@ -225,6 +226,11 @@ export function evidenceFromToolResult(
         ? { dataFacets: [...shapeFacets(output)!] }
         : {}),
       ...(coverageHoursOf(output) !== undefined ? { coverageHours: coverageHoursOf(output)! } : {}),
+      // GRANULARITY (resolution.ts): the sampling detail of this payload, resolved at the same
+      // boundary that measures its shape and span. The adapter's declaration wins; otherwise
+      // the bar size is read from the payload's own timestamp spacing. It is a fact about the
+      // DATA, so a daily candle set cannot claim to be an hourly series.
+      ...(resolutionOfOutput(output) !== undefined ? { resolution: resolutionOfOutput(output)! } : {}),
       // RESPONSE IDENTITY: one provider response routed through several capabilities is ONE
       // observation. Without this, a byte-identical payload became several independent facts.
       payloadIdentity: payloadIdentityOf(result, output),
@@ -255,6 +261,39 @@ function shapeFacets(output: ToolOutput): readonly DataFacet[] | undefined {
   if (output.dataFacets !== undefined) return [...output.dataFacets] as readonly DataFacet[];
   const inferred = facetsOfPayload(output.content);
   return inferred.length > 0 ? inferred : undefined;
+}
+
+/**
+ * The sampling granularity this output carries, from the adapter's declaration or from the
+ * payload's own timestamps. Undefined means the granularity cannot be determined — which is
+ * the honest answer, and is treated as "not proven fine enough" by the coverage law.
+ */
+function resolutionOfOutput(output: ToolOutput): Resolution | undefined {
+  if (output.outputClass === "UNAVAILABLE" || isInterpretationClass(output.outputClass)) return undefined;
+  if (output.resolution !== undefined) {
+    const declared = resolutionOfTimeframe(output.resolution);
+    if (declared !== undefined) return declared;
+  }
+  const fromTimeframe = resolutionOfTimeframe(output.timeframe);
+  if (fromTimeframe !== undefined) return fromTimeframe;
+  return resolutionOfStamps(payloadStamps(output.content));
+}
+
+/** Every observation timestamp a payload carries, in milliseconds. */
+function payloadStamps(content: unknown): number[] {
+  const rows = Array.isArray(content) ? content : [content];
+  const stamps: number[] = [];
+  for (const row of rows) {
+    if (row === null || typeof row !== "object" || Array.isArray(row)) continue;
+    const record = row as Record<string, unknown>;
+    for (const [key, value] of Object.entries(record)) {
+      if (/^(ts|time|timestamp|datetime|date|asof|opentime|closetime|lastupdatedat|t)$/i.test(key)) {
+        const numeric = numericTime(value);
+        if (numeric !== undefined) stamps.push(numeric);
+      }
+    }
+  }
+  return stamps;
 }
 
 /**

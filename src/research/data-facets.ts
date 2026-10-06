@@ -25,6 +25,8 @@
  * providers or questions.
  */
 
+import { requestedWindowHoursOf } from "./temporal.js";
+
 /** The data shapes an observation can carry. */
 export type DataFacet =
   /** One point-in-time reading (a spot quote, a level, a single print). */
@@ -165,18 +167,12 @@ export function facetsOfRequirementText(text: string): readonly DataFacet[] {
 /**
  * The window a requirement asks for, in hours, read from its OWN wording.
  * Undefined means the requirement named no window (an instantaneous ask, or an open one).
+ *
+ * Delegates to the ONE temporal parser (`temporal.ts`): this was previously a second, partial
+ * list of phrases that understood hours/days/today/this week/this month and nothing else.
  */
 export function requestedWindowHours(text: string): number | undefined {
-  const t = text.toLowerCase();
-  const hourMatch = /\b(\d{1,3})\s*-?\s*(?:h|hr|hour|hours)\b/.exec(t);
-  if (hourMatch?.[1] !== undefined) return Number(hourMatch[1]);
-  const dayMatch = /\b(\d{1,3})\s*-?\s*(?:d|day|days)\b/.exec(t);
-  if (dayMatch?.[1] !== undefined) return Number(dayMatch[1]) * 24;
-  if (/\b(today|intraday|this session|the session)\b/.test(t)) return 24;
-  if (/\bthis week\b|\bweek to date\b/.test(t)) return 168;
-  if (/\byesterday\b/.test(t)) return 24;
-  if (/\bthis month\b|\bmonth to date\b/.test(t)) return 720;
-  return undefined;
+  return requestedWindowHoursOf(text);
 }
 
 // ---------------------------------------------------------------------------
