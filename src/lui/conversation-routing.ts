@@ -23,6 +23,7 @@
 import { questionNamesAsset, resolveNamedAsset } from "../domain/instruments.js";
 import type { ConversationIntent, Investigation } from "../domain/investigation.js";
 import { executionConstraintsOf, isObservationMode } from "../research/execution-mode.js";
+import { temporalIntentOf } from "../research/temporal.js";
 
 /** What the conversation layer decided to do with a turn. */
 export type RouteAction = "CONTINUE" | "START" | "CLARIFY";
@@ -83,18 +84,34 @@ const COMPARISON_TURN = /\bcompare\w*|\bversus\b|\bvs\.?\b|\bcompared (?:with|to
 const COMPARISON_ANCHOR = /\b(?:that|this|it|them|those)\b/i;
 
 /**
- * A TIME-WINDOW restatement: "Now look at the last 7 days.", "over the past 24 hours", "since
- * yesterday", "year to date". The trader changes WHEN the investigation looks, not WHAT it is
- * about — the turn names no subject, so the topic-switch law cannot see it, and opening a new
- * thread for it silently abandons every run in the current one. Inside a live thread a window
- * restatement is a refinement of the same investigation: the answer re-frames the subject the
- * thread already established over a new window. Deliberately requires an explicit window
- * determiner (last/past/previous/prior/since/to-date), so "right now" and "today" — plain
- * freshness words that appear in standalone questions — do not turn every restatement into a
- * continuation.
+ * Does the turn RESTATE the investigation's time window? "Now look at the last 7 days.",
+ * "expand to the 24-hour window", "what about this week?", "since the breakout".
+ *
+ * A window restatement changes WHEN the investigation looks, not WHAT it is about — the turn
+ * typically names no subject, so the topic-switch law cannot see it, and opening a new thread
+ * for it silently abandons every run in the current one. Inside a live thread it is a
+ * refinement: the answer re-frames the subject the thread already established.
+ *
+ * The vocabulary is read from THE shared temporal parser (`temporalIntentOf`, the same one the
+ * engine's window-coverage law uses), never re-listed here: rolling windows with or without a
+ * quantity ("the last 7 days", "the 24-hour window", "the past week"), explicit ranges,
+ * occurrence counts, since-anchors and calendar periods all come from one reading. Two kinds
+ * deliberately DO NOT continue:
+ *   - INSTANT ("right now"): a measurement ask, already routed by the execution contract;
+ *   - the freshness-word calendar phrases ("today", "yesterday", "intraday"): any standalone
+ *     question carries them, so treating them as restatements would turn every fresh question
+ *     typed into a thread into a continuation of it.
  */
-const TIME_WINDOW_CHANGE =
-  /\b(?:last|past|previous|prior)\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty[- ]?four|24|48|72)\s*(?:minutes?|hours?|days?|weeks?|months?|quarters?|years?|sessions?)\b|\b(?:last|past|previous)\s+(?:couple of\s+)?(?:minutes|hours|days|weeks|months|years)\b|\bsince (?:yesterday|last week|the start of|the beginning of)\b|\b(?:year|month|quarter) to date\b/i;
+function restatesTimeWindow(message: string): boolean {
+  const intent = temporalIntentOf(message);
+  if (intent.kind === "ROLLING" || intent.kind === "RANGE" || intent.kind === "OCCURRENCES" || intent.kind === "SINCE") {
+    return true;
+  }
+  if (intent.kind === "CALENDAR") {
+    return intent.phrase !== undefined && !/^(?:today|tonight|yesterday|intraday|this session|the session)$/i.test(intent.phrase);
+  }
+  return false;
+}
 
 /**
  * A bare anaphor: too short to carry a subject of its own, so it can only be resolved against
@@ -376,19 +393,6 @@ export function routeConversation(input: RouteInput): ConversationRoute {
     };
   }
 
-  // 5b. TIME-WINDOW DIMENSION CHANGE inside a live thread: same investigation, new window.
-  //     After the topic-switch test (a foreign asset in the turn already switched) and after
-  //     the historical intent ("has this happened in the last 7 days?" is a precedent question,
-  //     not a window restatement).
-  if (hasThread && TIME_WINDOW_CHANGE.test(message)) {
-    return {
-      action: "CONTINUE",
-      intent: "FOLLOW_UP",
-      continuedInvestigation: true,
-      reason: "the turn restates the investigation over a different time window without changing its subject",
-    };
-  }
-
   // 6. DEFINITE BACK-REFERENCE inside a live thread, at ANY length. Deliberately AFTER the
   //    topic-switch test: "the Ethereum explanation is wrong" names a subject and is a switch,
   //    while "the liquidity explanation" names none and is a reference to what this thread
@@ -405,6 +409,20 @@ export function routeConversation(input: RouteInput): ConversationRoute {
       reason: challenges
         ? "the turn refers back to what this investigation established and asks what would support or weaken it"
         : "the turn refers back to what this investigation established",
+    };
+  }
+
+  // 6b. TIME-WINDOW DIMENSION CHANGE inside a live thread: same investigation, new window.
+  //     AFTER the historical intent ("has this happened in the last 7 days?" is a precedent
+  //     question, not a restatement) and AFTER the back-reference rule, so a referential turn
+  //     that also mentions its window ("...over the current 24-hour window, what caused ..."
+  //     ) keeps its own classification instead of being relabelled a window restatement.
+  if (hasThread && restatesTimeWindow(message)) {
+    return {
+      action: "CONTINUE",
+      intent: "FOLLOW_UP",
+      continuedInvestigation: true,
+      reason: "the turn restates the investigation over a different time window without changing its subject",
     };
   }
 

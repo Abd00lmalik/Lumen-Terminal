@@ -335,6 +335,18 @@ describe("a time-window restatement continues the same investigation", () => {
   it("plain freshness words are not a window change (standalone questions still start)", () => {
     expect(route("What is the weather in Tokyo?").action).toBe("START");
     expect(route("How do I bake sourdough bread?").action).toBe("START");
+    // "today" is a freshness word any standalone question carries: it never continues a thread.
+    expect(route("What do analysts think today?").action).toBe("START");
+  });
+
+  it("reads the window vocabulary from the shared temporal parser, in all its forms", () => {
+    // The router does not re-list window phrases; every form the engine's temporal parser
+    // understands continues the thread here too.
+    expect(route("Now look at the last 7 days.").action).toBe("CONTINUE"); // quantity window
+    expect(route("Expand to the 24-hour window.").action).toBe("CONTINUE"); // bare quantity+unit
+    expect(route("What about this week?").action).toBe("CONTINUE"); // calendar period
+    expect(route("Now look at the last 3 occurrences.").action).toBe("CONTINUE"); // episode count
+    expect(route("What has happened since the breakout?").action).toBe("CONTINUE"); // since-anchor
   });
 });
 
