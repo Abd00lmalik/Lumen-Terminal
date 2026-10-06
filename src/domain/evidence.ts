@@ -15,6 +15,8 @@ import { createEvidence } from "./objects.js";
 import type { ToolOutput, ToolResult } from "./tool-result.js";
 import { isInterpretationClass } from "./tool-result.js";
 import type { ProvenanceOrigin } from "./provenance.js";
+import { facetsOfPayload, type DataFacet } from "../research/data-facets.js";
+import { payloadIdentityOf } from "./payload-identity.js";
 
 /** Mapping from normalized tool-output class to evidence class. */
 export function evidenceClassForOutput(output: ToolOutput): EvidenceClass {
@@ -214,6 +216,18 @@ export function evidenceFromToolResult(
       // lets a factual-timeline answer separate "what is directly observed" from "what is reported"
       // instead of presenting both as the same kind of thing.
       sourcing: sourcingClassForOutput(output),
+      // DATA SHAPE (research-integrity contract): what this payload ACTUALLY carries, resolved
+      // here at the only boundary that still holds the raw content. An adapter's declaration
+      // is authoritative; otherwise the payload's own shape decides. Either way it is a fact
+      // about the data, never about the provider's name or the call having succeeded — which
+      // is what makes "BTC price sequence, high, low and volume" unsatisfiable by a spot quote.
+      ...(shapeFacets(output) !== undefined
+        ? { dataFacets: [...shapeFacets(output)!] }
+        : {}),
+      ...(coverageHoursOf(output) !== undefined ? { coverageHours: coverageHoursOf(output)! } : {}),
+      // RESPONSE IDENTITY: one provider response routed through several capabilities is ONE
+      // observation. Without this, a byte-identical payload became several independent facts.
+      payloadIdentity: payloadIdentityOf(result, output),
       ...(payloadDuplicateFlag(output) ? { duplicateContent: true } : {}),
     },
     origin,
@@ -228,4 +242,94 @@ function payloadDuplicateFlag(output: ToolOutput): boolean {
     return (payload as Record<string, unknown>)["duplicateContent"] === true;
   }
   return false;
+}
+
+/**
+ * The data facets an output carries: the adapter's own declaration when it made one, and
+ * otherwise the payload's own shape. An interpretation or model-authored output carries none —
+ * a skill's prose about a price is not the price.
+ */
+function shapeFacets(output: ToolOutput): readonly DataFacet[] | undefined {
+  if (output.outputClass === "UNAVAILABLE") return undefined;
+  if (isInterpretationClass(output.outputClass)) return undefined;
+  if (output.dataFacets !== undefined) return [...output.dataFacets] as readonly DataFacet[];
+  const inferred = facetsOfPayload(output.content);
+  return inferred.length > 0 ? inferred : undefined;
+}
+
+/**
+ * Hours of time this output spans, from the adapter's measurement or from its own timestamps.
+ * A single print spans 0 — which is the fact that makes a snapshot unable to answer "the last
+ * 24 hours" no matter how fresh it is.
+ */
+function coverageHoursOf(output: ToolOutput): number | undefined {
+  if (output.coverageHours !== undefined) return output.coverageHours;
+  if (isInterpretationClass(output.outputClass) || output.outputClass === "UNAVAILABLE") return undefined;
+  const bounds = temporalBoundsOf(output.content);
+  if (bounds === undefined) return undefined;
+  const spanHours = (bounds.end - bounds.start) / 3_600_000;
+  // ONE PRINT SPANS NOTHING. An observation with a single timestamp is a fact about an
+  // instant; stating that explicitly is what stops "fetched one second ago" from ever being
+  // read as coverage of anything.
+  if (bounds.end - bounds.start === 0) return 0;
+  // A BAR IS NOT INSTANTANEOUS: a 24x1h candle set reaches from its first OPEN to the CLOSE
+  // of its last bar, so the final bar's own width belongs to the span. The adapter declares
+  // the bar size (`timeframe`); without a declared granularity the measured span is all the
+  // evidence honestly supports, and a 23-hour reach never claims to be a 24-hour one.
+  return spanHours + (barHoursOf(output.timeframe) ?? 0);
+}
+
+/** "1h" / "4h" / "15m" / "1d" / "1w" to hours; undefined when the bar size is undeclared. */
+function barHoursOf(timeframe: string | undefined): number | undefined {
+  if (timeframe === undefined) return undefined;
+  const match = /^(\d{1,4})\s*([mhdw])$/i.exec(timeframe.trim());
+  if (match?.[1] === undefined || match[2] === undefined) return undefined;
+  const amount = Number(match[1]);
+  const unit = match[2].toLowerCase();
+  if (unit === "m") return amount / 60;
+  if (unit === "h") return amount;
+  if (unit === "d") return amount * 24;
+  return amount * 168;
+}
+
+/**
+ * The payload's own time span, read from timestamps on its rows or from an explicit window.
+ * Returns undefined when the payload carries no time information at all, which is itself the
+ * answer: an undated observation cannot claim to cover any window.
+ */
+function temporalBoundsOf(content: unknown): { start: number; end: number } | undefined {
+  const rows = Array.isArray(content) ? content : [content];
+  const stamps: number[] = [];
+  let windowStart: number | undefined;
+  let windowEnd: number | undefined;
+  for (const row of rows) {
+    if (row === null || typeof row !== "object" || Array.isArray(row)) continue;
+    const record = row as Record<string, unknown>;
+    for (const [key, value] of Object.entries(record)) {
+      const lowered = key.toLowerCase();
+      const numeric = numericTime(value);
+      if (numeric === undefined) continue;
+      if (/^(ts|time|timestamp|datetime|date|asof|opentime|closetime|lastupdatedat|t)$/.test(lowered)) stamps.push(numeric);
+      else if (/^(from|start|starttime|since|fromms|open_?time)$/.test(lowered)) windowStart = numeric;
+      else if (/^(to|end|endtime|until|toms|close_?time)$/.test(lowered)) windowEnd = numeric;
+    }
+  }
+  if (stamps.length >= 1) return { start: Math.min(...stamps), end: Math.max(...stamps) };
+  if (windowStart !== undefined && windowEnd !== undefined && windowEnd > windowStart) {
+    return { start: windowStart, end: windowEnd };
+  }
+  return undefined;
+}
+
+/** Seconds-epoch or ISO time to milliseconds; anything else is not a time. */
+function numericTime(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    // Heuristic used by every venue in the stack: a 10-digit value is a seconds epoch.
+    return value > 1e11 ? value : value * 1000;
+  }
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return undefined;
 }

@@ -15,6 +15,16 @@
  */
 
 import { sentencesOf } from "./contract-checks.js";
+import {
+  demandsSpan,
+  facetsOfRequirementText,
+  facetCoverage,
+  impliedFacets,
+  requestedWindowHours,
+  servedFacetsOf,
+  windowCovers,
+  type DataFacet,
+} from "./data-facets.js";
 import { expandSubjectTerms } from "../domain/instruments.js";
 import { withoutProhibitions } from "./execution-mode.js";
 import { contractFor } from "./flow-contract.js";
@@ -115,6 +125,30 @@ export interface ResearchRequirement {
    * vocabulary reasons. Model-authored requirements stay strictly vocabulary-matched.
    */
   readonly evidenceClasses?: readonly string[];
+  /**
+   * THE SHAPES THIS REQUIREMENT DEMANDS (research-integrity contract).
+   *
+   * A requirement that names no data shape — a driver row, a thesis row, a counterevidence
+   * row — declares none and is matched exactly as before. A requirement that names ONE
+   * declares it here, and only an observation carrying that shape may satisfy it. Subject
+   * overlap remains an ADMISSION gate; it is never a coverage proof.
+   *
+   * Derived from the requirement's own wording when not stated explicitly (see
+   * `facetsOfRequirementText`), and preserved verbatim when a caller states it.
+   */
+  readonly dataFacets?: readonly DataFacet[];
+  /**
+   * The time window this requirement asks for, in hours, read from its own wording. When set,
+   * an observation must actually SPAN it: a snapshot fetched one second ago is fresh and
+   * spans zero hours, so it cannot answer "the last 24 hours".
+   */
+  readonly windowHours?: number;
+  /**
+   * Evidence refs that matched but carry the SAME payload identity as another ref already on
+   * this row: re-served copies, never additional facts. Kept so provenance survives while the
+   * informational count stays honest.
+   */
+  readonly duplicateEvidenceRefs?: readonly string[];
   /** Relationship type this requirement represents in the causal chain. */
   readonly relationshipType?: RelationshipType;
   /** Evidence quality assessment for this requirement's satisfied evidence. */
@@ -153,6 +187,67 @@ export interface CoverageEvidence {
   readonly sourceType?: "PRIMARY" | "SECONDARY" | "COMMUNITY" | "ANALYSIS";
   /** Adapter-flagged repeated content: never adds source diversity (same underlying report). */
   readonly duplicateContent?: boolean;
+  /** The data shapes this observation carries, resolved at the ingestion boundary. */
+  readonly dataFacets?: readonly DataFacet[];
+  /** Hours of time this observation spans on its own timestamps (a single print spans 0). */
+  readonly coverageHours?: number;
+  /** Identity of the underlying provider response: identical identity ⇒ one observation. */
+  readonly payloadIdentity?: string;
+}
+
+/**
+ * The subset of a stored Evidence object that coverage matching reads.
+ */
+export interface CoverageEvidenceSource {
+  readonly id: string;
+  readonly observation: string;
+  readonly evidenceType?: string;
+  readonly freshness?: string;
+  readonly timestamp?: string;
+  readonly subject?: string;
+  readonly sourceProvider?: string;
+  readonly sourceType?: "PRIMARY" | "SECONDARY" | "COMMUNITY" | "ANALYSIS";
+  readonly duplicateContent?: boolean;
+  readonly dataFacets?: readonly string[];
+  readonly coverageHours?: number;
+  readonly payloadIdentity?: string;
+}
+
+/**
+ * THE COVERAGE MAPPING — one place where a stored observation becomes a coverage candidate.
+ *
+ * This exists because the shape and span measured at ingestion were being dropped on the way
+ * to the matcher. The adapter declares its facets and `evidence.ts` measures `coverageHours`
+ * from the payload's own timestamps; if neither reaches `matchRequirement`, the matcher is
+ * left re-parsing the RENDERED observation text and sees no span at all. `windowCovers`
+ * refuses an unknown span, so every window-bearing requirement became unsatisfiable by ANY
+ * evidence — the mirror image of the original defect (a snapshot wrongly satisfying a 24-hour
+ * high became a correct 24-hour high being unsatisfiable). Both runners use this function so
+ * there is exactly one mapping to keep correct.
+ */
+export function coverageItemOf(e: CoverageEvidenceSource): CoverageEvidence {
+  return {
+    ref: e.id,
+    text: e.observation,
+    ...(e.evidenceType !== undefined ? { evidenceType: e.evidenceType } : {}),
+    ...(e.freshness !== undefined ? { freshness: e.freshness } : {}),
+    // The declared subject travels into coverage: a payload may never name its own ticker.
+    ...(e.subject !== undefined ? { subject: e.subject } : {}),
+    ...(e.timestamp !== undefined ? { observedAt: e.timestamp } : {}),
+    // Provenance-derived source identity/kind feed the requirement's evidence-quality
+    // assessment: sourceDiversity counts DISTINCT origins (transport/publisher/upstream),
+    // and a primary feed can satisfy a requirement as DIRECT_EVIDENCE.
+    ...(e.sourceProvider !== undefined ? { sourceProvider: e.sourceProvider } : {}),
+    ...(e.sourceType !== undefined ? { sourceType: e.sourceType } : {}),
+    ...(e.duplicateContent === true ? { duplicateContent: true } : {}),
+    // The data shape and the span the payload actually has. Facets are narrowed here: they
+    // were computed from `DataFacet` constants upstream, and coverage compares them as such.
+    ...(e.dataFacets !== undefined ? { dataFacets: e.dataFacets as readonly DataFacet[] } : {}),
+    ...(e.coverageHours !== undefined ? { coverageHours: e.coverageHours } : {}),
+    // Response identity: one provider response re-served under several capability names is
+    // ONE observation, never the corroboration the evidence count would otherwise suggest.
+    ...(e.payloadIdentity !== undefined ? { payloadIdentity: e.payloadIdentity } : {}),
+  };
 }
 
 const DAY_MS = 86_400_000;
@@ -448,6 +543,192 @@ export function roleOf(description: string, importance: "CRITICAL" | "SUPPORTING
   return importance === "CRITICAL" ? "CORE" : "SUPPORTING";
 }
 
+/**
+ * The atomic observational rows a question's own wording earns.
+ *
+ * Every spec is a shape the trader NAMED. Nothing is inferred from a provider, and nothing is
+ * added when the question named no shape — an observational question that asks only "what is
+ * the price" keeps the single current-value row it always had.
+ */
+function observationalFieldSpecs(
+  question: string,
+  _subject: string,
+): readonly EngineRequirementSpec[] {
+  const facets = new Set<DataFacet>(facetsOfRequirementText(question));
+  if (facets.size === 0) return [];
+  const window = requestedWindowHours(question);
+  const scope = window !== undefined ? ` over the last ${window} hours` : "";
+  const out: EngineRequirementSpec[] = [];
+  for (const facet of facets) {
+    const label = ATOMIC_LABELS[facet];
+    const description = (s: string) => `the observed ${label} for ${s}${scope}`;
+    out.push({
+      description,
+      role: "CORE",
+      importance: "CRITICAL",
+      timeSensitivity: "CURRENT",
+      evidenceClasses: fieldEvidenceClassesFor(facet),
+      dataFacets: [facet],
+      covers: fieldCoverPattern(facet),
+    });
+  }
+  return out;
+}
+
+/** Evidence classes that may SERVE a shape. Declarative: a class never confers a shape. */
+function fieldEvidenceClassesFor(facet: DataFacet): readonly string[] {
+  switch (facet) {
+    case "REPORTED_EVENT":
+      return ["NEWS", "HEADLINE", "EVENT", "ANNOUNCEMENT"];
+    case "VOLUME":
+    case "AGGREGATE_VOLUME":
+    case "HIGH":
+    case "LOW":
+    case "OPEN":
+    case "CLOSE":
+    case "OHLC":
+      return ["OHLCV", "PRICE", "MARKET_DATA", "RAW_DATA", "OBSERVATION"];
+    default:
+      return ["PRICE", "QUOTE", "MARKET_DATA", "RAW_DATA", "OBSERVATION"];
+  }
+}
+
+/** Does an already-present row already demand this shape? Read from its declared facets. */
+function fieldCoverPattern(facet: DataFacet): RegExp {
+  const words = ATOMIC_LABELS[facet].split(/\s+/).slice(0, 2).join("\\s+");
+  return new RegExp(`\\b${words}\\b`, "i");
+}
+
+/**
+ * FIELD-LEVEL DECOMPOSITION (research-integrity contract).
+ *
+ * A trader who enumerates the data they want gets ONE requirement per shape they named. The
+ * reproduction made this unmissable:
+ *
+ *   "Retrieve Bitcoin price sequence, high, low, and volume data for the last 24 hours."
+ *
+ * as a single row was satisfiable by a CoinGecko spot snapshot, because the row's only test was
+ * a shared token. Split, each shape stands or falls on its own: the price sequence needs a
+ * series that spans the window, the high needs a high, the low needs a low, the volume needs
+ * a volume field. One snapshot then settles exactly one of them and leaves the rest honestly
+ * unresolved, which is what the trader's "say which ones are unavailable" asks for.
+ *
+ * Three laws:
+ *  1. The rows KEEP the question's scope. Every atomic row carries the same role, importance,
+ *     time sensitivity, domains and window the parent row had — nothing is downgraded to make
+ *     it satisfiable, and nothing is dropped.
+ *  2. Decomposition is REFINEMENT, never relaxation. A row demanding several shapes is replaced
+ *     by rows demanding each; a row demanding one shape is left exactly as it is.
+ *  3. Text that names no data shape (a driver row, a thesis row, a counterevidence row) is
+ *     untouched, so every non-observational ledger keeps its existing behaviour verbatim.
+ */
+export function decomposeFieldRequirements(rows: readonly ResearchRequirement[]): ResearchRequirement[] {
+  const out: ResearchRequirement[] = [];
+  for (const row of rows) {
+    // ENGINE ROWS ARE NOT DECOMPOSED FROM THEIR WORDING (see `requiredFacetsOf`): their text
+    // describes a decision dimension, and an incidental data word must not manufacture demands
+    // the engine never intended. They pass through untouched.
+    if (row.engineRequired === true && row.dataFacets === undefined) {
+      out.push(row);
+      continue;
+    }
+    // IDEMPOTENCE: a row that already carries ONE explicit shape is already atomic and passes
+    // through untouched. Without this, an atomic row's own wording ("the observed high over the
+    // requested window") would name several shapes again and be split on every pass.
+    const declared = row.dataFacets;
+    if (declared !== undefined && declared.length <= 1) {
+      out.push(withDerivedShape(row, [...declared]));
+      continue;
+    }
+    const facets = declared ?? facetsOfRequirementText(row.description);
+    if (facets.length <= 1) {
+      out.push(withDerivedShape(row, facets));
+      continue;
+    }
+    const windowHours = requestedWindowHours(row.description);
+    const subject = /\bfor ([A-Z]{2,6})\b/.exec(row.description)?.[1];
+    for (const facet of facets) {
+      out.push({
+        ...row,
+        id: requirementId(out.length),
+        description: atomicDescriptionFor(row.description, facet, subject),
+        dataFacets: [facet],
+        ...(windowHours !== undefined ? { windowHours } : {}),
+        recoveryAttempts: 0,
+        status: "PENDING",
+        evidenceRefs: [],
+        staleOnlyRefs: [],
+        ...(row.duplicateEvidenceRefs !== undefined ? { duplicateEvidenceRefs: [] } : {}),
+        retrievalObjective: retrievalObjectiveFor(atomicDescriptionFor(row.description, facet, subject), row.timeSensitivity, row.role),
+      });
+    }
+  }
+  return out.map((row, i) => ({ ...row, id: requirementId(i) }));
+}
+
+/** Attach the shape a row derives from its own wording, without touching an explicit one. */
+function withDerivedShape(row: ResearchRequirement, facets: readonly DataFacet[]): ResearchRequirement {
+  // An ENGINE row declares its shapes; only a planner row has them read from its wording.
+  if (row.engineRequired === true) {
+    return row.dataFacets === undefined ? row : row;
+  }
+  const windowHours = requestedWindowHours(row.description);
+  return {
+    ...row,
+    ...(row.dataFacets !== undefined ? {} : { dataFacets: [...facets] }),
+    ...(row.windowHours !== undefined || windowHours === undefined ? {} : { windowHours }),
+  };
+}
+
+/**
+ * The wording of one atomic row. It keeps the parent's request in its own terms and names the
+ * shape it now stands for, so the trader's diagnostics read back as the shapes they asked for
+ * rather than as an internal schema.
+ */
+const ATOMIC_LABELS: Readonly<Record<DataFacet, string>> = {
+  SNAPSHOT: "current value",
+  SERIES: "timestamped price sequence",
+  OHLC: "open/high/low/close record for each interval",
+  OPEN: "opening price",
+  HIGH: "high",
+  LOW: "low",
+  CLOSE: "closing price",
+  VOLUME: "volume",
+  AGGREGATE_VOLUME: "aggregate volume",
+  TIMESTAMP: "time of each observation",
+  WINDOW: "window boundaries",
+  REPORTED_EVENT: "reported event dated inside the window",
+};
+
+function atomicDescriptionFor(parent: string, facet: DataFacet, subject: string | undefined): string {
+  const label = ATOMIC_LABELS[facet];
+  // Drop the enumeration the parent used ("price sequence, high, low, and volume data") so the
+  // atomic row names ONE shape: a row that still says "high, low and volume" would demand all
+  // three again and decomposition would be a no-op.
+  const trimmed = stripEnumerations(parent);
+  return `${trimmed} — ${label}${subject !== undefined ? ` for ${subject}` : ""}`.trim();
+}
+
+/**
+ * Remove an enumeration of data shapes from a parent requirement's text, leaving its subject,
+ * scope and window intact: "Retrieve Bitcoin price sequence, high, low, and volume data for the
+ * last 24 hours." becomes "Retrieve Bitcoin data for the last 24 hours.".
+ */
+function stripEnumerations(text: string): string {
+  return text
+    .replace(/\b(price|prices)\s+(?:path|sequence|trajectory|history|series)\b/gi, "data")
+    .replace(/\b(observed\s+)?(high|low)s?\b(?=\s*(?:and|,|\/|$|\.)|\s*,\s*(?:and\s+)?(?:high|low))/gi, "")
+    .replace(/\b(?:opening|open)(?:\/reference)?\s+price\b/gi, "")
+    .replace(/\b(?:closing|close)(?:\/current)?\s+price\b/gi, "")
+    .replace(/\b(?:timestamps?|dated|volume)\b/gi, "")
+    .replace(/\s*,(?:\s*,)+\s*/g, ", ")
+    .replace(/\bdata\s*,/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/,\s*\./g, ".")
+    .replace(/\s*[,;]\s*$/, "")
+    .trim();
+}
+
 /** Requirement-scoped retrieval objective handed to research workers (never the whole question). */
 export function retrievalObjectiveFor(description: string, timeSensitivity: TimeSensitivity, role: RequirementRole): string {
   const window = timeSensitivity === "CURRENT" ? "current data only" : timeSensitivity === "RECENT" ? "the recent period" : timeSensitivity === "HISTORICAL" ? "historical periods" : "the relevant period";
@@ -636,6 +917,12 @@ interface EngineRequirementSpec {
   readonly evidenceClasses: readonly string[];
   /** Does an existing requirement already state this dimension? */
   readonly covers: RegExp;
+  /**
+   * The data SHAPES this dimension demands, when it demands one. Absent for every
+   * non-observational dimension, which is what leaves driver/thesis/counterevidence rows
+   * matched exactly as they always were.
+   */
+  readonly dataFacets?: readonly DataFacet[];
   /** When present, the domain applies only to these subject market classes. */
   readonly markets?: readonly SubjectMarketClass[];
 }
@@ -913,6 +1200,19 @@ export function completeRequirements(
       specs.push(spec);
     }
   }
+  // OBSERVATIONAL FIELD ROWS (research-integrity contract): when the question itself ENUMERATES
+  // the data it wants ("the observed high, low, opening/reference price, closing/current price,
+  // timestamps, and volume"), the engine owes one CRITICAL row per named shape instead of one
+  // generic "current value" row. This is what makes the gap report name the missing shapes, and
+  // it is derived from the QUESTION's wording — never from what any provider happened to return.
+  //
+  // The single generic observation row is RETAINED below: a question that enumerates shapes
+  // still genuinely wants a current reading of its subject, and dropping it would weaken the
+  // ledger rather than sharpen it.
+  const observationalSpecs =
+    contract?.flow === "WHAT_HAPPENED" || questionType === "OBSERVATION"
+      ? observationalFieldSpecs(question, subject)
+      : [];
   // CHALLENGE is required only where the question asks for a conclusion to be tested.
   // The FLOW decides this when one is resolved: WHAT_HAPPENED owes no counterevidence row.
   const challengeRequired = contract !== undefined
@@ -927,7 +1227,31 @@ export function completeRequirements(
     });
   }
 
-  const out: ResearchRequirement[] = [...requirements];
+  const out: ResearchRequirement[] = decomposeFieldRequirements(requirements);
+
+  for (const spec of observationalSpecs) {
+    const description = spec.description(subject);
+    const covered = out.some((r) => r.role === spec.role && spec.covers.test(r.description));
+    if (covered) continue;
+    const domains = domainsOfRequirement(description);
+    out.push({
+      id: requirementId(out.length),
+      description,
+      importance: spec.importance,
+      role: spec.role,
+      timeSensitivity: spec.timeSensitivity,
+      domains: domains.length > 0 ? domains : (["PRICE_MARKET"] as const),
+      status: "PENDING",
+      evidenceRefs: [],
+      staleOnlyRefs: [],
+      recoveryAttempts: 0,
+      engineRequired: true,
+      evidenceClasses: [...spec.evidenceClasses],
+      ...(spec.dataFacets !== undefined ? { dataFacets: [...spec.dataFacets] } : {}),
+      ...(requestedWindowHours(question) !== undefined ? { windowHours: requestedWindowHours(question)! } : {}),
+      retrievalObjective: retrievalObjectiveFor(description, spec.timeSensitivity, spec.role),
+    });
+  }
   for (const spec of specs) {
     // Coverage of a dimension requires the SAME ROLE, not only overlapping vocabulary: a CORE
     // requirement worded "...supports the thesis that NVDA is weakening" must not be mistaken
@@ -1126,6 +1450,11 @@ export function completeRequirements(
         retrievalObjective: retrievalObjectiveFor(description, "CURRENT", "CORE"),
       });
     }
+
+    // FIELD DECOMPOSITION, LAST: after the engine has added its own rows, so the engine's
+    // observational row is split on the same law as a planner's. Idempotent — an already
+    // atomic row demands exactly one shape and passes through unchanged.
+    out.splice(0, out.length, ...decomposeFieldRequirements(out));
 
     // FLOW ISOLATION: every row whose decision dimension the resolved flow does NOT GRANT is
     // refused HERE, at ledger construction — never stripped at the UI, where the trader would see
@@ -1361,6 +1690,42 @@ export function concernsSubject(text: string, subjectTerms: ReadonlySet<string>)
   return false;
 }
 
+/**
+ * The shapes a requirement demands, after implication.
+ *
+ * An explicit declaration on the row is authoritative; otherwise the shapes are read from the
+ * row's OWN wording, which is what lets a planner-authored requirement ("Retrieve Bitcoin price
+ * sequence, high, low, and volume data for the last 24 hours.") be held to the contract without
+ * the planner having to learn a new schema. A row that names no shape demands nothing.
+ */
+/** Source kinds that make an item a CLAIM about the world rather than an observation of it. */
+function isReportingSourceType(
+  sourceType: "PRIMARY" | "SECONDARY" | "COMMUNITY" | "ANALYSIS" | undefined,
+): boolean {
+  return sourceType === "SECONDARY" || sourceType === "COMMUNITY" || sourceType === "ANALYSIS";
+}
+
+/**
+ * The shapes a requirement demands, after implication.
+ */
+export function requiredFacetsOf(req: Pick<ResearchRequirement, "dataFacets" | "description" | "engineRequired">): ReadonlySet<DataFacet> {
+  const declared = req.dataFacets;
+  if (declared !== undefined) return impliedFacets(new Set<DataFacet>(declared));
+  // ENGINE ROWS MUST DECLARE. An engine dimension's wording describes the DECISION it serves,
+  // not a data shape to retrieve: "the explicit period over period change for X (price, volume
+  // and range) as a calculated comparison" is a CALCULATION the engine computes from other
+  // evidence, and letting the word "volume" turn it into a demand for a retrieved volume series
+  // would have made a correct comparison run unsatisfiable. Only a planner-authored row has its
+  // shapes read from its own wording, and an engine row opts in by declaring them.
+  if (req.engineRequired === true) return new Set<DataFacet>();
+  return impliedFacets(new Set<DataFacet>(facetsOfRequirementText(req.description)));
+}
+
+/** The window a requirement asks for, in hours; an explicit declaration wins over wording. */
+export function requirementWindowHours(req: Pick<ResearchRequirement, "windowHours" | "description">): number | undefined {
+  return req.windowHours ?? requestedWindowHours(req.description);
+}
+
 /** Is the observation fresh enough for this requirement's time sensitivity? */
 export function freshnessSufficient(req: Pick<ResearchRequirement, "timeSensitivity" | "description">, item: CoverageEvidence, now: Date): boolean {
   if (req.timeSensitivity === "ANY") return true;
@@ -1495,6 +1860,38 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
     const cryptoNative = [...CRYPTO_DOMAIN_TOKENS].some((t) => itemTokenSet2.has(t)) || itemDomain === "ONCHAIN" || itemDomain === "DEFI";
     if (cryptoNative) return "NO_MATCH";
   }
+  // DATA-SHAPE LAW (research-integrity contract): coverage is decided by what the observation
+  // CONTAINS. This gate runs AFTER every relevance gate above (is this about my subject? is it
+  // about the right domain?) and BEFORE vocabulary overlap can ever produce SATISFIES, because
+  // overlap only ever answered "is this about the right thing" — never "does it contain what
+  // was asked for".
+  //
+  // The reproduction: "Retrieve Bitcoin price sequence, high, low, and volume data for the last
+  // 24 hours" was SATISFIED by a CoinGecko /simple/price snapshot. The only shared token was
+  // BITCOIN. This gate is why the asset name is now an admission fact and never a coverage proof.
+  //
+  // Two checks, in this order:
+  //  1. SHAPE: the observation must carry every shape the row demands. A row that demands no
+  //     shape is untouched — drivers, thesis and counterevidence rows keep their own law.
+  //  2. WINDOW: when the row asks for a window, the observation must actually SPAN it. Age and
+  //     span are different axes: a snapshot one second old is fresh and spans zero hours.
+  const demandedFacets = requiredFacetsOf(req);
+  if (demandedFacets.size > 0) {
+    const served = servedFacetsOf({
+      text: item.text,
+      ...(item.dataFacets !== undefined ? { dataFacets: item.dataFacets } : {}),
+      // A REPORTING source kind marks a claim ABOUT the world. An UNKNOWN kind is not a claim:
+      // "this item has no declared source type" must never silently demote a primary
+      // quantitative feed that simply did not declare one.
+      ...(isReportingSourceType(item.sourceType) ? { reported: true } : {}),
+      newsDomain: itemDomain === "NEWS",
+    });
+    if (facetCoverage(demandedFacets, served) !== "FULL") return "NO_MATCH";
+    const windowHours = req.windowHours ?? requestedWindowHours(req.description);
+    if (windowHours !== undefined && demandsSpan(demandedFacets) && !windowCovers(windowHours, item.coverageHours)) {
+      return "NO_MATCH";
+    }
+  }
   // ARROW ADMISSION LAW (research contract §3): an arrow row has its OWN admission law and never
   // falls through to the dimension vocabulary/class paths. Endpoint coverage is not transmission
   // coverage — strong evidence for both endpoints must never make an unsupported arrow supported.
@@ -1623,6 +2020,19 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
  * the quality of the evidence based on source diversity, directness, and consistency.
  * This prevents the model from treating correlation as causation.
  */
+/**
+ * How many DISTINCT observations actually back a requirement.
+ *
+ * This is the number the trader reads as evidence. Re-served copies of one provider response
+ * are excluded: a capability-level provider reached under several capability names used to
+ * report one snapshot as several observations, which reads as corroboration and is not.
+ */
+export function distinctEvidenceCount(
+  req: Pick<ResearchRequirement, "evidenceRefs" | "duplicateEvidenceRefs">,
+): number {
+  return req.evidenceRefs.length;
+}
+
 export function assessCoverage(
   requirements: readonly ResearchRequirement[],
   items: readonly CoverageEvidence[],
@@ -1632,14 +2042,27 @@ export function assessCoverage(
     if (req.status === "EXHAUSTED" || req.status === "UNAVAILABLE") return req;
     const satisfied: string[] = [];
     const staleOnly: string[] = [];
+    // RESPONSE-IDENTITY LAW: one provider response re-served under another capability name is
+    // ONE observation. Its ref is preserved (provenance is not erased) and recorded as a
+    // duplicate, but it never becomes a second fact and never inflates the informational
+    // count the trader reads as corroboration.
+    const satisfiedIdentity = new Map<string, string>();
+    const duplicates: string[] = [];
     for (const item of items) {
       const result = matchRequirement(req, item, opts);
-      if (result === "SATISFIES") satisfied.push(item.ref);
-      else if (result === "STALE_ONLY") staleOnly.push(item.ref);
+      if (result === "SATISFIES") {
+        const identity = item.payloadIdentity;
+        if (identity !== undefined && satisfiedIdentity.has(identity)) {
+          duplicates.push(item.ref);
+          continue;
+        }
+        if (identity !== undefined) satisfiedIdentity.set(identity, item.ref);
+        satisfied.push(item.ref);
+      } else if (result === "STALE_ONLY") staleOnly.push(item.ref);
     }
     const status: RequirementStatus =
       satisfied.length > 0 ? "SATISFIED" : staleOnly.length > 0 ? "PARTIALLY_SATISFIED" : req.status === "PARTIALLY_SATISFIED" ? "PARTIALLY_SATISFIED" : "PENDING";
-    
+
     // EVIDENCE QUALITY ASSESSMENT: for satisfied requirements, assess the quality
     const updatedReq = { ...req, status, evidenceRefs: satisfied, staleOnlyRefs: staleOnly };
     if (status === "SATISFIED" && satisfied.length > 0) {
@@ -1647,6 +2070,7 @@ export function assessCoverage(
       const qualityAssessment = assessEvidenceQuality(updatedReq, satisfiedEvidence);
       return {
         ...updatedReq,
+        ...(duplicates.length > 0 ? { duplicateEvidenceRefs: duplicates } : {}),
         evidenceQuality: qualityAssessment.quality,
         evidenceDirectness: qualityAssessment.directness,
         sourceDiversity: qualityAssessment.sourceDiversity,
@@ -1774,30 +2198,55 @@ export interface CapabilitySupport {
   readonly domains: readonly EvidenceDomain[];
   readonly dataTypes: readonly string[];
   readonly freshness: readonly TimeSensitivity[];
+  /**
+   * THE SHAPES THIS CAPABILITY CAN PRODUCE (research-integrity contract).
+   *
+   * A declaration is a RANKING signal, never a coverage guarantee: it says what a capability is
+   * able to return when its provider is healthy, so a request for a price PATH ranks the candle
+   * path above a spot-quote path instead of tying on vocabulary and letting the alphabetical
+   * tie-break pick the poorer one (the production failure scheduled COMMODITY_MARKET_DATA — zero
+   * providers — ahead of the crypto one). The guarantee lives where it can be observed for
+   * certain, at the evidence layer: `matchRequirement` still decides satisfaction from what a
+   * payload ACTUALLY carries, so an over-optimistic declaration costs ranking points, never a
+   * false SATISFIED.
+   *
+   * Market-class scope is the second half of the same fix: a commodity, FX or equity market-data
+   * capability must never be scheduled for a crypto subject, however well its vocabulary scored.
+   */
+  readonly facets?: readonly DataFacet[];
+  /** Market classes this capability can serve; absent means "any class it is offered for". */
+  readonly marketClasses?: readonly SubjectMarketClass[];
 }
 
 export const CAPABILITY_SUPPORT: Readonly<Record<string, CapabilitySupport>> = {
-  MARKET_DATA_ANALYSIS: { domains: ["PRICE_MARKET", "TECHNICAL"], dataTypes: ["PRICE", "OHLCV", "VOLUME", "QUOTE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
-  TECHNICAL_ANALYSIS: { domains: ["TECHNICAL", "PRICE_MARKET"], dataTypes: ["INDICATOR", "TREND", "MOMENTUM", "SETUP"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
+  MARKET_DATA_ANALYSIS: { domains: ["PRICE_MARKET", "TECHNICAL"], dataTypes: ["PRICE", "OHLCV", "VOLUME", "QUOTE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"], facets: ["SNAPSHOT", "SERIES", "OHLC", "HIGH", "LOW", "OPEN", "CLOSE", "VOLUME", "TIMESTAMP"] },
   SENTIMENT_ANALYSIS: { domains: ["SENTIMENT", "PRICE_MARKET"], dataTypes: ["SENTIMENT", "POSITIONING", "PROXY"], freshness: ["CURRENT", "RECENT"] },
-  NEWS_ANALYSIS: { domains: ["NEWS", "MACRO", "PRICE_MARKET"], dataTypes: ["NEWS", "HEADLINE", "EVENT", "DRIVER", "DEVELOPMENT", "TRANSMISSION", "RELATIONSHIP"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
+  NEWS_ANALYSIS: { domains: ["NEWS", "MACRO", "PRICE_MARKET"], dataTypes: ["NEWS", "HEADLINE", "EVENT", "DRIVER", "DEVELOPMENT", "TRANSMISSION", "RELATIONSHIP"], freshness: ["CURRENT", "RECENT", "HISTORICAL"], facets: ["REPORTED_EVENT", "TIMESTAMP"] },
   MACRO_ANALYSIS: { domains: ["MACRO"], dataTypes: ["POLICY", "RATE", "YIELD", "INFLATION", "GROWTH", "LABOR", "LIQUIDITY", "CREDIT", "USD", "DOLLAR", "VOLATILITY", "REGIME", "TRANSMISSION", "RELATIONSHIP"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   DERIVATIVES_ANALYSIS: { domains: ["DERIVATIVES"], dataTypes: ["FUNDING", "OPEN_INTEREST", "POSITIONING", "LIQUIDATION"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
-  HISTORICAL_COMPARISON: { domains: ["HISTORICAL", "PRICE_MARKET", "TECHNICAL", "GENERAL"], dataTypes: ["OHLCV", "EPISODE", "OUTCOME", "CYCLE", "ANALOGUE"], freshness: ["HISTORICAL", "ANY"] },
+  HISTORICAL_COMPARISON: { domains: ["HISTORICAL", "PRICE_MARKET", "TECHNICAL", "GENERAL"], dataTypes: ["OHLCV", "EPISODE", "OUTCOME", "CYCLE", "ANALOGUE"], freshness: ["HISTORICAL", "ANY"], facets: ["SERIES", "OHLC", "HIGH", "LOW", "OPEN", "CLOSE", "VOLUME", "TIMESTAMP"] },
   FALSIFICATION: { domains: ["GENERAL", "NEWS"], dataTypes: ["DISCONFIRMING", "RISK", "COUNTEREVIDENCE"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
   SOURCE_VALIDATION: { domains: ["GENERAL", "NEWS"], dataTypes: ["PRIMARY", "VERIFICATION", "PROVENANCE"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
   WEB_SEARCH: { domains: ["GENERAL", "NEWS", "PROJECT", "MACRO", "FUNDAMENTALS"], dataTypes: ["SEARCH", "PRIMARY", "DEVELOPMENT", "NARRATIVE", "TRANSMISSION", "RELATIONSHIP"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
   ONCHAIN_ANALYSIS: { domains: ["ONCHAIN"], dataTypes: ["ADDRESS", "HOLDER", "TRANSACTION", "RESERVE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   DEFI_ANALYSIS: { domains: ["DEFI"], dataTypes: ["TVL", "PROTOCOL", "LIQUIDITY", "STAKING"], freshness: ["CURRENT", "RECENT"] },
   PROJECT_RESEARCH: { domains: ["PROJECT", "NEWS", "ONCHAIN", "DEFI"], dataTypes: ["DESCRIPTION", "ECOSYSTEM", "NARRATIVE", "TEAM", "ROADMAP"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
-  EQUITY_MARKET_DATA: { domains: ["PRICE_MARKET", "MACRO"], dataTypes: ["PRICE", "OHLCV", "VOLUME", "QUOTE", "YIELD", "VOLATILITY", "USD", "INDEX", "RATE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
+  EQUITY_MARKET_DATA: { domains: ["PRICE_MARKET", "MACRO"], dataTypes: ["PRICE", "OHLCV", "VOLUME", "QUOTE", "YIELD", "VOLATILITY", "USD", "INDEX", "RATE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"], facets: ["SNAPSHOT", "SERIES", "OHLC", "HIGH", "LOW", "OPEN", "CLOSE", "VOLUME", "TIMESTAMP"], marketClasses: ["EQUITY", "INDEX"] },
   EQUITY_FUNDAMENTALS: { domains: ["FUNDAMENTALS"], dataTypes: ["REVENUE", "MARGIN", "VALUATION", "SHARES", "BALANCE_SHEET"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   EARNINGS_CALENDAR: { domains: ["EARNINGS"], dataTypes: ["EARNINGS_DATE", "CONSENSUS", "ESTIMATE", "GUIDANCE", "REPORT"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   EQUITY_NEWS: { domains: ["NEWS", "EARNINGS", "FUNDAMENTALS"], dataTypes: ["HEADLINE", "COMPANY_EVENT", "ANNOUNCEMENT", "CATALYST"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   LOCAL_KNOWLEDGE_RETRIEVAL: { domains: ["GENERAL"], dataTypes: ["FRAMEWORK", "SAVED_RESEARCH", "METHODOLOGY", "NOTE"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
-  CRYPTO_MARKET_DATA: { domains: ["PRICE_MARKET"], dataTypes: ["PRICE", "OHLCV", "VOLUME", "QUOTE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
-  COMMODITY_MARKET_DATA: { domains: ["PRICE_MARKET"], dataTypes: ["PRICE", "OHLCV", "VOLUME", "QUOTE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
-  FX_MARKET_DATA: { domains: ["PRICE_MARKET"], dataTypes: ["PRICE", "OHLCV", "VOLUME", "QUOTE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
+  // SHAPE DECLARATIONS: what each market-data chain can actually return.
+  //  - CRYPTO: exchange-native candles via the market-intel/klines paths, plus a keyless
+  //    aggregate spot fallback. It can serve a PATH, not only a quote.
+  //  - COMMODITY / FX / EQUITY: quotes, volumes and series from their own venues.
+  //  - TECHNICAL_ANALYSIS: raw OHLCV candles (TechnicalKlinesRestAdapter) as well as indicators,
+  //    which is what makes a "give me the price path" request reachable at all — before this it
+  //    declared only INDICATOR/TREND/MOMENTUM/SETUP and could never win a series requirement.
+  CRYPTO_MARKET_DATA: { domains: ["PRICE_MARKET"], dataTypes: ["PRICE", "OHLCV", "VOLUME", "QUOTE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"], facets: ["SNAPSHOT", "SERIES", "OHLC", "HIGH", "LOW", "OPEN", "CLOSE", "VOLUME", "TIMESTAMP"], marketClasses: ["CRYPTO"] },
+  COMMODITY_MARKET_DATA: { domains: ["PRICE_MARKET"], dataTypes: ["PRICE", "OHLCV", "VOLUME", "QUOTE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"], facets: ["SNAPSHOT", "SERIES", "HIGH", "LOW", "OPEN", "CLOSE", "VOLUME", "TIMESTAMP"], marketClasses: ["COMMODITY", "METAL"] },
+  FX_MARKET_DATA: { domains: ["PRICE_MARKET"], dataTypes: ["PRICE", "OHLCV", "VOLUME", "QUOTE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"], facets: ["SNAPSHOT", "SERIES", "HIGH", "LOW", "OPEN", "CLOSE", "VOLUME", "TIMESTAMP"], marketClasses: ["FX"] },
+  TECHNICAL_ANALYSIS: { domains: ["TECHNICAL", "PRICE_MARKET"], dataTypes: ["INDICATOR", "TREND", "MOMENTUM", "SETUP", "OHLCV", "VOLUME"], freshness: ["CURRENT", "RECENT", "HISTORICAL"], facets: ["SERIES", "OHLC", "HIGH", "LOW", "OPEN", "CLOSE", "VOLUME", "TIMESTAMP"] },
 };
 
 /**
@@ -1808,13 +2257,23 @@ export const CAPABILITY_SUPPORT: Readonly<Record<string, CapabilitySupport>> = {
  */
 export function capabilitiesForRequirement(
   requirement: ResearchRequirement,
-  opts: { readonly isAvailable?: (cap: string) => boolean; readonly limit?: number } = {},
+  opts: {
+    readonly isAvailable?: (cap: string) => boolean;
+    readonly limit?: number;
+    /** The question's resolved market class, used to keep cross-asset chains out. */
+    readonly marketClass?: SubjectMarketClass;
+  } = {},
 ): readonly string[] {
   const reqTokens = meaningfulTokens(`${requirement.description} ${requirement.domains.join(" ")}`);
+  const demanded = requiredFacetsOf(requirement);
   const scored: { readonly cap: string; readonly score: number }[] = [];
   for (const [cap, support] of Object.entries(CAPABILITY_SUPPORT)) {
     const domainHits = support.domains.filter((d) => requirement.domains.includes(d)).length;
     if (domainHits === 0) continue;
+    // MARKET-CLASS SCOPE: a commodity chain cannot serve a crypto subject and vice versa. The
+    // production failure scheduled COMMODITY_MARKET_DATA for a Bitcoin question purely on an
+    // alphabetical tie-break; it returned nothing and burned the round the crypto path needed.
+    if (opts.marketClass !== undefined && support.marketClasses !== undefined && !support.marketClasses.includes(opts.marketClass)) continue;
     const freshnessOk =
       requirement.timeSensitivity === "ANY" || support.freshness.includes(requirement.timeSensitivity);
     if (!freshnessOk) continue; // a historical-only capability cannot serve a CURRENT need
@@ -1824,9 +2283,14 @@ export function capabilitiesForRequirement(
     // spends a round on a guaranteed empty result (the caller's intent — "recovery never
     // schedules a capability the deployment cannot execute" — was only affecting the score).
     if (opts.isAvailable !== undefined && !opts.isAvailable(cap)) continue;
+    // SHAPE AFFINITY: a capability that declares the demanded shapes outranks one that can only
+    // return a quote, so "give me the price path" ranks the candle path first. This is ranking
+    // only — `matchRequirement` still decides satisfaction from the evidence itself.
+    const servedFacets = support.facets ?? [];
+    const shapeHits = [...demanded].filter((f) => servedFacets.includes(f)).length;
     scored.push({
       cap,
-      score: domainHits * 10 + typeHits * 4 + 2 + (support.freshness.includes("ANY") ? 0 : 1),
+      score: domainHits * 10 + typeHits * 4 + shapeHits * 6 + 2 + (support.freshness.includes("ANY") ? 0 : 1),
     });
   }
   scored.sort((a, b) => b.score - a.score || a.cap.localeCompare(b.cap));
@@ -1847,7 +2311,13 @@ export const DISCONFIRMATION_CAPABILITIES: readonly string[] = Object.entries(CA
  */
 export function recoveryCapabilities(
   blocking: readonly ResearchRequirement[],
-  opts: { readonly isAvailable?: (cap: string) => boolean; readonly limit?: number; readonly exclude?: readonly string[] } = {},
+  opts: {
+    readonly isAvailable?: (cap: string) => boolean;
+    readonly limit?: number;
+    readonly exclude?: readonly string[];
+    /** The question's resolved market class; keeps cross-asset chains out of recovery. */
+    readonly marketClass?: SubjectMarketClass;
+  } = {},
 ): readonly string[] {
   const limit = opts.limit ?? 4;
   const excluded = new Set(opts.exclude ?? []);
@@ -1906,6 +2376,8 @@ export function mandatoryCapabilities(
     readonly isAvailable?: (cap: string) => boolean;
     readonly exclude?: readonly string[];
     readonly limit?: number;
+    /** The question's resolved market class; keeps cross-asset chains out of the floor. */
+    readonly marketClass?: SubjectMarketClass;
     /**
      * Capabilities the plan EXPLICITLY excluded from scope (the plan's scopeExcluded, mapped by
      * the planner to capability names). The floor must not silently undo a declared exclusion:

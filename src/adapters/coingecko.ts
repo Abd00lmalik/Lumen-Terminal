@@ -90,6 +90,17 @@ function coinIdOf(params: Record<string, unknown>): string | undefined {
 export class CoinGeckoMarketDataAdapter implements ProviderAdapter {
   readonly providerId = "fallback/coingecko-market";
   readonly capabilities: readonly CapabilityName[] = ["MARKET_DATA_ANALYSIS", "CRYPTO_MARKET_DATA"];
+  /**
+   * THE SHAPES THIS FALLBACK PRODUCES — stated by the adapter that knows what it called.
+   *
+   * CoinGecko's `/simple/price` returns one instant: a current price, a 24h percentage change,
+   * market cap, a rolling 24h volume TOTAL and a single `asOf`. It is not a candle feed and
+   * carries no high, no low, no open, no close and no series, so it must never be credited with
+   * them. Declaring this explicitly is what stops a capability-level fallback from silently
+   * standing in for the richer primary it replaced: a question asking for the 24-hour path stays
+   * unresolved on this evidence instead of reading as complete.
+   */
+  readonly dataFacets = ["SNAPSHOT", "CLOSE", "AGGREGATE_VOLUME", "TIMESTAMP"] as const;
   readonly limitations: readonly string[] = [
     "CoinGecko public API: aggregated USD market data, not an exchange-native order-book view",
     "spot price/24h statistics only; no order book, no OHLCV klines from this fallback",
@@ -153,6 +164,8 @@ export class CoinGeckoMarketDataAdapter implements ProviderAdapter {
     const outputs: ToolOutput[] = [
       {
         outputClass: "QUANTITATIVE_OBSERVATION" as const,
+        dataFacets: [...this.dataFacets],
+        coverageHours: 0,
         content: {
           coin: coinId,
           priceUsd: price,

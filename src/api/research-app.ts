@@ -38,7 +38,7 @@ import {
 } from "./dto.js";
 import { InvalidRequestError, ModelFailureError, PersistenceFailureError, NotFoundError } from "./errors.js";
 import { renderConfidence, type ConfidenceComponents } from "../research/confidence.js";
-import { questionTypeOf } from "../research/requirements.js";
+import { questionTypeOf, distinctEvidenceCount } from "../research/requirements.js";
 import { contractFor } from "../research/flow-contract.js";
 import {
   judgmentPermitted,
@@ -540,6 +540,7 @@ export class ResearchApp {
         readonly id: string; readonly description: string; readonly importance: string; readonly timeSensitivity: string;
         readonly role?: string;
         readonly status: string; readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[];
+        readonly duplicateEvidenceRefs?: readonly string[];
         readonly recoveryAttempts: number; readonly missingReason?: string;
       }[];
       readonly floorCapabilities?: readonly string[];
@@ -609,7 +610,8 @@ export class ResearchApp {
                 importance: r.importance,
                 timeSensitivity: r.timeSensitivity,
                 status: r.status,
-                evidenceCount: r.evidenceRefs.length,
+                evidenceCount: distinctEvidenceCount(r),
+                duplicateEvidenceCount: r.duplicateEvidenceRefs?.length ?? 0,
                 staleEvidenceCount: r.staleOnlyRefs.length,
                 recoveryAttempts: r.recoveryAttempts,
                 ...(r.missingReason !== undefined ? { unresolvedReason: r.missingReason } : {}),

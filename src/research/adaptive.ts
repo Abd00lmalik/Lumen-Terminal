@@ -45,6 +45,7 @@ import {
 import {
   assessCoverage,
   buildRequirements,
+  coverageItemOf,
   CAPABILITY_SUPPORT,
   blockingRequirements,
   completeRequirements,
@@ -666,6 +667,7 @@ export async function runAdaptiveResearch(
         ...mandatoryCapabilities(requirements, {
           isAvailable: capabilityUsable,
           exclude: [...planned],
+          ...(resolvedAsset !== undefined ? { marketClass: engineMarketClass(currentRun()?.userQuestion ?? objective, resolvedAsset) } : {}),
           // The plan's declared exclusions are SCOPE, not oversight: the floor closes gaps, it
           // never widens scope the question already excluded.
           excludedFromScope: plan.scopeExcluded.flatMap((s) => scopeExclusionToCapabilities(s, capabilityUsable)),
@@ -726,6 +728,17 @@ export async function runAdaptiveResearch(
         roundsSkippedByBudget = true;
         break;
       }
+      // THE SHAPES THIS RUN STILL OWES: the union of the unmet rows' demanded data shapes, in a
+  // stable order. Read from the ledger, so it changes exactly when the trader's request does.
+  const requiredFacetBrief = (): readonly string[] => {
+    const out: string[] = [];
+    for (const row of requirements) {
+      if (row.status === "SATISFIED" || row.role === "CONTEXT" || row.role === "CHALLENGE") continue;
+      for (const facet of row.dataFacets ?? []) if (!out.includes(facet)) out.push(facet);
+    }
+    return out;
+  };
+
       // Independent capability calls run in PARALLEL (performance mandate §32): the registry
       // executes each through its own provider chain with bounded transport timeouts, and one
       // failure never cancels siblings. Evidence ingestion stays in plan order after all
@@ -734,7 +747,17 @@ export async function runAdaptiveResearch(
         options.onProgress?.(progressEvent("capability_started", at(), `capability ${capability} started`, { capability }));
         const result = await options.registry.execute(
           capability,
-          { ...(options.capabilityParams ?? {}) },
+          {
+            ...(options.capabilityParams ?? {}),
+            // SHAPE BRIEF (research-integrity contract): the unresolved rows' demanded data
+            // shapes travel with the call, so a provider that serves several shapes from one
+            // tool can serve the RIGHT one. The market-intel tool answers `crypto_market` for a
+            // spot reading and the same `crypto_market` for an hourly candle series; without this
+            // brief it could only pick its default, which is why a request for the last 24 hours
+            // of price path came back as one instant. This is a REQUEST, never a claim about
+            // what will be served — coverage is decided from the payload when it arrives.
+            ...(requiredFacetBrief().length > 0 ? { requiredFacets: requiredFacetBrief() } : {}),
+          },
           systemOrigin,
           at(),
         );
@@ -905,6 +928,7 @@ export async function runAdaptiveResearch(
           ? recoveryCapabilities(dimensionReqs, {
               isAvailable: capabilityUsable,
               exclude: allExecutions.map((e) => e.capability),
+              ...(resolvedAsset !== undefined ? { marketClass: engineMarketClass(currentRun()?.userQuestion ?? objective, resolvedAsset) } : {}),
             })
           : [];
         if (
@@ -1362,22 +1386,7 @@ function coverageEvidenceOf(workspace: Workspace, researchRef: string): readonly
   for (const ref of research.evidenceRefs) {
     const e = workspace.getEvidence(ref);
     if (e === undefined) continue;
-    items.push({
-      ref: e.id,
-      text: e.observation,
-      evidenceType: e.evidenceType,
-      freshness: e.freshness,
-      // The declared subject travels into coverage: a payload may never name its own ticker.
-      ...(e.subject !== undefined ? { subject: e.subject } : {}),
-      ...(e.timestamp !== undefined ? { observedAt: e.timestamp } : {}),
-      // Provenance-derived source identity/kind feed the requirement's evidence-quality
-      // assessment: sourceDiversity counts DISTINCT origins (transport/publisher/upstream),
-      // and a primary feed can satisfy a requirement as DIRECT_EVIDENCE. Without these the
-      // assessment defaulted every real item to a single unknown source (CORRELATIONAL).
-      ...(e.sourceProvider !== undefined ? { sourceProvider: e.sourceProvider } : {}),
-      ...(e.sourceType !== undefined ? { sourceType: e.sourceType } : {}),
-      ...(e.duplicateContent === true ? { duplicateContent: true } : {}),
-    });
+    items.push(coverageItemOf(e));
   }
   return items;
 }

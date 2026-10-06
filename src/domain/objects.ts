@@ -127,6 +127,26 @@ export interface Evidence {
    */
   readonly duplicateContent?: boolean;
   /**
+   * THE SHAPE OF THIS OBSERVATION (research-integrity contract): the data facets the payload
+   * actually carries, resolved at the ingestion boundary from the data the adapter received.
+   * Coverage is decided by comparing these against the facets a requirement demands, so a
+   * spot snapshot can never satisfy a request for a windowed path, a high or a low.
+   */
+  readonly dataFacets?: readonly string[];
+  /**
+   * How much TIME this observation spans, in hours, measured on the payload's own timestamps.
+   * A single print spans 0. Freshness (how old the newest point is) and span (how far back the
+   * data reaches) are different axes; only the second can answer "the last 24 hours".
+   */
+  readonly coverageHours?: number;
+  /**
+   * IDENTITY OF THE UNDERLYING PROVIDER RESPONSE: stable across the evidence objects produced
+   * when one provider response is routed through more than one capability. Two objects with
+   * the same identity are ONE observation re-served, never independent corroboration, and
+   * never a second fact.
+   */
+  readonly payloadIdentity?: string;
+  /**
    * RUN OWNERSHIP (provenance contract): the research object whose run retrieved this
    * observation. This is the AUTHORITATIVE relational owner — never inferred from a timestamp,
    * an id's numeric prefix, a capability name, or a source. Undefined only for evidence that
@@ -159,6 +179,9 @@ export function createEvidence(
     sourceType?: "PRIMARY" | "SECONDARY" | "COMMUNITY" | "ANALYSIS";
     sourcing?: SourcingClass;
     duplicateContent?: boolean;
+    dataFacets?: readonly string[];
+    coverageHours?: number;
+    payloadIdentity?: string;
   },
   origin: ProvenanceOrigin,
   at = new Date(),
@@ -185,6 +208,9 @@ export function createEvidence(
     ...(input.sourcing !== undefined ? { sourcing: input.sourcing } : {}),
     ...(input.duplicateContent !== undefined ? { duplicateContent: input.duplicateContent } : {}),
     ...(input.subject !== undefined ? { subject: input.subject } : {}),
+    ...(input.dataFacets !== undefined ? { dataFacets: Object.freeze([...input.dataFacets]) } : {}),
+    ...(input.coverageHours !== undefined ? { coverageHours: input.coverageHours } : {}),
+    ...(input.payloadIdentity !== undefined ? { payloadIdentity: input.payloadIdentity } : {}),
     ...(input.researchRef !== undefined ? { researchRef: input.researchRef } : {}),
     provenance: createProvenance(origin, `evidence classified as ${input.evidenceClass}`, at),
   });
