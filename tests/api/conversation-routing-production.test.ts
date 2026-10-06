@@ -287,6 +287,96 @@ describe("a subject-less standalone question inside a live thread (documented ru
 });
 
 // ---------------------------------------------------------------------------
+// 1b. Phase 3: the thread-drop regressions (dimension changes on a live thread)
+// ---------------------------------------------------------------------------
+
+/**
+ * THE THREE TURN SHAPES THAT DROPPED THE THREAD. Each names no new subject (or names the
+ * thread's OWN subject), so the trader plainly meant the investigation on screen, and each
+ * was routed START/NEW_INVESTIGATION — abandoning every run in the thread and, for the
+ * comparison case, leaving the trader's own anaphor with nothing to resolve it.
+ */
+describe("a falsification follow-up continues instead of opening a new investigation", () => {
+  it("'What would prove that wrong?' continues as FALSIFICATION", () => {
+    // The regex only knew "what could prove", so the five-word "would" phrasing fell through
+    // to the self-contained-question default even though it refers to the thread's reading.
+    const result = route("What would prove that wrong?");
+    expect(result.action).toBe("CONTINUE");
+    expect(result.intent).toBe("FALSIFICATION");
+    expect(result.continuedInvestigation).toBe(true);
+  });
+
+  it("the already-handled phrasing still continues", () => {
+    expect(route("What could prove that explanation wrong?").action).toBe("CONTINUE");
+  });
+});
+
+describe("a time-window restatement continues the same investigation", () => {
+  it("'Now look at the last 7 days.' changes WHEN, not WHAT — it continues", () => {
+    const result = route("Now look at the last 7 days.");
+    expect(result.action).toBe("CONTINUE");
+    expect(result.intent).toBe("FOLLOW_UP");
+    expect(result.continuedInvestigation).toBe(true);
+  });
+
+  it("without a live thread the same words are a new investigation", () => {
+    const bare = routeConversation({
+      message: "Now look at the last 7 days.", investigation: undefined, hasPriorResearch: false, hasInvestigationThesis: false,
+    });
+    expect(bare.action).toBe("START");
+  });
+
+  it("a window restatement that also names a foreign subject still switches", () => {
+    const result = route("Now look at the last 7 days for Ethereum.");
+    expect(result.action).toBe("START");
+    expect(result.intent).toBe("TOPIC_SWITCH");
+  });
+
+  it("plain freshness words are not a window change (standalone questions still start)", () => {
+    expect(route("What is the weather in Tokyo?").action).toBe("START");
+    expect(route("How do I bake sourdough bread?").action).toBe("START");
+  });
+});
+
+describe("an anchored comparison continues the thread it stands on", () => {
+  it("'Compare that with ETH.' continues — 'that' IS the thread", () => {
+    // The topic-switch law saw the ETH and opened a fresh thread, so the comparison ran
+    // without the Bitcoin evidence the trader was explicitly comparing against.
+    const result = route("Compare that with ETH.");
+    expect(result.action).toBe("CONTINUE");
+    expect(result.intent).toBe("RELATED");
+    expect(result.continuedInvestigation).toBe(true);
+  });
+
+  it("the anaphor may be spelled 'this move' as well", () => {
+    expect(route("Compare this move with ETH.").action).toBe("CONTINUE");
+  });
+
+  it("naming the investigation's own subject anchors without an anaphor", () => {
+    expect(route("Compare BTC with ETH performance this month.").action).toBe("CONTINUE");
+  });
+
+  it("a comparison of two foreign subjects still switches", () => {
+    const result = route("Compare Ethereum with Solana.");
+    expect(result.action).toBe("START");
+    expect(result.intent).toBe("TOPIC_SWITCH");
+  });
+
+  it("without a live thread the same words are a new investigation", () => {
+    const bare = routeConversation({
+      message: "Compare that with ETH.", investigation: undefined, hasPriorResearch: false, hasInvestigationThesis: false,
+    });
+    expect(bare.action).toBe("START");
+  });
+
+  it("a period comparison with no asset stays the historical reading", () => {
+    // "Compare it with 2022" names no instrument: it is a precedent question (HISTORICAL),
+    // not an asset comparison, and must not be captured by the comparison rule.
+    expect(route("Compare it with 2022.").intent).toBe("HISTORICAL");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 2. Defect B: the thread merge law
 // ---------------------------------------------------------------------------
 

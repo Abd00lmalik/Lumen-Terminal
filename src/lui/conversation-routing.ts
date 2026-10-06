@@ -60,9 +60,9 @@ const THESIS_STATEMENT =
 const THESIS_EVALUATION =
   /\bdoes (?:my|the) (?:thesis|view|position|setup|case)\b|\b(?:is|are) (?:my|the) (?:thesis|view|position|setup)\b|\bstill (?:hold|valid|working|work)\b/i;
 
-/** "What could prove me wrong?", "challenge my thesis", "what contradicts this?" */
+/** "What could prove me wrong?", "What would prove that wrong?", "challenge my thesis", "what contradicts this?" */
 const FALSIFICATION =
-  /\bwhat could prove\b|\bprove me wrong\b|\bchallenge my\b|\bcontradict\w*\b|\bdisconfirm\w*\b|\bfalsif\w*\b/i;
+  /\bwhat (?:could|would|might) (?:prove|disprove)\b|\bwhat would invalidate\b|\bprove me wrong\b|\bchallenge my\b|\bcontradict\w*\b|\bdisconfirm\w*\b|\bfalsif\w*\b/i;
 
 /** "What have we established so far?", "summarize", "what should I be watching?" */
 const SYNTHESIS =
@@ -75,6 +75,26 @@ const HISTORICAL =
 /** "Focus on ETF flows", "go deeper on derivatives", "specifically liquidations". */
 const DEEPER =
   /\b(?:focus|zoom|dig|look|narrow)\s+(?:in)?\s*(?:specifically)?\s*(?:on|into)\b|\bgo deeper\b|\bdeeper (?:on|into)\b|\bspecifically\b|\bnarrow (?:it )?down\b|\bdrill (?:in)?to\b|\bwhat about\b/i;
+
+/** "Compare that with ETH.", "compare BTC with ETH", "BTC versus ETH". */
+const COMPARISON_TURN = /\bcompare\w*|\bversus\b|\bvs\.?\b|\bcompared (?:with|to)\b/i;
+
+/** The turn stands ON this thread: "that", "this move", "it" — the investigation's own subject. */
+const COMPARISON_ANCHOR = /\b(?:that|this|it|them|those)\b/i;
+
+/**
+ * A TIME-WINDOW restatement: "Now look at the last 7 days.", "over the past 24 hours", "since
+ * yesterday", "year to date". The trader changes WHEN the investigation looks, not WHAT it is
+ * about — the turn names no subject, so the topic-switch law cannot see it, and opening a new
+ * thread for it silently abandons every run in the current one. Inside a live thread a window
+ * restatement is a refinement of the same investigation: the answer re-frames the subject the
+ * thread already established over a new window. Deliberately requires an explicit window
+ * determiner (last/past/previous/prior/since/to-date), so "right now" and "today" — plain
+ * freshness words that appear in standalone questions — do not turn every restatement into a
+ * continuation.
+ */
+const TIME_WINDOW_CHANGE =
+  /\b(?:last|past|previous|prior)\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty[- ]?four|24|48|72)\s*(?:minutes?|hours?|days?|weeks?|months?|quarters?|years?|sessions?)\b|\b(?:last|past|previous)\s+(?:couple of\s+)?(?:minutes|hours|days|weeks|months|years)\b|\bsince (?:yesterday|last week|the start of|the beginning of)\b|\b(?:year|month|quarter) to date\b/i;
 
 /**
  * A bare anaphor: too short to carry a subject of its own, so it can only be resolved against
@@ -306,8 +326,35 @@ export function routeConversation(input: RouteInput): ConversationRoute {
     };
   }
 
+  // 3d. COMPARISON CONTINUITY — the one turn that may stand on this thread while naming a
+  //    different asset. "Compare that with ETH." anchors to the investigation's own subject
+  //    ("that" IS the thread) and asks to measure it against another named asset. The
+  //    topic-switch law below would open a fresh thread, and the trader's "that" would dangle
+  //    with nothing to resolve it — the comparison would run WITHOUT the very evidence it is
+  //    comparing. A comparison therefore continues only when it (a) anchors to this thread
+  //    (an anaphor, or the subject's own name) and (b) names at least one real asset to
+  //    compare against. A comparison naming only foreign subjects ("compare Ethereum with
+  //    Solana") still switches; "compare it with 2022" names no asset at all and stays the
+  //    historical-intent reading in step 5. Runs BEFORE the topic-switch test by design: this
+  //    is the documented exception where a named other subject does not abandon the thread.
+  if (
+    hasThread &&
+    investigation !== undefined &&
+    COMPARISON_TURN.test(message) &&
+    resolveNamedAsset(message) !== undefined &&
+    (COMPARISON_ANCHOR.test(message) || questionNamesAsset(message, investigation.subject))
+  ) {
+    return {
+      action: "CONTINUE",
+      intent: "RELATED",
+      continuedInvestigation: true,
+      reason: "the turn compares this investigation's own subject against another named asset",
+    };
+  }
+
   // 4. TOPIC SWITCH, before any subject inheritance. A turn naming a different subject never
-  //    continues this investigation.
+  //    continues this investigation (the comparison rule above is the only documented
+  //    exception, and it must anchor to the thread to fire).
   const switchVerdict = topicSwitchVerdict(message, investigation);
   if (switchVerdict.switch) {
     return {
@@ -326,6 +373,19 @@ export function routeConversation(input: RouteInput): ConversationRoute {
       intent: "HISTORICAL",
       continuedInvestigation: true,
       reason: "the trader asked whether this has happened before, about the investigation's subject",
+    };
+  }
+
+  // 5b. TIME-WINDOW DIMENSION CHANGE inside a live thread: same investigation, new window.
+  //     After the topic-switch test (a foreign asset in the turn already switched) and after
+  //     the historical intent ("has this happened in the last 7 days?" is a precedent question,
+  //     not a window restatement).
+  if (hasThread && TIME_WINDOW_CHANGE.test(message)) {
+    return {
+      action: "CONTINUE",
+      intent: "FOLLOW_UP",
+      continuedInvestigation: true,
+      reason: "the turn restates the investigation over a different time window without changing its subject",
     };
   }
 
