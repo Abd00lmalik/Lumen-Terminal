@@ -60,6 +60,16 @@ export function questionIntentOf(question: string): QuestionIntent {
   if (/\bwhat happened\b|\bwhat has happened\b|\bwhat.s happened\b/.test(q)) {
     return "WHAT_HAPPENED";
   }
+  // A factual request that ENUMERATES observational data shapes ("the observed high, low,
+  // opening/reference price, closing/current price, timestamps, and volume") is a
+  // reconstruction question even when it never says "what happened". It previously fell through
+  // to the bare-"what is" CURRENT_STATE catch-all, whose dimensions (CURRENT_STATE, RECENCY,
+  // MATERIALITY) contain no high, low, open, close or volume — so nothing in the ledger ever
+  // asked for the data the trader named. Shape beats phrasing: this branch is specific to a
+  // list of observational fields and runs before the catch-all, never after a causal branch.
+  if (/\b(high|low|opening|open|closing|close)\b[^.?!]{0,60}\b(price|prices|value|level)\b|\bprice (?:path|sequence|trajectory)\b/.test(q)) {
+    return "WHAT_HAPPENED";
+  }
   // Synthesis wording outranks a bare "drivers" mention: "synthesize all the information on
   // current inflation drivers" is a cross-domain overview, not a pure CURRENT_DRIVERS ask.
   if (/\ball (the )?(information|evidence|data|research)\b|\bsynthesi[sz]e\b|\bwhat does .* say\b|\beverything\b|\boverview\b|\bcross[- ]domain\b/.test(q)) {

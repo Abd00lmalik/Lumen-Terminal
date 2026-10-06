@@ -29,8 +29,17 @@ import { RestTransport } from "./transports/rest.js";
 import { TransportError } from "./transports/resilience.js";
 import type { ToolOutput, ToolResultInput } from "../domain/tool-result.js";
 
-/** Capabilities G1 can satisfy once connected. */
-export const G1_CAPABILITIES: readonly CapabilityName[] = ["HISTORICAL_COMPARISON"];
+/**
+ * Capabilities G1 can satisfy once connected.
+ *
+ * CRYPTO_MARKET_DATA is served by the SAME adapter because it is the SAME data: real exchange
+ * OHLCV with exact timestamps. It was registered for historical comparison alone, so a question
+ * that simply asks for the last 24 hours of price — the reproduction — could never reach the one
+ * provider in this stack that can answer it, and the run fell back to a spot snapshot. The
+ * capability declares SHAPES now, so the shape contract can rank this path first for a series
+ * requirement; coverage itself is still decided from what each payload carries.
+ */
+export const G1_CAPABILITIES: readonly CapabilityName[] = ["HISTORICAL_COMPARISON", "CRYPTO_MARKET_DATA"];
 
 /** Binance Vision is the live-verified fallback (official Market-Data-Only URL, no auth). */
 export const BINANCE_VISION_BASE_URL = "https://data-api.binance.vision";
@@ -286,7 +295,9 @@ export class G1HistoricalDataAdapter implements HistoricalDataProvider {
    * instead of an opaque SCHEMA failure. Explicit params always win.
    */
   async execute(capability: string, params: Record<string, unknown>): Promise<ToolResultInput> {
-    if (capability !== "HISTORICAL_COMPARISON") {
+    // BOTH capabilities read the SAME exchange candle endpoints, so a request routed through
+    // either one is served from the same venue with the same provenance.
+    if (capability !== "HISTORICAL_COMPARISON" && capability !== "CRYPTO_MARKET_DATA") {
       throw new TransportError("SCHEMA_ERROR", `${this.providerId} has no mapping for capability ${capability}`, { retriable: false });
     }
     return this.query(this.withDefaults(params));

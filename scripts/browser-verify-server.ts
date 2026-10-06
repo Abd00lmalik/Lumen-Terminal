@@ -32,20 +32,76 @@ const stubAdapter: ProviderAdapter = {
   capabilities: ["CRYPTO_MARKET_DATA", "FALSIFICATION", "NEWS", "ONCHAIN"],
   limitations: ["deterministic browser-verification stub; not a live market feed"],
   freshnessProfile: "test:live",
-  async execute(capability: string) {
+  async execute(capability: string, params: Record<string, unknown> = {}) {
     const prices = [84821, 85340, 84990];
+    // SHAPE-AWARE STUB, mirroring what the real chain now does: a request for a windowed
+    // series is served candles, and anything else is served the aggregate spot snapshot a
+    // CoinGecko /simple/price fallback returns. Declaring the shapes explicitly is what lets
+    // the field-coverage scenario prove that a snapshot resolves only the shape it carries.
+    const demanded = Array.isArray(params.requiredFacets) ? (params.requiredFacets as string[]) : [];
+    const wantsSeries = demanded.some((f) => ["SERIES", "OHLC", "HIGH", "LOW", "OPEN", "CLOSE", "VOLUME"].includes(f));
+    // THE PRODUCTION CONDITION, REPRODUCED. The live failure happened when the primary
+    // exchange path was down and the keyless CoinGecko fallback was all that answered. Scenario
+    // G asks for the enumerated 24-hour field list, so this feed serves ONLY the fallback
+    // snapshot for it — which is what makes the scenario a reproduction rather than a demo of
+    // the happy path. Every other scenario keeps the candle path.
+    const fallbackOnly = /\bprice path\b|\b(?:high|low|opening|closing)\b[^.?!]{0,60}\bprice\b/i.test(
+      String(params.question ?? params.objective ?? ""),
+    );
+    if (capability !== "CRYPTO_MARKET_DATA" || fallbackOnly || !wantsSeries) {
+      return {
+        tool: "browser-verify",
+        capability,
+        transport: "https",
+        outputs: [
+          {
+            outputClass: "QUANTITATIVE_OBSERVATION" as const,
+            dataFacets: ["SNAPSHOT", "CLOSE", "AGGREGATE_VOLUME", "TIMESTAMP"] as const,
+            coverageHours: 0,
+            content: {
+              coin: "bitcoin",
+              priceUsd: 85335,
+              change24hPct: 0.002039,
+              marketCapUsd: 1_700_000_000_000,
+              volume24hUsd: 31_200_000_000,
+              asOf: new Date().toISOString(),
+              source: "browser-verify spot snapshot",
+            },
+            about: "BTC",
+          },
+          {
+            outputClass: "FACTUAL_OBSERVATION" as const,
+            dataFacets: ["REPORTED_EVENT"] as const,
+            content: "Reported headline: spot bitcoin ETF inflows resume as sentiment improves",
+            about: "BTC",
+          },
+        ],
+      };
+    }
+    const now = Date.now();
     return {
       tool: "browser-verify",
       capability,
       transport: "https",
       outputs: [
-        ...prices.map((price, i) => ({
+        {
           outputClass: "QUANTITATIVE_OBSERVATION" as const,
-          content: `BTC 1h candle at ${new Date(Date.now() - (prices.length - i) * 3_600_000).toISOString()}: open ${price - 120}, high ${price + 260}, low ${price - 310}, close ${price}, volume ${1_200_000 + i * 40_000}`,
+          dataFacets: ["SERIES", "OHLC", "HIGH", "LOW", "OPEN", "CLOSE", "VOLUME", "TIMESTAMP"] as const,
+          coverageHours: 24,
+          timeframe: "1h",
+          content: prices.map((price, i) => ({
+            ts: (now - (prices.length - i) * 3_600_000) / 1000,
+            open: price - 120,
+            high: price + 260,
+            low: price - 310,
+            close: price,
+            baseVol: 1_200_000 + i * 40_000,
+          })),
           about: "BTC",
-        })),
+        },
         {
           outputClass: "FACTUAL_OBSERVATION" as const,
+          dataFacets: ["REPORTED_EVENT"] as const,
           content: "Reported headline: spot bitcoin ETF inflows resume as sentiment improves",
           about: "BTC",
         },
@@ -68,14 +124,24 @@ function flowOf(question: string): string {
   const q = question.toLowerCase();
   // The turn text carries system framing as well as the trader's words; match the shapes only
   // where the trader's own request appears, and ignore the prompt's rule text.
-  const ask = q.split("\n").filter((l) => !/^- |^\d\.|^(you|the assistant|respond|output|return)\b/.test(l.trim())).join(" ");
-  if (/\bprove\b.*\bwrong\b|\binvalidate\b|\bfalsif\w*/.test(ask)) return "WHAT_COULD_PROVE_ME_WRONG";
-  if (/\baccording to my\b|\bmy framework\b|framework criteria/.test(ask)) return "EVALUATE_WITH_MY_FRAMEWORK";
-  if (/\bthesis\b|\bdoes my\b|\bstill hold\b/.test(ask)) return "DOES_MY_THESIS_HOLD";
-  if (/\bhappened before\b|\bhistor\w*|\banalog\w*/.test(ask)) return "HAS_THIS_HAPPENED_BEFORE";
-  if (/\b(?:could|would|might) affect\b|\bupcoming\b|\bcatalysts?\b|\bnext few days\b|\bnext few weeks\b/.test(ask)) return "WHAT_COULD_AFFECT_IT";
-  if (/\bwhy\b|\bwhat (?:caused|drove)\b|\bwhat(?:'s| is|s) (?:behind|pushing|driving)\b/.test(ask)) return "WHY_IT_HAPPENED";
-  if (/\bwhat happened\b|\bwhat occurred\b|\btimeline\b|\bsequence of\b|\bfactual\b/.test(ask)) return "WHAT_HAPPENED";
+  // SYSTEM FRAMING is dropped too: the engine hands the LUI the conversation frame, which quotes
+  // the trader's message AND the interpreted request AND any prior turns. A router that reads
+  // the whole frame classifies on the PREVIOUS turn's words — scenario G was routed as a thesis
+  // question because scenario D's thesis turn was still inside the frame. The trader's own turn
+  // is the routing authority, so only that is read.
+  const ask = q.split("\n").filter((l) => !/^- |^\d\.|^(you|the assistant|respond|output|return)\b/i.test(l.trim())).join(" ");
+  const traderTurn = /trader message:\s*"(.*?)"/s.exec(q)?.[1];
+  const routing = traderTurn !== undefined && traderTurn !== "" ? traderTurn : ask;
+  if (/\bprove\b.*\bwrong\b|\binvalidate\b|\bfalsif\w*/.test(routing)) return "WHAT_COULD_PROVE_ME_WRONG";
+  if (/\baccording to my\b|\bmy framework\b|framework criteria/.test(routing)) return "EVALUATE_WITH_MY_FRAMEWORK";
+  if (/\bthesis\b|\bdoes my\b|\bstill hold\b/.test(routing)) return "DOES_MY_THESIS_HOLD";
+  if (/\bhappened before\b|\bhistor\w*|\banalog\w*/.test(routing)) return "HAS_THIS_HAPPENED_BEFORE";
+  if (/\b(?:could|would|might) affect\b|\bupcoming\b|\bcatalysts?\b|\bnext few days\b|\bnext few weeks\b/.test(routing)) return "WHAT_COULD_AFFECT_IT";
+  if (/\bwhy\b|\bwhat (?:caused|drove)\b|\bwhat(?:'s| is|s) (?:behind|pushing|driving)\b/.test(routing)) return "WHY_IT_HAPPENED";
+  if (/\bwhat happened\b|\bwhat occurred\b|\btimeline\b|\bsequence of\b|\bfactual\b/.test(routing)) return "WHAT_HAPPENED";
+  // An enumerated observational ask is a reconstruction even without the words "what happened":
+  // "the observed high, low, opening/reference price, closing/current price, timestamps, volume".
+  if (/\bprice (?:path|sequence|trajectory)\b|\b(?:high|low|opening|closing)\b[^.?!]{0,60}\bprice\b/.test(routing)) return "WHAT_HAPPENED";
   return "WHAT_DOES_ALL_INFORMATION_SAY";
 }
 

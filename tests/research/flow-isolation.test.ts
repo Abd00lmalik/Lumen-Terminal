@@ -452,7 +452,13 @@ describe("runtime flow-contract assertion", () => {
       planRows.filter((r) => !offending.has(r.id)) as never,
       { subject: "BTC", marketClass: "CRYPTO", flow: "WHAT_HAPPENED" },
     );
-    expect(rebuilt.some((r) => r.description === "the timestamped BTC price movement over the window")).toBe(true);
+    // The in-contract row SURVIVES the refusal — as the atomic shape rows its own wording
+    // names ("timestamped price movement over the window" is a sequence + timestamps request,
+    // and field decomposition splits it into exactly those two demands). What must not happen
+    // is the row being DISCARDED, which is what a rebuild-from-empty would do; that is why this
+    // asserts the row's subject matter is still present rather than its exact wording.
+    expect(rebuilt.some((r) => /BTC price movement/i.test(r.description))).toBe(true);
+    expect(rebuilt.length).toBeGreaterThan(0);
     expect(assertFlowContract({ flow: "WHAT_HAPPENED", requirements: rebuilt, dimensionOf }).ok).toBe(true);
   });
 

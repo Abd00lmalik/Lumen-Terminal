@@ -46,6 +46,12 @@ const B = "Why did Bitcoin move today?";
 const C = "What could affect Bitcoin over the next few days?";
 const D = "Does my Bitcoin thesis still hold?";
 const E = "Now focus specifically on ETF flows.";
+/**
+ * The FIELD-COVERAGE reproduction, verbatim and never paraphrased: an enumerated observational
+ * ask whose answer was one CoinGecko spot snapshot reported as a satisfied 24-hour path.
+ */
+const G =
+  "What was the Bitcoin price path during that 24-hour window? Give me the observed high, low, opening/reference price, closing/current price, timestamps, and volume. Use only market-data observations. If any of these are unavailable, explicitly say which ones are unavailable.";
 
 /** Vocabulary a WHAT_HAPPENED answer must never contain (the forbidden causal machinery). */
 const FORBIDDEN_IN_OBSERVATION_ANSWER =
@@ -204,6 +210,17 @@ try {
     !reqA.some((r) => /driver|mechanism|transmission|counter|thesis|falsif|material|catalyst|supply|demand|what would (?:change|prove)/i.test(r)),
     reqA);
   check("A: the ledger owes NO CHALLENGE row", reqA.length > 0 && !reqA.some((r) => /^CHALLENGE/i.test(r)), reqA);
+  // POSITIVE CONTROL, the mirror of scenario G. The scripted provider DOES serve windowed OHLCV
+  // here, so the atomic shape rows must actually RESOLVE. This is the check the suite was
+  // missing: when the coverage mapping dropped the measured span, `windowCovers` saw no span
+  // and left every window-bearing row unresolved no matter how good the data was — the exact
+  // inverse false negative of the reproduction's false positive, and scenario A never noticed
+  // because it only asserted WHICH rows existed, never whether one could be satisfied.
+  const reqsA = diag(aggA).requirements ?? [];
+  const windowedA = reqsA.filter((r) => /(sequence|high|low|volume)/i.test(r.description ?? ""));
+  check("A: windowed OHLCV SATISFIES the atomic shape rows it actually carries",
+    windowedA.length > 0 && windowedA.some((r) => r.status === "SATISFIED"),
+    windowedA.map((r) => `${r.description} [${r.status}]`));
   const answerA = String(aggA.answer?.answer ?? "");
   check("A: the answer uses the observation contract (timeline + observed/reported/missing)",
     /\*\*What happened\*\*/.test(answerA) && /What is directly observed/i.test(answerA) && /What is reported/i.test(answerA) && /Missing evidence/i.test(answerA),
@@ -211,10 +228,12 @@ try {
   check("A: the answer carries NO causal/thesis machinery", !FORBIDDEN_IN_OBSERVATION_ANSWER.test(answerA), answerA.slice(0, 220));
   check("A: the answer carries NO counterevidence status claim", (aggA.answer?.counterevidenceStatus ?? "NOT_ASSESSED") === "NOT_ASSESSED", aggA.answer?.counterevidenceStatus);
   const evidenceA = await api("/api/evidence?limit=200");
-  const prints = evidenceA.filter((e) => /candle/.test(e.observation ?? ""));
+  // Identified by the SHAPE the payload carries, not by wording: the stub serves structured
+  // OHLCV rows, and a coverage law that has to grep prose is not the law being tested.
+  const prints = evidenceA.filter((e) => (e.dataFacets ?? []).some((f) => f === "SERIES" || f === "HIGH" || f === "LOW"));
   check("A: the retrieved price prints are DIRECT_OBSERVATION",
-    prints.length >= 3 && prints.every((e) => e.sourceClass === "DIRECT_OBSERVATION"),
-    prints.slice(0, 2).map((e) => ({ ref: e.ref, sourceClass: e.sourceClass })));
+    prints.length >= 1 && prints.every((e) => e.sourceClass === "DIRECT_OBSERVATION"),
+    prints.slice(0, 2).map((e) => ({ ref: e.ref, sourceClass: e.sourceClass, dataFacets: e.dataFacets })));
   check("A: the retrieved headline is labelled a REPORTED_CLAIM, not an observation",
     evidenceA.some((e) => e.sourceClass === "REPORTED_CLAIM"),
     evidenceA.filter((e) => /Reported headline/.test(e.observation ?? "")).map((e) => ({ ref: e.ref, sourceClass: e.sourceClass })));
@@ -301,6 +320,57 @@ try {
   check("D: support AND opposition are both reported",
     /support/i.test(answerD) && /oppos|against|weaken/i.test(answerD), answerD.slice(0, 240));
   await shot("D1-answer");
+
+  // ---- G: FIELD-LEVEL COVERAGE (the enumerated-ask reproduction) --------------------
+  // The scripted provider answers with ONE CoinGecko simple-price snapshot, exactly as the
+  // production run did. The ledger must therefore resolve the snapshot's own shape and leave
+  // every shape it does not carry UNRESOLVED and NAMED — never "every requirement established".
+  await newResearch();
+  const freshG = await composerLabel();
+  check("setup: a fresh thread is open before scenario G", freshG === "Research", freshG);
+  const typedG = await askViaUI(G);
+  check("G: the exact reproduction question is typed", typedG === G, typedG);
+  await submitViaUI();
+  await waitFor(`${idle} && document.querySelector('.ask-bar button')?.textContent?.includes('Ask follow-up') ? 'done' : ''`, "run G");
+  const invG = await currentInvestigation();
+  const refsG = invG?.runs.map((r) => r.researchRef) ?? [];
+  const aggG = refsG.length > 0 ? await runAggregate(refsG[refsG.length - 1]) : {};
+  check("G: FLOW IS WHAT_HAPPENED", aggG.flow === "WHAT_HAPPENED", aggG.flow);
+
+  const reqsG = aggG.researchDiagnostics?.requirements ?? [];
+  const shapesG = reqsG.map((r) => r.description).join(" | ");
+  check("G: the enumerated ask became SEPARATE requirements per shape",
+    reqsG.length >= 4 && /high/i.test(shapesG) && /low/i.test(shapesG) && /volume/i.test(shapesG) && /(sequence|timestamp)/i.test(shapesG),
+    reqsG.map((r) => `${r.description} [${r.status}]`));
+  const openG = reqsG.filter((r) => r.importance === "CRITICAL" && r.status !== "SATISFIED");
+  check("G: a spot snapshot leaves the shapes it cannot carry UNRESOLVED",
+    openG.length > 0 && openG.some((r) => /high|low|sequence|opening|volume/i.test(r.description)),
+    openG.map((r) => `${r.description} [${r.status}]`));
+  const snapshotRows = reqsG.filter((r) => r.status === "SATISFIED");
+  check("G: the snapshot satisfies ONLY the shape it actually carries",
+    snapshotRows.length > 0 && snapshotRows.every((r) => !/high|low/i.test(r.description)),
+    snapshotRows.map((r) => r.description));
+  // The inflation guard, proven through the real HTTP/engine path rather than asserted on a
+  // bound. The scripted provider serves ONE headline payload, which the capability fan-out
+  // mints into several Evidence objects; before the coverage mapping carried payloadIdentity
+  // each of them counted as an independent fact, and every row here reported 0 duplicates.
+  check("G: a re-served provider response is counted ONCE, never as corroboration",
+    reqsG.some((r) => (r.duplicateEvidenceCount ?? 0) > 0),
+    reqsG.map((r) => `${r.description.slice(0, 30)}: ${r.evidenceCount}+${r.duplicateEvidenceCount ?? 0}dup`));
+  const runEvidenceG = (await api("/api/evidence?limit=200"))
+    .filter((e) => e.researchRunId === refsG[refsG.length - 1]);
+  const distinctIdentitiesG = new Set(runEvidenceG.map((e) => e.payloadIdentity).filter(Boolean)).size;
+  check("G: no requirement cites more observations than the run holds distinct payloads",
+    distinctIdentitiesG > 0 && reqsG.every((r) => r.evidenceCount <= distinctIdentitiesG),
+    { distinctIdentitiesG, maxRowCount: Math.max(...reqsG.map((r) => r.evidenceCount ?? 0)) });
+
+  const answerG = String(aggG.answer?.answer ?? "");
+  check("G: the answer NEVER claims every requirement was established",
+    !/Nothing outstanding/.test(answerG) && !/every requirement/i.test(answerG), answerG.slice(0, 320));
+  check("G: the answer NAMES the shapes that could not be established",
+    /high|low|sequence|opening|volume/i.test(answerG) && /not established|could not be established|unavailable/i.test(answerG),
+    answerG.slice(0, 400));
+  await shot("G1-field-coverage-answer");
 
   // ---- F: NEW RESEARCH IS CLEAN ---------------------------------------------------
   const before = (await api("/api/investigations")).length;

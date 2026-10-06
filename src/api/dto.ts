@@ -98,6 +98,16 @@ export interface EvidenceDTO {
    * is something a source says about the world.
    */
   readonly sourceClass?: "DIRECT_OBSERVATION" | "REPORTED_CLAIM";
+  /** The data shapes this observation actually carries (snapshot, series, high, low, volume...). */
+  readonly dataFacets?: readonly string[];
+  /** Hours of time this observation spans on its own timestamps (a single print spans 0). */
+  readonly coverageHours?: number;
+  /**
+   * Identity of the underlying provider response. Two evidence objects sharing it are ONE
+   * observation re-served through the capability fan-out, never independent corroboration —
+   * exposed so a client can audit the informational count instead of taking it on trust.
+   */
+  readonly payloadIdentity?: string;
   /** Repeated-content flag: same underlying report as another item; never independent corroboration. */
   readonly duplicateContent?: boolean;
   readonly supports: readonly string[];
@@ -123,6 +133,11 @@ export function evidenceToDTO(e: Evidence): EvidenceDTO {
     ...(e.sourceProvider !== undefined ? { sourceProvider: e.sourceProvider } : {}),
     ...(e.sourceType !== undefined ? { sourceType: e.sourceType } : {}),
     ...(e.sourcing !== undefined ? { sourceClass: e.sourcing } : {}),
+    // THE SHAPE OF THE OBSERVATION: exposed so the client can see WHAT the evidence contains
+    // rather than inferring coverage from a provider name or a count.
+    ...(e.dataFacets !== undefined ? { dataFacets: [...e.dataFacets] } : {}),
+    ...(e.coverageHours !== undefined ? { coverageHours: e.coverageHours } : {}),
+    ...(e.payloadIdentity !== undefined ? { payloadIdentity: e.payloadIdentity } : {}),
     ...(e.duplicateContent === true ? { duplicateContent: true } : {}),
     supports: idRefs(e.supports),
     contradicts: idRefs(e.contradicts),
@@ -1000,6 +1015,12 @@ export interface RequirementDiagnosticDTO {
   /** SATISFIED | PARTIALLY_SATISFIED | PENDING | EXHAUSTED | UNAVAILABLE */
   readonly status: string;
   readonly evidenceCount: number;
+  /**
+   * Evidence objects that matched but are re-served copies of an observation already counted
+   * (same provider response, same payload identity). Reported so the count stays auditable:
+   * they are provenance, never additional information.
+   */
+  readonly duplicateEvidenceCount: number;
   /** Observations that matched but fell outside the requirement's time horizon. */
   readonly staleEvidenceCount: number;
   readonly recoveryAttempts: number;

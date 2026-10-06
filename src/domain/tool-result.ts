@@ -82,6 +82,19 @@ export interface ToolOutput {
   readonly content: unknown;
   readonly about?: string; // subject/asset/entity this output concerns
   readonly timeframe?: string; // e.g. "1h", "2026-09-01..2026-09-12"
+  /**
+   * THE SHAPE OF THIS OUTPUT, declared by the adapter that received it. An adapter serving a
+   * spot quote declares SNAPSHOT; one serving a candle table declares the OHLCV set. The
+   * declaration is authoritative when present and is otherwise inferred from the payload, so
+   * coverage is decided by what the data CONTAINS and never by what the provider is called.
+   */
+  readonly dataFacets?: readonly string[];
+  /**
+   * Hours of TIME this output spans, measured on its own timestamps. A single print spans 0.
+   * This is what makes "the last 24 hours" answerable: an instantaneous snapshot is fresh
+   * (a freshness fact) and still reaches back over zero hours (a coverage fact).
+   */
+  readonly coverageHours?: number;
   /** Required when outputClass is interpretation-like: the Skill authored this, not the market. */
   readonly interpretationBasis?: string;
   /**

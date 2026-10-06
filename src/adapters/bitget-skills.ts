@@ -242,10 +242,26 @@ export function createMarketIntelAdapter(transport: McpTransport): BitgetSkillAd
             // Default action: the engine plans capabilities, not tool args (orchestration
             // capability-first); an unset action must still produce a VALID request, so fall
             // back to the broad market snapshot (global: market cap, BTC dominance, volumes).
-            buildArgs: (params) => ({
-              ...actionArgs(["action", "query", "coin_id", "coin_ids", "symbol", "interval", "limit"])(params),
-              action: (params as { action?: string }).action ?? "global",
-            }),
+            //
+            // SHAPE-AWARE DEFAULT (research-integrity contract): when the run's own requirement
+            // demands a time series, a high/low, a windowed volume or an OHLCV record, the
+            // default becomes the `ohlcv` action — the SAME tool, already available here, whose
+            // candles carry exactly those fields. Without this the tool answered every shape
+            // request with a broad snapshot, which is why "the price path over the last 24
+            // hours" produced one instant. An explicit action in the params always wins, and a
+            // request that wants only a spot reading keeps the snapshot default.
+            buildArgs: (params) => {
+              const p = params as Record<string, unknown>;
+              const demanded = Array.isArray(p.requiredFacets) ? (p.requiredFacets as string[]) : [];
+              const wantsSeries = demanded.some((f) =>
+                f === "SERIES" || f === "OHLC" || f === "HIGH" || f === "LOW" || f === "OPEN" || f === "CLOSE" || f === "VOLUME",
+              );
+              return {
+                ...actionArgs(["action", "query", "coin_id", "coin_ids", "symbol", "interval", "limit"])(params),
+                action: (p.action as string | undefined) ?? (wantsSeries ? "ohlcv" : "global"),
+                ...(wantsSeries && p.interval === undefined ? { interval: "1h" } : {}),
+              };
+            },
           }
         : undefined,
     outputMapping: MARKET_INTEL_MAPPING,
