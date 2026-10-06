@@ -225,6 +225,53 @@ export function answerShapeGuidance(shape: AnswerShape): readonly string[] {
   ];
 }
 
+/**
+ * MODE-SHAPE VIOLATIONS — sections the mode's answer OWES that this draft does not carry.
+ *
+ * The shape guidance is injected into the synthesis prompt, but guidance is not a contract:
+ * `keyFactors` and `whatWouldChangeTheView` are optional in the schema, and a renderer only
+ * renders what it is given — so a WHY answer whose factors came back empty renders as a bare
+ * paragraph with no drivers, no competing readings and no "what would change it", and a
+ * falsification answer with no conditions to monitor renders as ordinary prose. The section
+ * descriptions map onto the synthesis fields the renderer actually emits; a section may also
+ * be satisfied by the structured causal chain when that is where the model put it (drivers
+ * live in `causalChain.drivers`, forward watch conditions in `causalChain.forwardWatchConditions`).
+ *
+ * Deterministic, asset-agnostic, and deliberately NARROW: only sections with a clean field
+ * mapping are enforced. Narrative shapes with no field of their own (a historical analogue,
+ * a cross-domain synthesis, a factual timeline — the latter rendered by the observation
+ * contract) are not reduced to a proxy the model could satisfy while missing the point.
+ * A mode that owes nothing structurally (GENERIC) never violates.
+ */
+export function answerShapeViolations(
+  mode: string | undefined,
+  data: Pick<AnswerSynthesis, "keyFactors" | "whatWouldChangeTheView" | "causalChain">,
+): readonly string[] {
+  const flow = contractFor(mode)?.flow;
+  if (flow === undefined) return [];
+  const chain = data.causalChain;
+  const hasFactors = data.keyFactors.length > 0 || (chain !== undefined && chain.drivers.length > 0);
+  const hasWatch =
+    data.whatWouldChangeTheView.length > 0 ||
+    (chain !== undefined && chain.forwardWatchConditions.length > 0);
+  const shape = ANSWER_SHAPES[flow];
+  switch (flow) {
+    case "WHY_IT_HAPPENED":
+    case "WHAT_COULD_AFFECT_IT":
+      return [
+        ...(hasFactors ? [] : [`${shape[0]} — provide at least one factor with its evidence (keyFactors)`]),
+        ...(hasWatch ? [] : [`the mode's "what would change it" section — provide at least one condition (whatWouldChangeTheView)`]),
+      ];
+    case "DOES_MY_THESIS_HOLD":
+    case "EVALUATE_WITH_MY_FRAMEWORK":
+      return hasFactors ? [] : [`${shape[0]} — provide at least one item (keyFactors)`];
+    case "WHAT_COULD_PROVE_ME_WRONG":
+      return hasWatch ? [] : [`${shape[0]} — provide at least one condition (whatWouldChangeTheView)`];
+    default:
+      return [];
+  }
+}
+
 export const ANSWER_SYNTHESIS_SCHEMA_DESC = [
   "{",
   ' "directAnswer": string, // 2 to 5 sentences that DIRECTLY answer the question',
@@ -458,6 +505,54 @@ export async function synthesizeAnswer(options: SynthesizeAnswerOptions): Promis
       if (retryDirect === "" || !opensWithTheAnswer(retryDirect)) return undefined;
       data = retried;
       direct = retryDirect; // the retry's answer replaces the rejected draft everywhere below
+    } catch {
+      return undefined;
+    }
+  }
+  // MODE-SHAPE ENFORCEMENT (deterministic, not prompt-hopeful): the mode's shape was in the
+  // prompt as GUIDANCE, and the schema marks its fields optional, so nothing else checks that
+  // the sections actually arrived. A draft missing sections the mode owes gets ONE bounded
+  // corrective retry naming exactly what is missing (the same law the question-first opener
+  // has): a retry that still misses them — or breaks the opener, or fails schema — is rejected
+  // and the caller keeps its deterministic evidence-grounded fallback. Sections the mode does
+  // not owe are never required, so a GENERIC answer can never violate its way out.
+  const missingSections = answerShapeViolations(options.mode, data);
+  if (missingSections.length > 0) {
+    try {
+      const retry = await provider.structured<string>({
+        schemaName: "research.answer_synthesis",
+        schemaDescription: ANSWER_SYNTHESIS_SCHEMA_DESC,
+        system: SYNTHESIS_SYSTEM,
+        // The trader's question is protected context: compaction may drop rendered
+        // evidence, never the words the answer has to be about.
+        protectedFragments: traderWords(question),
+        prompt: [
+          `Trader question (answer THIS): "${question}"`,
+          "Your previous draft is missing sections this research mode OWES in its answer:",
+          ...missingSections.map((section) => `- ${section}`),
+          `Rejected draft: "${direct.slice(0, 600)}"`,
+          ...answerShapeGuidance(answerShape),
+          "Rewrite it with those sections filled from the validated context only; never invent material the context does not support. Same JSON schema.",
+          "Validated research context follows. Evidence ids in brackets are the ONLY citable refs.",
+          "---",
+          renderResearchContext(context),
+          "---",
+          'Respond as JSON conforming to schema "research.answer_synthesis".',
+          ANSWER_SYNTHESIS_SCHEMA_DESC,
+        ].join("\n"),
+        preferJson: true,
+      });
+      const retried = validateModelOutput<AnswerSynthesis>(ANSWER_SYNTHESIS_SCHEMA, retry.raw).data;
+      const retryDirect = typeof retried.directAnswer === "string" ? retried.directAnswer.trim() : "";
+      if (
+        retryDirect === "" ||
+        !opensWithTheAnswer(retryDirect) ||
+        answerShapeViolations(options.mode, retried).length > 0
+      ) {
+        return undefined;
+      }
+      data = retried;
+      direct = retryDirect;
     } catch {
       return undefined;
     }
