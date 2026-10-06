@@ -905,7 +905,11 @@ export function questionTypeOf(question: string): QuestionType {
   // dimensions — a counterevidence requirement, a FALSIFICATION round, thesis implications —
   // that the request never asked for.
   if (/\b(spot price|current price|price (?:right )?now|latest price|current (?:quote|spot|price|value|level)|what(?:'s| is) the (?:price|quote|spot price)|retrieve|fetch|pull|observe|observation|quote|reading)\b/.test(q)) return "OBSERVATION";
-  if (/\bhas (this|it|that|the .*? setup)\b.*\bhappened\b|\bhistor\w*|\bsimilar setup\b|\bhappened before\b|\banalog\w*|\bcomparable episodes?\b/.test(q)) return "HISTORICAL";
+  // HISTORICAL ("has ... happened before" OR "has ... like this ... before"): the analogue
+  // shape does not require the word "happened" — "Has Bitcoin reacted like this to similar
+  // CPI surprises before?" is a precedent question, and without this form it fell through to
+  // SYNTHESIS (the catch-all) and never earned the HISTORICAL contract's shape.
+  if (/\bhas (this|it|that|the .*? setup)\b.*\bhappened\b|\bhistor\w*|\bsimilar setup\b|\bhappened before\b|\banalog\w*|\bcomparable episodes?\b|\bha(?:s|ve)\b[^.?!]{0,80}\b(?:like this|same setup|similar to this)\b[^.?!]{0,60}\bbefore\b/.test(q)) return "HISTORICAL";
     if (/\bmy thesis\b|\bthesis\b|\bmy (view|position|read|call)\b|\baccording to my\b|\bdoes (this|the) (hold|still hold)\b/.test(q)) return "THESIS";
   if (/\bcompare\w*|\bcompared (with|to)\b|\bversus\b|\bvs\.?\b|\bweek over week\b|\bweek[- ]over[- ]week\b|\bmonth over month\b|\bbetter than\b|\bperformance (vs|versus)\b/.test(q)) return "COMPARISON";
   if (/\bearnings\b|\breport\b|\bresults\b|\bfomc\b|\bcpi print\b|\bupcoming\b|\baround its next\b|\bnext (earnings|report|meeting|print)\b/.test(q)) return "EVENT";

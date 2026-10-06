@@ -20,28 +20,47 @@
  * the FIRST (highest-priority) mode still owns what the answer looks like.
  *
  * Deterministic and asset-agnostic: these patterns describe QUESTION SHAPES (explain a move,
- * test a belief, compare a period), never assets or topics. The patterns mirror the LUI flow
- * guard's vocabulary so the router and the ledger can never disagree about what a question is.
+ * test a belief, compare a period), never assets or topics. MODE_PATTERNS below is the SINGLE
+ * shared vocabulary: the LUI flow guard reads the same table the ledger reads, so the router
+ * and the ledger cannot disagree about what a question is.
  */
 import type { CanonicalFlow } from "./flow-contract.js";
 
-interface ModePattern {
+export interface ModePattern {
   readonly flow: CanonicalFlow;
   readonly re: RegExp;
 }
 
 /**
- * Mode vocabulary, ordered most-specific-first (the same priority the LUI flow guard uses).
- * The first pattern that matches is the PRIMARY mode and owns the answer shape.
+ * SHARED MODE VOCABULARY — the single pattern table the WHOLE pipeline reads.
+ *
+ * The flow guard (dispatch), `primaryFlowOf`/`chainedFlowsOf` (the ledger's mode detection) and
+ * the answer-shape selection all consume THIS table, so the router and the ledger cannot drift
+ * apart by having two hand-maintained regex sets. Each pattern here is the union of what both
+ * consumers previously needed plus the shapes the trader's own natural phrasings proved:
+ * "What would invalidate my thesis?" (falsification without the word "prove"),
+ * "Does my thesis that BTC remains bullish still hold?" (thesis-hold with modifiers between
+ * the determiner and "hold"), "Evaluate this according to my risk framework" (framework with
+ * an intervening noun), "Has Bitcoin reacted like this to similar CPI surprises before?"
+ * (historical without the word "happened"), "Is the current move mainly driven by ETF flows
+ * or macro?" (causal without the word "why"), and "What happened, and why?" (a bare causal
+ * leg joined by a conjunction).
+ *
+ * Deterministic and asset-agnostic: these patterns describe QUESTION SHAPES, never assets or
+ * topics. A pattern matching here means the question ASKS for that methodology — the model's
+ * classification still wins whenever it does not contradict the message (see flow-guard).
+ *
+ * Ordered most-specific-first: the first pattern that matches is the PRIMARY mode and owns the
+ * answer shape.
  */
-const MODE_PATTERNS: readonly ModePattern[] = [
+export const MODE_PATTERNS: readonly ModePattern[] = [
   {
     flow: "EVALUATE_WITH_MY_FRAMEWORK",
-    re: /\baccording to (?:this|my|the following|the attached) framework\b|\bmy framework\b|\bframework (?:weights|criteria|rules)\b|\bevaluate .{0,40}\busing (?:this|my) framework\b|\bagainst \w+ framework\b|\bmy (?:rules|criteria|checklist)\b/i,
+    re: /\baccording to (?:this|my|the following|the attached)(?: [\w-]+){0,2} framework\b|\bmy framework\b|\bframework (?:weights|criteria|rules)\b|\bevaluate .{0,40}\busing (?:this|my) framework\b|\bagainst (?:\w+ ){0,2}framework\b|\bmy (?:rules|criteria|checklist)\b/i,
   },
   {
     flow: "WHAT_COULD_PROVE_ME_WRONG",
-    re: /\b(?:what could|what would|what might)\b.{0,30}\b(?:prove|disprove|falsify)\b.{0,20}\b(?:wrong|thesis|belief|view|case)?\b|\bchallenge (?:my|this) (?:thesis|view|belief|conclusion)\b|\bfalsify\b|\bwhat could prove\b|\bwhat would invalidate\b|\bprove me wrong\b|\bshould i disbelieve\b/i,
+    re: /\b(?:what could|what would|what might)\b.{0,30}\b(?:prove|disprove|falsify)\b.{0,20}\b(?:wrong|thesis|belief|view|case)?\b|\bchallenge (?:my|this) (?:thesis|view|belief|conclusion)\b|\bfalsify\b|\bwhat could prove\b|\bwhat would invalidate\b|\bprove me wrong\b|\btry to (?:prove|disprove) (?:me|this|it) wrong\b|\bshould i disbelieve\b/i,
   },
   {
     flow: "DOES_MY_THESIS_HOLD",
@@ -49,7 +68,7 @@ const MODE_PATTERNS: readonly ModePattern[] = [
   },
   {
     flow: "WHAT_DOES_ALL_INFORMATION_SAY",
-    re: /\bwhat does (?:all|the) (?:the )?information (?:say|indicate|show)\b|\ball the information\b|\boverall picture\b|\bsynthesi[sz]e (?:all|the) (?:evidence|information|findings|sources)\b|\bwhat do all (?:the )?sources say\b/i,
+    re: /\bwhat does (?:all|the) (?:the )?information (?:say|indicate|show)\b|\ball the information\b|\boverall picture\b|\bsynthesi[sz]e (?:all|the) (?:evidence|information|findings|sources)\b|\bweigh (?:all|the) (?:evidence|sources|signals)\b|\bwhat do all (?:the )?sources say\b/i,
   },
   {
     flow: "WHAT_COULD_AFFECT_IT",
@@ -57,15 +76,15 @@ const MODE_PATTERNS: readonly ModePattern[] = [
   },
   {
     flow: "HAS_THIS_HAPPENED_BEFORE",
-    re: /\bhas this happened before\b|\bhas .{0,40} happened before\b|\bhistorical (?:precedent|parallel|analog|comparison)\b|\blast time this happened\b|\bprecedent\b|\bhas (?:this|the) setup happened\b|\bprevious (?:three|two|four|\d+ )occurrences\b/i,
+    re: /\bhas this happened before\b|\bhas .{0,40} happened before\b|\bhistorical (?:precedent|parallel|analog|comparison)\b|\bhistory rhyme\b|\blast time this happened\b|\bprecedent\b|\bhas (?:this|the) setup happened\b|\bprevious (?:three|two|four|\d+ )occurrences\b|\bha(?:s|ve)\b[^.?!]{0,80}\b(?:like this|same setup|similar to this)\b[^.?!]{0,60}\bbefore\b/i,
   },
   {
     flow: "WHY_IT_HAPPENED",
-    re: /\bwhy (?:did|is|are|has|have|was|were|do|does)\b|\bexplain why\b|\bwhat caused\b|\bcauses? of (?:the )?(?:move|rise|drop|rally|decline)\b|\bwhat drove\b|\bcausal (?:explanation|investigation)\b/i,
+    re: /\bwhy (?:did|is|are|has|have|was|were|do|does)\b|\bwhy\s*\?|\b(?:is|are|was|were)\b[^?]{0,60}\bdriven\b|\bexplain why\b|\bwhat caused\b|\bcauses? of (?:the )?(?:move|rise|drop|rally|decline)\b|\bwhat drove\b|\bcausal (?:explanation|investigation)\b/i,
   },
   {
     flow: "WHAT_HAPPENED",
-    re: /\bwhat happened\b|\bfactual (?:sequence|timeline)\b|\btimeline of\b|\bchronolog|\bwhat took place\b|\bwhat occurred\b|\bsequence of events\b|\bwhat's been going on\b|\brecap\b|\bwhat was observed\b/i,
+    re: /\bwhat happened\b|\bwhat has happened\b|\bfactual (?:sequence|timeline)\b|\btimeline of\b|\bchronolog|\bwhat took place\b|\bwhat occurred\b|\bsequence of events\b|\bwhat's been going on\b|\brecap\b|\bwhat was observed\b/i,
   },
 ];
 
