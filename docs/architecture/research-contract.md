@@ -127,7 +127,7 @@ The arrow row is also researchable: its description declares the data type it ne
 not the question's resolved instrument — the transmission clause's head can name a market other
 than the instrument, e.g. "How does inflation transmit into Treasury yields?" derives
 `INFLATION -> RATES`, not a Treasury-yields-to-Treasury-yields arrow), and the relationship-capable
-capabilities (`WEB_SEARCH`, `CROSS_DOMAIN_SYNTHESIS`, `NEWS_ANALYSIS`, `MACRO_ANALYSIS`) declare
+capabilities (`WEB_SEARCH`, `NEWS_ANALYSIS`, `MACRO_ANALYSIS`) declare
 that data type — so capability ranking schedules a relationship route instead of an endpoint feed.
 An arrow is therefore `PENDING` until researched, `EXHAUSTED` only after bounded research spent
 those routes, and never resurrected later by endpoint coverage (`assessCoverage` treats

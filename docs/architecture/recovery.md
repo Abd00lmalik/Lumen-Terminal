@@ -11,13 +11,19 @@ For every blocking (unresolved CRITICAL, or un-attempted CHALLENGE) requirement:
 1. **Primary** — the capabilities the plan scheduled for it.
 2. **Capability floor** — engine-required capabilities the plan omitted (round 1).
 3. **Requirement-aware recovery rounds** — `recoveryCapabilities` maps each blocking requirement to
-   capabilities from its declared domains/data types/freshness, excluding anything already tried.
-   A blocking CHALLENGE maps to disconfirmation capabilities only. Bounded by `maxRecoveryRounds`
+   capabilities from its declared domains/data types/freshness, excluding anything already tried,
+   and the round objective carries the **retrieval brief** (unresolved requirements, windows, roles,
+   evidence classes). A blocking CHALLENGE maps to disconfirmation capabilities only; when no
+   domain-mapped path remains, the map falls back to `WEB_SEARCH` — the retrieval-shaped last resort
+   since the paid agent tier was removed (2026-10-05). Bounded by `maxRecoveryRounds`
    (default 2) and the round budget.
-4. **Requirement-scoped deep research** — when the loop still ends insufficient, the last-resort
-   tier (`CROSS_DOMAIN_SYNTHESIS` research agents, then `WEB_SEARCH`) fires ONCE with the exact
-   question plus the **retrieval brief**: the unresolved requirements, their windows, roles and
-   evidence classes. Found evidence upgrades the conclusion; a still-empty tier falls through.
+4. **Requirement-scoped deep research (self-gated)** — the adaptive loop and the flow runner keep an
+   engine-owned tier that fires ONCE with the exact question plus the retrieval brief. It is gated on
+   a registered `CROSS_DOMAIN_SYNTHESIS` provider; since `CROSS_DOMAIN_SYNTHESIS` has no provider
+   (its only sources purchased generated answers and were removed 2026-10-05), the tier is skipped
+   by design — a run never buys an answer instead of gathering evidence. Step 3 carries the
+   requirement-scoped retrieval that used to live here. Found evidence upgrades the conclusion;
+   an empty result falls through.
 5. **Honest terminal state** — `EXHAUSTED` with `missingReason` naming the requirement and the
    attempted paths. Never fabricated values; a retrieval failure is a technical condition, never
    negative evidence.

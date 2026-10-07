@@ -39,6 +39,12 @@ three occurrences"), **INSTANT**, or **OPEN**.
   how a provider would silently substitute a different span.
 - `requestedWindowHours` (data-facets) and the requirement window law now delegate here, so there is
   one temporal vocabulary for requirements and evidence.
+- Conversation routing delegates too: `restatesTimeWindow` in `src/lui/conversation-routing.ts`
+  reads a "now look at the last 7 days" restatement through `temporalIntentOf` instead of carrying
+  its own window-phrase regex. The routing layer keeps its own policy on top of the parse — an
+  INSTANT measurement ask and freshness-word calendar phrases ("today", "yesterday", "intraday")
+  never continue a thread, so a fresh standalone question still starts one — but it never
+  re-enumerates the phrases themselves.
 
 ## 3. MODES — `src/research/modes.ts`
 
@@ -53,12 +59,26 @@ question never widens scope. `completeRequirements` then:
 Thus "Why did BTC fall, and does my bullish thesis still hold?" acquires OBSERVATION → CAUSAL →
 THESIS internally, while the primary mode still owns the answer shape.
 
+The mode vocabulary is ONE table: `MODE_PATTERNS` is exported from `modes.ts`, and
+`src/lui/flow-guard.ts` classifies task wording through that same table (`TASK_PATTERNS =
+MODE_PATTERNS`). Flow guards and mode chaining therefore cannot drift onto different regexes for
+the same phrase — the failure where a question's guard pattern and its chain pattern disagreed
+(three of seventeen probe questions classified inconsistently, each path falling back to a
+different flow). `tests/lui/intent-coherence.test.ts` pins the parity.
+
 ## 4. ANSWER SHAPES — `src/research/synthesis.ts`
 
 `answerShapeFor(flow)` names the SECTIONS each mode's answer owes (a timeline for WHAT_HAPPENED, a
 condition → evidence → status structure for DOES_MY_THESIS_HOLD, falsification conditions for
 WHAT_COULD_PROVE_ME_WRONG, and so on). `answerShapeGuidance` is appended to the synthesis prompt, and
 `renderAnswerSynthesis` keeps raw provider payloads out of the answer (they belong in traceability).
+
+The shape is enforced, not only prompted: `answerShapeViolations` checks the sections with a clean
+field mapping against what the draft actually delivered (the structured causal chain counts as its
+own factors/watch conditions; a section with no field of its own is never demanded). A draft that
+owes a section and omits it gets one bounded corrective retry naming exactly what is missing — the
+same law the question-first opener already had — and a retry that still misses it is rejected so the
+deterministic fallback answers instead.
 
 ## 5. ASSETS — `src/domain/instruments.ts`, `requirements.ts subjectMarketClassOf`
 
@@ -74,3 +94,8 @@ remain taxonomies.
 hourly; finer satisfies coarser), temporal parsing across kinds, multi-mode chaining vs single-mode
 isolation, asset-class generalization, and per-mode answer shapes. `tests/research/field-coverage.test.ts`
 and `tests/research/flow-isolation.test.ts` continue to pin the window/shape laws and flow isolation.
+The single-vocabulary laws have their own suites: `tests/lui/intent-coherence.test.ts` (flow guard vs
+mode chain classify every phrasing the same way), `tests/api/conversation-routing-production.test.ts`
+(dimensions changes keep their thread; anchored comparisons, window restatements, falsification
+rephrasings, and the controls that must still start fresh), and the answer-shape matrix in
+`tests/research/final-judgment.test.ts`.

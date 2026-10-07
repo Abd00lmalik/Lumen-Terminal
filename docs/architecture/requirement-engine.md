@@ -24,6 +24,23 @@ capabilities; it cannot remove engine-required ones.
 The **counterevidence floor** separately schedules `FALSIFICATION` once per run when a CRITICAL
 requirement exists and it was not planned.
 
+Two invariants keep the floor able to do its job:
+
+- **Every requirement domain has a capability.** The classifier can label a requirement with any
+  `EvidenceDomain`, so every domain must be declared by at least one entry in `CAPABILITY_SUPPORT` —
+  otherwise a CRITICAL requirement classifies into vocabulary nothing serves, the floor schedules
+  zero capabilities, and only recovery's empty-candidates backstop eventually reaches `WEB_SEARCH`.
+  `EVIDENCE_DOMAINS` (with a compile-time exhaustiveness anchor) is checked against the
+  declarations in `tests/research/requirement-coverage.test.ts`. The historical failure: OPTIONS
+  ("open interest", "implied volatility", "strike") was such a dead end, and "open interest"
+  classified ONLY there while `DERIVATIVES_ANALYSIS` — the capability that actually returns it —
+  declares the DERIVATIVES domain.
+- **Type hits compare in one vocabulary.** Requirement tokens are canonicalized (inflection
+  folding, concept synonyms: "policy"/"yields" → `RATE`) while capability data types are declared
+  raw, so `capabilitiesForRequirement` folds each data type the same way before matching, and counts
+  distinct CONCEPTS: `POLICY`, `RATE` and `YIELD` all fold to `RATE`, and counting one concept three
+  times let a broad declaration outrank the capability that returns the data the requirement names.
+
 ## Deterministic matching
 
 `matchRequirement` (used identically by coverage assessment and the synthesis admission gate) checks:
@@ -74,5 +91,6 @@ bounded recovery rounds (see `docs/architecture/recovery.md`) before honest insu
 
 `recoveryCapabilities` maps blocking requirements to capabilities from the same declarations. A
 blocking CHALLENGE requirement is recovered with disconfirmation capabilities only. When no path
-remains, the fallback tier is `WEB_SEARCH` → `CROSS_DOMAIN_SYNTHESIS` (deep research), and only
-then `EXHAUSTED`.
+remains, the fallback tier is `WEB_SEARCH` alone (`CROSS_DOMAIN_SYNTHESIS` was withdrawn with the
+paid agent tier on 2026-10-05: a run never buys a generated answer instead of gathering evidence),
+and only then `EXHAUSTED`.
