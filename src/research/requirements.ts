@@ -179,6 +179,22 @@ export type EvidenceDomain =
   | "PRICE_MARKET" | "MACRO" | "NEWS" | "EARNINGS" | "FUNDAMENTALS" | "HISTORICAL"
   | "OPTIONS" | "DERIVATIVES" | "SENTIMENT" | "ONCHAIN" | "DEFI" | "PROJECT" | "TECHNICAL" | "GENERAL";
 
+/** Every EvidenceDomain as a runtime list, for domain-level conformance checks in tests. */
+export const EVIDENCE_DOMAINS = [
+  "PRICE_MARKET", "MACRO", "NEWS", "EARNINGS", "FUNDAMENTALS", "HISTORICAL",
+  "OPTIONS", "DERIVATIVES", "SENTIMENT", "ONCHAIN", "DEFI", "PROJECT", "TECHNICAL", "GENERAL",
+] as const satisfies readonly EvidenceDomain[];
+
+type AssertNever<T extends never> = T;
+/**
+ * Compile-time exhaustiveness anchor: the moment a domain joins `EvidenceDomain` without
+ * joining `EVIDENCE_DOMAINS`, this type errors, so the domain-capability conformance test
+ * can never silently iterate an outdated list.
+ */
+export type EvidenceDomainsAreExhaustive = AssertNever<
+  Exclude<EvidenceDomain, (typeof EVIDENCE_DOMAINS)[number]>
+>;
+
 /** One observation available for coverage assessment (a workspace Evidence, minimized). */
 export interface CoverageEvidence {
   readonly ref: string;
@@ -313,7 +329,11 @@ const DOMAIN_KEYWORDS: readonly { readonly domain: EvidenceDomain; readonly patt
   { domain: "FUNDAMENTALS", patterns: [/\b(fundamental|fundamentals|revenue|margin|margins|valuation|book value|cash flow|balance sheet|eps growth)\b/i] },
   { domain: "HISTORICAL", patterns: [/\b(histor\w*|past|previous\w*|before|similar setups?|analogue|analog\w*|compare with|cycle|episode\w*)\b/i] },
   { domain: "OPTIONS", patterns: [/\b(options|option chain|implied volatility|strike|positioning|open interest)\b/i] },
-  { domain: "DERIVATIVES", patterns: [/\b(funding|funding rate|perpetual|futures basis|liquidations|leverage)\b/i] },
+  // "open interest" is a derivatives information kind: DERIVATIVES_ANALYSIS (the public perp
+  // venues) declares OPEN_INTEREST as one of its data types. It used to classify only under
+  // OPTIONS, a domain no capability declares, so an open-interest requirement mapped to
+  // NOTHING and the floor never scheduled the provider that actually returns the number.
+  { domain: "DERIVATIVES", patterns: [/\b(funding|funding rate|perpetual|futures basis|liquidations|leverage|open interest)\b/i] },
   { domain: "SENTIMENT", patterns: [/\b(sentiment|fear|greed|positioning|crowd|narrative)\b/i] },
   { domain: "ONCHAIN", patterns: [/\b(on-chain|onchain|whale|wallet|holders|exchange reserves|transactions|address)\b/i] },
   { domain: "DEFI", patterns: [/\b(defi|tvl|protocol|liquidity pool|staking|aave|uniswap|l2|layer 2)\b/i] },
@@ -2324,7 +2344,12 @@ export const CAPABILITY_SUPPORT: Readonly<Record<string, CapabilitySupport>> = {
   HISTORICAL_COMPARISON: { domains: ["HISTORICAL", "PRICE_MARKET", "TECHNICAL", "GENERAL"], dataTypes: ["OHLCV", "EPISODE", "OUTCOME", "CYCLE", "ANALOGUE"], freshness: ["HISTORICAL", "ANY"], facets: ["SERIES", "OHLC", "HIGH", "LOW", "OPEN", "CLOSE", "VOLUME", "TIMESTAMP"] },
   FALSIFICATION: { domains: ["GENERAL", "NEWS"], dataTypes: ["DISCONFIRMING", "RISK", "COUNTEREVIDENCE"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
   SOURCE_VALIDATION: { domains: ["GENERAL", "NEWS"], dataTypes: ["PRIMARY", "VERIFICATION", "PROVENANCE"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
-  WEB_SEARCH: { domains: ["GENERAL", "NEWS", "PROJECT", "MACRO", "FUNDAMENTALS"], dataTypes: ["SEARCH", "PRIMARY", "DEVELOPMENT", "NARRATIVE", "TRANSMISSION", "RELATIONSHIP"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
+  // WEB_SEARCH also declares OPTIONS: it is the only registered, provider-backed path for
+  // options-kind information (no options-chain source exists; OPTIONS_CHAIN_ANALYSIS stays out
+  // of the vocabulary until one does). Without this, an OPTIONS requirement — "implied
+  // volatility", "option chain", "strike" — mapped to no capability at all, so the floor
+  // scheduled nothing and only recovery's empty-candidates backstop reached WEB_SEARCH.
+  WEB_SEARCH: { domains: ["GENERAL", "NEWS", "PROJECT", "MACRO", "FUNDAMENTALS", "OPTIONS"], dataTypes: ["SEARCH", "PRIMARY", "DEVELOPMENT", "NARRATIVE", "TRANSMISSION", "RELATIONSHIP"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
   ONCHAIN_ANALYSIS: { domains: ["ONCHAIN"], dataTypes: ["ADDRESS", "HOLDER", "TRANSACTION", "RESERVE"], freshness: ["CURRENT", "RECENT", "HISTORICAL"] },
   DEFI_ANALYSIS: { domains: ["DEFI"], dataTypes: ["TVL", "PROTOCOL", "LIQUIDITY", "STAKING"], freshness: ["CURRENT", "RECENT"] },
   PROJECT_RESEARCH: { domains: ["PROJECT", "NEWS", "ONCHAIN", "DEFI"], dataTypes: ["DESCRIPTION", "ECOSYSTEM", "NARRATIVE", "TEAM", "ROADMAP"], freshness: ["CURRENT", "RECENT", "HISTORICAL", "ANY"] },
@@ -2374,8 +2399,24 @@ export function capabilitiesForRequirement(
     const freshnessOk =
       requirement.timeSensitivity === "ANY" || support.freshness.includes(requirement.timeSensitivity);
     if (!freshnessOk) continue; // a historical-only capability cannot serve a CURRENT need
-    let typeHits = 0;
-    for (const dt of support.dataTypes) if (reqTokens.has(dt)) typeHits += 1;
+    // DISTINCT CONCEPTS, NOT DECLARATIONS: requirement tokens are canonicalized ("funding" ->
+    // "FUND") and concept-folded ("policy"/"yields" -> "RATE"), while dataType strings are
+    // declared raw, so two corrections make typeHits count what the name promises:
+    //  1. fold the dataType the same way the description was folded, so FUNDING, POSITIONING
+    //     and OPEN_INTEREST can score at all (an unfoldered compare never matched them, and
+    //     the only capability returning open interest kept losing to capabilities that merely
+    //     mention rates);
+    //  2. count each matched CONCEPT once: POLICY, RATE and YIELD all fold to RATE, and
+    //     counting one concept three times let a broad dataType list outrank the capability
+    //     that actually returns the data the requirement names.
+    const hitConcepts = new Set<string>();
+    for (const dt of support.dataTypes) {
+      if (reqTokens.has(dt)) { hitConcepts.add(dt); continue; }
+      for (const t of meaningfulTokens(dt)) {
+        if (reqTokens.has(t)) { hitConcepts.add(t); break; }
+      }
+    }
+    const typeHits = hitConcepts.size;
     // AVAILABILITY IS A FILTER, NOT A PREFERENCE: scheduling a capability no provider serves
     // spends a round on a guaranteed empty result (the caller's intent — "recovery never
     // schedules a capability the deployment cannot execute" — was only affecting the score).

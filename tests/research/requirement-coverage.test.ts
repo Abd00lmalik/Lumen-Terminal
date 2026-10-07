@@ -12,13 +12,18 @@
  *   ranked with registry availability, excluding already-tried capabilities. Nothing here
  *   knows about a specific question.
  * - CATALOG CONFORMANCE: every planner capability declares support and vice versa.
+ * - DOMAIN COVERAGE: every EvidenceDomain maps to at least one capability that declares it,
+ *   so a requirement can never be classified into a vocabulary no capability serves (the
+ *   live OPTIONS dead end: "open interest"/"implied volatility" classified under OPTIONS,
+ *   which no capability declared, so the floor scheduled nothing and the provider that
+ *   actually returns open interest was never reachable from the requirement naming it).
  * - GENERALIZATION: unseen questions derive requirements that match registered capabilities
  *   without any question-specific code.
  */
 import { describe, expect, it } from "vitest";
 import {
-  CAPABILITY_SUPPORT, assessCoverage, buildRequirements, capabilitiesForRequirement, coverageVerdict,
-  exhaustUnresolved, matchRequirement, recoveryCapabilities, renderCoverage, requirementsFromTasks,
+  CAPABILITY_SUPPORT, EVIDENCE_DOMAINS, assessCoverage, buildRequirements, capabilitiesForRequirement, coverageVerdict,
+  exhaustUnresolved, mandatoryCapabilities, matchRequirement, recoveryCapabilities, renderCoverage, requirementsFromTasks,
   type CoverageEvidence,
 } from "../../src/research/requirements.js";
 import { subjectTermsOf } from "../../src/domain/instruments.js";
@@ -167,6 +172,42 @@ describe("capability matching (declarations, not question routes)", () => {
     expect(exhausted[0]?.status).toBe("EXHAUSTED");
     expect(exhausted[0]?.missingReason).toContain("stale evidence");
     expect(exhausted[0]?.missingReason).toContain("MACRO_ANALYSIS");
+  });
+});
+
+describe("domain coverage (no requirement domain is a dead end)", () => {
+  it("every EvidenceDomain is declared by at least one registered capability", () => {
+    const declared = new Set(Object.values(CAPABILITY_SUPPORT).flatMap((s) => s.domains));
+    for (const domain of EVIDENCE_DOMAINS) expect(declared).toContain(domain);
+  });
+
+  it("an open-interest requirement reaches the provider that returns open interest", () => {
+    const [oi] = buildRequirements([{ description: "current open interest levels" }]);
+    expect(oi?.domains).toEqual(expect.arrayContaining(["OPTIONS", "DERIVATIVES"]));
+    const caps = capabilitiesForRequirement(oi!, { isAvailable: () => true });
+    expect(caps).toContain("DERIVATIVES_ANALYSIS");
+    expect(caps).not.toContain("OPTIONS_CHAIN_ANALYSIS"); // vocabulary-removed: no provider exists
+    expect(mandatoryCapabilities([oi!], { isAvailable: () => true })).toContain("DERIVATIVES_ANALYSIS");
+  });
+
+  it("a pure-options requirement maps to WEB_SEARCH instead of mapping to nothing", () => {
+    for (const description of [
+      "options market implied direction",
+      "strike concentration and gamma exposure",
+      "implied volatility regime for the asset",
+    ]) {
+      const [req] = buildRequirements([{ description }]);
+      expect(req?.domains).toContain("OPTIONS");
+      expect(mandatoryCapabilities([req!], { isAvailable: () => true })).toContain("WEB_SEARCH");
+    }
+  });
+
+  it("type hits count distinct concepts, so the open-interest provider makes the round-1 floor", () => {
+    // "funding rate" folds POLICY/RATE/YIELD-shaped rate vocabulary onto one concept; counting
+    // it repeatedly used to outrank DERIVATIVES_ANALYSIS — the only capability returning the
+    // open interest the requirement names — pushing it out of the floor's per-requirement top 2.
+    const [req] = buildRequirements([{ description: "open interest and funding rate changes" }]);
+    expect(mandatoryCapabilities([req!], { isAvailable: () => true })).toContain("DERIVATIVES_ANALYSIS");
   });
 });
 
