@@ -766,6 +766,21 @@ export async function runAdaptiveResearch(
         if (named !== undefined) return named;
         return impliedResolutionForWindow(smallestWindow);
       };
+      // THE WINDOW THIS RUN STILL OWES (MC-5): the narrowest lookback any unmet requirement
+      // names. It travels with the call so a provider answers THE window the trader asked for
+      // instead of its own default (the live defect: a "last 7 days" ask was served three years
+      // of daily candles because the window never reached the provider). This is a REQUEST, not
+      // a claim about what will be served; coverage is still decided from the payload.
+      const requiredWindowHoursBrief = (): number | undefined => {
+        let smallest: number | undefined;
+        for (const row of requirements) {
+          if (row.status === "SATISFIED" || row.role === "CONTEXT" || row.role === "CHALLENGE") continue;
+          const window = row.windowHours ?? requestedWindowHoursOf(row.description);
+          if (window === undefined) continue;
+          if (smallest === undefined || window < smallest) smallest = window;
+        }
+        return smallest;
+      };
 
       // Independent capability calls run in PARALLEL (performance mandate §32): the registry
       // executes each through its own provider chain with bounded transport timeouts, and one
@@ -786,6 +801,7 @@ export async function runAdaptiveResearch(
             // what will be served — coverage is decided from the payload when it arrives.
             ...(requiredFacetBrief().length > 0 ? { requiredFacets: requiredFacetBrief() } : {}),
             ...(requiredResolutionBrief() !== undefined ? { requiredResolution: requiredResolutionBrief() } : {}),
+            ...(requiredWindowHoursBrief() !== undefined ? { requiredWindowHours: requiredWindowHoursBrief() } : {}),
           },
           systemOrigin,
           at(),
@@ -1225,10 +1241,30 @@ export async function runAdaptiveResearch(
 
   // Lifecycle honesty: the loop CONCLUDED (by sufficiency, insufficiency, budget, or model
   // failure); the research object must reflect that instead of staying ACTIVE forever.
-  workspace.transitionResearch(researchRef, "COMPLETED", { kind: "agent", detail: "adaptive research loop" }, `research concluded: ${stoppedBecause}`, at());
+  // FAILED is a first-class lifecycle state (state-contract law): a run that could not produce
+  // a valid result — the time budget reached with material requirements still unresolved, or
+  // the interpretation model failing mid-run — is FAILED, never a success-shaped COMPLETED.
+  // The partial evidence, the gaps and the stop reason still persist and render honestly.
+  const collectedForLifecycle = allExecutions.flatMap((e) => e.evidenceIds).map((id) => workspace.getEvidence(id)).filter((e): e is Evidence => e !== undefined);
+  const mandatoryUnresolved = blockingRequirements(requirements).length > 0;
+  const failedRun =
+    stoppedBecause === "MODEL_FAILURE"
+    || (mandatoryUnresolved &&
+      (stoppedBecause === "TIME_BUDGET_EXHAUSTED"
+        || stoppedBecause === "ROUND_BUDGET_EXHAUSTED"
+        || stoppedBecause === "REQUIREMENT_GAPS_UNRESOLVED"
+        || stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE"
+        || stoppedBecause === "HOLLOW_COMPLETE_RECOVERY"));
+  workspace.transitionResearch(
+    researchRef,
+    failedRun ? "FAILED" : "COMPLETED",
+    { kind: "agent", detail: "adaptive research loop" },
+    `research concluded: ${stoppedBecause}${failedRun ? " (failed: unresolved mandatory requirements)" : ""}`,
+    at(),
+  );
   // Persist the completed loop (lock §14). A store failure propagates; never reported as success.
   await options.store.save(workspace.toSnapshot());
-  const collected = allExecutions.flatMap((e) => e.evidenceIds).map((id) => workspace.getEvidence(id)).filter((e): e is Evidence => e !== undefined);
+  const collected = collectedForLifecycle;
   const finalContext = buildResearchContext(workspace, {
     researchRef,
     relevantTo: objective,

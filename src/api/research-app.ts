@@ -324,6 +324,12 @@ export class ResearchApp {
           origin,
         );
 
+    // FOLLOW-UP LINEAGE (durable research object contract): when this turn continues a thread,
+    // the run it produces is a CHILD of the investigation's most recent completed run, carrying
+    // parentResearchId + followUpDepth so History nests it under its parent instead of listing
+    // it as an unrelated top-level investigation. Root runs carry neither field.
+    const parentRun = continuing ? [...ws0.investigationRuns(investigation.id)].reverse().find((r) => r.status === "COMPLETED") : undefined;
+
     const traderTurn = ws0.appendTurn(
       createTurn({
         investigationId: investigation.id,
@@ -338,6 +344,10 @@ export class ResearchApp {
       runId,
       userQuestion: submittedQuestion,
       investigationId: investigation.id,
+      ...(parentRun !== undefined ? { parentResearchId: parentRun.id } : {}),
+      ...(parentRun !== undefined
+        ? { followUpDepth: (parentRun.followUpDepth ?? 0) + 1 }
+        : {}),
     });
     try {
       // Honest wall-clock budget: finish (and persist) before the caller's execution window
@@ -541,6 +551,7 @@ export class ResearchApp {
         readonly role?: string;
         readonly status: string; readonly evidenceRefs: readonly string[]; readonly staleOnlyRefs: readonly string[];
         readonly duplicateEvidenceRefs?: readonly string[];
+        readonly originalWording?: string;
         readonly recoveryAttempts: number; readonly missingReason?: string;
       }[];
       readonly floorCapabilities?: readonly string[];
@@ -605,12 +616,19 @@ export class ResearchApp {
               if (seen.has(key)) continue; // the same requirement can appear on more than one outcome
               seen.add(key);
               requirements.push({
+                // STRUCTURED REQUIREMENT OBJECT: id, original wording, normalized description,
+                // role/type, status and supporting evidence ids — all data, never re-derived.
+                id: r.id,
+                ...(r.originalWording !== undefined && r.originalWording !== r.description
+                  ? { originalWording: r.originalWording }
+                  : {}),
                 description: r.description,
                 role: r.role ?? "CORE",
                 importance: r.importance,
                 timeSensitivity: r.timeSensitivity,
                 status: r.status,
                 evidenceCount: distinctEvidenceCount(r),
+                evidenceRefs: r.evidenceRefs.slice(0, 8),
                 duplicateEvidenceCount: r.duplicateEvidenceRefs?.length ?? 0,
                 staleEvidenceCount: r.staleOnlyRefs.length,
                 recoveryAttempts: r.recoveryAttempts,
@@ -692,14 +710,26 @@ export class ResearchApp {
                 : {}),
             };
           })();
-    // Honest outcome mapping: a pure interpretation failure (no research ran) is a MODEL_FAILURE;
-    // a run that completed research but ended on a model failure is a partial COMPLETED with the
-    // typed failure attached (the LUI's law: failure ≠ fabricated evidence, partial ≠ false success).
+    // Honest outcome mapping (FINAL-STATUS-FROM-COVERAGE law): a pure interpretation failure
+    // (no research ran) is a MODEL_FAILURE. A run whose research object is FAILED — the engine
+    // concluded it could not produce a valid result (time budget reached with unresolved
+    // CRITICAL requirements, requirement gaps) — is INSUFFICIENT, never a success-shaped
+    // COMPLETED; the collected evidence and its gaps still persist and render. The run's
+    // question resolution failing the fit gate demotes the outcome the same way: "question
+    // answered" is claimed only when the engine's coverage actually says so.
+    // A model failure AFTER research ran stays a partial COMPLETED with the typed failure
+    // attached (the LUI's law: failure ≠ fabricated evidence, partial ≠ false success) — the
+    // research object itself completed, so demoting it to MODEL_FAILURE/INSUFFICIENT would
+    // discard the persisted record and mint no judgment for research that genuinely ran.
     const ranResearch = researchRef !== undefined;
+    const answerRunStatus = ranResearch ? ws.getResearch(answerRunId!)?.status : undefined;
+    const resolution = researchDiagnostics?.questionResolution;
     const outcome: ResearchResponseDTO["outcome"] =
       result.rejected !== undefined ? "REJECTED"
       : result.awaitingConfirmation !== undefined ? "AWAITING_CONFIRMATION"
       : result.modelFailure !== undefined && !ranResearch ? "MODEL_FAILURE"
+      : answerRunStatus === "FAILED" ? "INSUFFICIENT"
+      : resolution !== undefined && resolution.status === "NOT_ANSWERED" ? "INSUFFICIENT"
       : "COMPLETED";
 
     // JUDGMENT BACKSTOP (completion law): a completed run is not complete until its
@@ -707,6 +737,9 @@ export class ResearchApp {
     // (flow path skipped it, or a prior instance's write was lost in a merge), the
     // run's validated answer IS the judgment — mint it deterministically. Without this
     // a completed run later hydrates as a judgmentless bare summary.
+    // INSUFFICIENT runs must not mint a judgment backstop: a budget stop is not a conclusion,
+    // and a confidence-bearing judgment recorded from a partial run reads as a verdict the
+    // evidence never permitted. The run record below still persists (honest reopening).
     if (outcome === "COMPLETED" && researchRef !== undefined) {
       const minted = ensureRunJudgment(
         ws,
@@ -796,10 +829,12 @@ export class ResearchApp {
         ? { historicalAnalysis: toHistoricalAnalysisDTO(result.flow5.historicalAnalysis) }
         : {}),
     };
-    // Persist completed runs for history hydration: the response goes into the workspace
-    // graph (so the NEXT store.save round-trips it to any instance) AND the in-memory
-    // archive (so the completing instance serves it without a store read).
-    if (outcome === "COMPLETED" && researchRef !== undefined) {
+    // Persist terminal runs for history hydration (completion → reopen → refresh): the
+    // response goes into the workspace graph (so the NEXT store.save round-trips it to any
+    // instance) AND the in-memory archive (so the completing instance serves it without a
+    // store read). An INSUFFICIENT run persists too — its gaps are real research state, and
+    // the failure is rendered from the record, never as an empty workspace.
+    if (researchRef !== undefined && (outcome === "COMPLETED" || outcome === "INSUFFICIENT")) {
       this.responseArchive.set(researchRef, { response, question: submittedQuestion });
       while (this.responseArchive.size > 25) {
         const oldest = this.responseArchive.keys().next().value;

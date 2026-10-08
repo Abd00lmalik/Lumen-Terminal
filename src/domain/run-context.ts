@@ -28,6 +28,13 @@ export interface ResearchRun {
    * investigation-scoped evidence; the id says where the turn happened, not what it may consume.
    */
   readonly investigationId?: string;
+  /**
+   * FOLLOW-UP LINEAGE: the run this submission continues (undefined = ROOT), and its depth.
+   * Stamped onto every Research object the submission creates so a follow-up is durably a
+   * CHILD of its parent — history nests it there instead of listing it as unrelated research.
+   */
+  readonly parentResearchId?: string;
+  readonly followUpDepth?: number;
 }
 
 let active: ResearchRun | undefined;

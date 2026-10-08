@@ -267,6 +267,13 @@ export interface ResearchDTO {
   readonly userQuestion?: string;
   /** Internal Research objects of the same run (plan steps, flow phases) — children, never top-level. */
   readonly internalRefs?: readonly string[];
+  /**
+   * FOLLOW-UP LINEAGE (durable research object contract): the run this run continues and its
+   * depth (0 = root). Undefined = ROOT. The frontend nests follow-ups under their parent —
+   * never as an unrelated top-level history item; lifecycle status is never derived from it.
+   */
+  readonly parentResearchId?: string;
+  readonly followUpDepth?: number;
 }
 
 export function researchToDTO(r: Research): ResearchDTO {
@@ -277,6 +284,10 @@ export function researchToDTO(r: Research): ResearchDTO {
     flow: r.flow,
     ...(r.runId !== undefined ? { runRef: r.runId } : {}),
     ...(r.userQuestion !== undefined ? { userQuestion: r.userQuestion } : {}),
+    // LINEAGE AS DATA (never derived): depth 0 on a root is still reported so the client can
+    // distinguish "a root run" from "a legacy run with no stamp".
+    ...(r.parentResearchId !== undefined ? { parentResearchId: r.parentResearchId } : {}),
+    ...(r.followUpDepth !== undefined ? { followUpDepth: r.followUpDepth } : (r.runId !== undefined ? { followUpDepth: 0 } : {})),
     status: r.status,
     ...(r.currentJudgmentRef !== undefined ? { currentJudgmentRef: r.currentJudgmentRef } : {}),
     evidenceRefs: idRefs(r.evidenceRefs),
@@ -1015,6 +1026,15 @@ export interface AnswerDTO {
 }
 
 export interface RequirementDiagnosticDTO {
+  /** The requirement's own stable id (structured requirement object; traceability anchor). */
+  readonly id?: string;
+  /**
+   * ORIGINAL WORDING (requirement-fidelity contract): the verbatim text this requirement was
+   * extracted from (the planner's sentence or the parent row before decomposition). Kept so
+   * no decomposition/normalization step can silently drop an entity, metric or time range the
+   * trader stated — the diagnostics always show what was actually asked.
+   */
+  readonly originalWording?: string;
   readonly description: string;
   /** CORE | SUPPORTING | CHALLENGE | CONTEXT (or the role the engine inferred). */
   readonly role?: string;
@@ -1023,6 +1043,12 @@ export interface RequirementDiagnosticDTO {
   /** SATISFIED | PARTIALLY_SATISFIED | PENDING | EXHAUSTED | UNAVAILABLE */
   readonly status: string;
   readonly evidenceCount: number;
+  /**
+   * The evidence objects that actually satisfy this requirement (bounded; full provenance
+   * lives on the run). Structured requirement object contract: the requirement's supporting
+   * evidence ids are data, never re-derived by the client.
+   */
+  readonly evidenceRefs?: readonly string[];
   /**
    * Evidence objects that matched but are re-served copies of an observation already counted
    * (same provider response, same payload identity). Reported so the count stays auditable:
@@ -1124,7 +1150,7 @@ export interface ResearchResponseDTO {
   /** One of the locked six actions that ran (natural-language intent, not an API-routed flow). */
   readonly action: string;
   /** Whether the request halted for clarification/confirmation, was rejected, or completed. */
-  readonly outcome: "COMPLETED" | "AWAITING_CONFIRMATION" | "REJECTED" | "MODEL_FAILURE";
+  readonly outcome: "COMPLETED" | "INSUFFICIENT" | "AWAITING_CONFIRMATION" | "REJECTED" | "MODEL_FAILURE";
   readonly answer: AnswerDTO;
   /** Typed failure classification when outcome is MODEL_FAILURE; never laundered into evidence. */
   readonly modelFailure?: { readonly type: string; readonly message: string };

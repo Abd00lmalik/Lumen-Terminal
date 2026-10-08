@@ -39,6 +39,7 @@ import { subjectTermsOf } from "../domain/instruments.js";
 import { currentRun } from "../domain/run-context.js";
 import {
   assessCoverage,
+  blockingRequirements,
   buildRequirements,
   coverageItemOf,
   completeRequirements,
@@ -46,6 +47,7 @@ import {
   markUnattemptableChallenges,
   requirementsFromTasks,
   SUBJECT_REQUIRED_CAPABILITIES,
+  DISCONFIRMATION_CAPABILITIES,
   type ResearchRequirement,
 } from "./requirements.js";
 import { buildResearchContext, renderResearchContext, type ResearchContext } from "./context.js";
@@ -368,9 +370,29 @@ export async function runFlow(
       .map((t) => ({ ...t, capabilities: permittedCapabilities(t.capabilities, options.capabilityConstraint ?? {}) }))
       .filter((t) => t.capabilities.length > 0);
 
-    // CAPABILITY FLOOR: the flow runner does NOT add a floor — the model's plan is the
-    // execution set. The floor belongs in the adaptive loop where the engine closes gaps the
-    // model omitted. Flows trust the plan; the completion gate is the safety net.
+    // CAPABILITY FLOOR: the flow runner does NOT add a general floor — the model's plan is the
+    // execution set. Flows trust the plan; the completion gate is the safety net.
+    //
+    // COUNTEREVIDENCE FLOOR (MC-4, the one engine action a flow run DOES owe): disconfirmation
+    // is an engine action, not a prompt convention. Without this, a flow run whose plan named no
+    // disconfirmation capability could only ever mark its CRITICAL CHALLENGE row satisfied with
+    // ordinary reporting about the subject, which is the counterevidence defect. When a CRITICAL
+    // CHALLENGE row is un-attempted and the deployment registers a disconfirmation capability,
+    // it is scheduled once here (bounded to one capability, and never a capability already run).
+    if (round === 1) {
+      const planned = new Set(roundTasks.flatMap((t) => [...t.capabilities]));
+      const challengeOpen = requirements.some(
+        (r) => r.role === "CHALLENGE" && r.status !== "SATISFIED" && r.recoveryAttempts === 0,
+      );
+      const disconfirmation = challengeOpen
+        ? DISCONFIRMATION_CAPABILITIES.find((cap) => !planned.has(cap) && capabilityUsable(cap))
+        : undefined;
+      if (disconfirmation !== undefined) {
+        roundTasks.push({ objective, capabilities: [disconfirmation], completion: "attempt disconfirmation of the leading conclusion" });
+        floorCapabilities = [...floorCapabilities, disconfirmation];
+        options.onProgress?.(progressEvent("capability_started", at(), `counterevidence floor: ${disconfirmation} required to attempt this question's challenge`, { capability: disconfirmation }));
+      }
+    }
     if (recoveryRoundCapabilities !== undefined) {
       recoveryRoundsUsed += 1;
       recoveryRoundCapabilities = undefined;
@@ -678,8 +700,25 @@ function finish(
 ): FlowOutcome {
   // Lifecycle honesty: the run CONCLUDED (by sufficiency, insufficiency, budget, or model
   // failure); the research object must reflect that instead of staying ACTIVE forever.
-  // STOPPED stays reserved for actually-interrupted runs (startup sweep).
-  workspace.transitionResearch(researchRef, "COMPLETED", { kind: "agent", detail: "flow runner" }, `research concluded: ${stoppedBecause}`, at());
+  // Same law as the adaptive loop (state-contract): a run that could not produce a valid
+  // result — model failure, or a budget/gap stop with unresolved mandatory requirements — is
+  // FAILED, never a success-shaped COMPLETED. STOPPED stays reserved for actually-interrupted
+  // runs (startup sweep).
+  const mandatoryUnresolved = blockingRequirements(requirements).length > 0;
+  const failedRun =
+    stoppedBecause === "MODEL_FAILURE"
+    || (mandatoryUnresolved &&
+      (stoppedBecause === "TIME_BUDGET_EXHAUSTED"
+        || stoppedBecause === "ROUND_BUDGET_EXHAUSTED"
+        || stoppedBecause === "REQUIREMENT_GAPS_UNRESOLVED"
+        || stoppedBecause === "MODEL_INSUFFICIENT_EVIDENCE"));
+  workspace.transitionResearch(
+    researchRef,
+    failedRun ? "FAILED" : "COMPLETED",
+    { kind: "agent", detail: "flow runner" },
+    `research concluded: ${stoppedBecause}${failedRun ? " (failed: unresolved mandatory requirements)" : ""}`,
+    at(),
+  );
   const research = workspace.getResearch(researchRef);
   const hypotheses = research !== undefined
     ? research.hypothesisRefs

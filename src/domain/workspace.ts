@@ -302,7 +302,9 @@ export class Workspace {
   addResearch(input: { objective: string; question: string; flow: string }, origin: ProvenanceOrigin, at?: Date): Research {
     // Stamp the active user submission (run-context): every Research created during one
     // question carries the same runId + the trader's verbatim question, so history shows one
-    // entry per question instead of one per internal plan step.
+    // entry per question instead of one per internal plan step. A follow-up submission also
+    // stamps its LINEAGE, so every run object durably records the parent it continues and its
+    // depth — history nests follow-ups under their parent instead of listing them unrelated.
     const run = currentRun();
     const research = createResearch(
       run !== undefined
@@ -311,6 +313,8 @@ export class Workspace {
             runId: run.runId,
             userQuestion: run.userQuestion,
             ...(run.investigationId !== undefined ? { investigationRef: run.investigationId } : {}),
+            ...(run.parentResearchId !== undefined ? { parentResearchId: run.parentResearchId } : {}),
+            ...(run.followUpDepth !== undefined ? { followUpDepth: run.followUpDepth } : {}),
           }
         : input,
       origin,

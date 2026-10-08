@@ -226,6 +226,15 @@ export interface CoverageEvidence {
   readonly resolution?: Resolution;
   /** Identity of the underlying provider response: identical identity ⇒ one observation. */
   readonly payloadIdentity?: string;
+  /**
+   * GROUP (MC-6): the provider response this segment belongs to. Segments of ONE response
+   * (monthly candle chunks) are distinct facts that TOGETHER span the requested window; the
+   * coverage engine may satisfy a windowed row from the group's assembled span when no single
+   * segment reaches it. Undefined for evidence that did not come from a tool response.
+   */
+  readonly payloadGroup?: string;
+  /** For a MC-6 assembled group item: the segment refs the group stands for. */
+  readonly groupRefs?: readonly string[];
 }
 
 /**
@@ -246,6 +255,8 @@ export interface CoverageEvidenceSource {
   /** The sampling granularity this observation carries, measured at ingestion. */
   readonly resolution?: string;
   readonly payloadIdentity?: string;
+  /** The tool response this evidence was ingested from (the MC-6 group key). */
+  readonly toolResultRef?: string;
 }
 
 /**
@@ -285,6 +296,9 @@ export function coverageItemOf(e: CoverageEvidenceSource): CoverageEvidence {
     // Response identity: one provider response re-served under several capability names is
     // ONE observation, never the corroboration the evidence count would otherwise suggest.
     ...(e.payloadIdentity !== undefined ? { payloadIdentity: e.payloadIdentity } : {}),
+    // MC-6 group key: the response this segment was ingested from. Segments of one response
+    // assemble into the window they jointly cover; nothing outside a real tool response groups.
+    ...(e.toolResultRef !== undefined ? { payloadGroup: e.toolResultRef } : {}),
   };
 }
 
@@ -295,22 +309,17 @@ const CURRENT_MAX_AGE_DAYS = 21;
 const RECENT_MAX_AGE_DAYS = 120;
 
 /**
- * TEMPORAL LAW (research mandate Part 4): when a requirement names an explicit recency
- * window, EVENT-DATED coverage (headlines/news) must fall inside it. A headline from three
- * weeks ago does not answer a "this week" catalyst requirement, however valid it is as
- * background. Market quotes keep the data-freshness window instead: a quote carries its own
- * timestamp, and a yield level is a state, not an event-dated development.
+ * Days named by a requirement's own recency phrasing, when it names one.
+ *
+ * Backed by the ONE temporal parser (temporal.ts) — `temporalIntentOf` reads rolling windows
+ * ("the last 48 hours"), calendar periods ("today", "this week", "this month"), explicit
+ * ranges and year-to-date — so every phrase the engine understands anywhere is understood
+ * here. A phrase that names no fixed duration ("since the breakout", "the current price")
+ * yields undefined and never tightens the freshness limit.
  */
-const EXPLICIT_WINDOWS: readonly { readonly pattern: RegExp; readonly days: number }[] = [
-  { pattern: /\b(today|right now|currently|intraday|tonight|at the moment)\b/i, days: 3 },
-  { pattern: /\b(this week|this week's|week to date|this-week|weekly)\b/i, days: 7 },
-  { pattern: /\b(this month|month to date|monthly)\b/i, days: 31 },
-];
-
-/** Days named by a requirement's own recency phrasing, when it names one. */
 export function explicitWindowDays(description: string): number | undefined {
-  for (const window of EXPLICIT_WINDOWS) if (window.pattern.test(description)) return window.days;
-  return undefined;
+  const hours = requestedWindowHours(description);
+  return hours !== undefined ? hours / 24 : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -751,11 +760,80 @@ const ATOMIC_LABELS: Readonly<Record<DataFacet, string>> = {
   REPORTED_EVENT: "reported event dated inside the window",
 };
 
+/**
+ * Which data shapes a piece of requirement wording names, most specific first.
+ *
+ * Shared by the atomic-row writer and the enumeration stripper so they can never disagree
+ * about what a clause names: a clause that names a shape is that shape's wording, and a
+ * clause that names none is context (subject, verb, window) that every atomic row keeps.
+ * Pure vocabulary of SHAPES — never an asset, topic or question list.
+ */
+const FACET_CLAUSE_VOCABULARY: readonly { readonly facet: DataFacet; readonly re: RegExp }[] = [
+  { facet: "REPORTED_EVENT", re: /\b(?:dated|events?|headlines?|news|announcements?|developments?)\b/i },
+  { facet: "SERIES", re: /\b(?:price\s+)?(?:sequence|path|trajectory|history|series|timeline)\b/i },
+  { facet: "OHLC", re: /\bohlc\b/i },
+  { facet: "OPEN", re: /\bopen(?:ing)?\b/i },
+  { facet: "CLOSE", re: /\bclos(?:e|ing)\b/i },
+  { facet: "HIGH", re: /\bhighs?\b/i },
+  { facet: "LOW", re: /\blows?\b/i },
+  { facet: "AGGREGATE_VOLUME", re: /\b(?:aggregate|total|cumulative)\s+volumes?\b/i },
+  { facet: "VOLUME", re: /\bvolumes?\b/i },
+  { facet: "TIMESTAMP", re: /\btimestamps?\b|\btime of each observation\b/i },
+  { facet: "WINDOW", re: /\bwindow\b/i },
+  { facet: "SNAPSHOT", re: /\b(?:price|prices|value|level|quote|current|spot|latest)\b/i },
+];
+
+/** The facets a clause names (the FIRST specific match wins a contested word: "price
+ * sequence" is a SERIES clause, not a SNAPSHOT one). */
+function facetsNamedBy(text: string): ReadonlySet<DataFacet> {
+  const named = new Set<DataFacet>();
+  for (const entry of FACET_CLAUSE_VOCABULARY) {
+    if (!entry.re.test(text)) continue;
+    named.add(entry.facet);
+    // A clause matched by a specific shape stops claiming the generic ones its words share.
+    if (entry.facet === "SERIES") named.delete("SNAPSHOT");
+    if (entry.facet === "OHLC") { named.delete("OPEN"); named.delete("HIGH"); named.delete("LOW"); named.delete("CLOSE"); }
+    if (entry.facet === "AGGREGATE_VOLUME") named.delete("VOLUME");
+  }
+  return named;
+}
+
+/** Top-level enumeration segments of a requirement text (commas, semicolons, and/or). */
+function enumerationClausesOf(text: string): readonly string[] {
+  return text
+    .split(/(?:,|;|\band\b|\bor\b)+/i)
+    .map((s) => s.replace(/\s+/g, " ").trim())
+    .filter((s) => s.length > 0);
+}
+
 function atomicDescriptionFor(parent: string, facet: DataFacet, subject: string | undefined): string {
   const label = ATOMIC_LABELS[facet];
-  // Drop the enumeration the parent used ("price sequence, high, low, and volume data") so the
-  // atomic row names ONE shape: a row that still says "high, low and volume" would demand all
-  // three again and decomposition would be a no-op.
+  // CLAUSE-LEVEL DECOMPOSITION (requirement-fidelity law): the atomic row is written from
+  // the parent's OWN wording — the clause(s) that name this facet plus every context clause
+  // (subject, verb, window) — with the OTHER facets' clauses removed whole. Deleting bare
+  // shape nouns in place is what produced mangled rows ("Retrieve current Bitcoin price,
+  // today's , today's , and 24-hour"): the possessive and the quantifier were left behind
+  // with nothing to modify. The clause survives here with its qualifiers, so no semantic
+  // constraint (a metric, a possessive scope, a time range) is silently deleted.
+  const clauses = enumerationClausesOf(parent);
+  const own = clauses.filter((c) => facetsNamedBy(c).has(facet));
+  if (own.length > 0) {
+    const context = clauses.filter((c) => facetsNamedBy(c).size === 0);
+    const composed = [...context, ...own].join(", ");
+    // The window travels: when the parent named a window and the kept wording does not
+    // carry it, the parent's own window phrase is appended verbatim (never re-derived).
+    const windowPhrase = /(?:\b(?:for|over|across|during)\b\s+(?:the\s+)?(?:last|past|previous)?\s*[\w-]*\s*(?:hours?|days?|weeks?|months?))|(?:\btoday(?:'s)?\b|\btonight\b|\bthis session\b|\bintraday\b|\b24[- ]hour\b|\b48[- ]hour\b|\b12[- ]hour\b)/i.exec(parent)?.[0];
+    const scoped = composed.includes("last") || /(?:today|tonight|intraday|session|24[- ]hour|48[- ]hour|12[- ]hour)/i.test(composed) || windowPhrase === undefined
+      ? composed
+      : `${composed} ${windowPhrase}`;
+    // The label is appended only when the kept wording does not already name the shape —
+    // a row that reads "high — high" says the same thing twice.
+    const labelWords = label.split(/\s+/)[0] ?? "";
+    const needsLabel = labelWords !== "" && !new RegExp(`\\b${labelWords.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(scoped);
+    return `${scoped}${needsLabel ? ` — ${label}` : ""}${subject !== undefined ? ` for ${subject}` : ""}`.trim();
+  }
+  // Fallback (the facet is implied, not named): the parent minus its enumeration segments,
+  // with the same no-fragments law.
   const trimmed = stripEnumerations(parent);
   return `${trimmed} — ${label}${subject !== undefined ? ` for ${subject}` : ""}`.trim();
 }
@@ -764,14 +842,15 @@ function atomicDescriptionFor(parent: string, facet: DataFacet, subject: string 
  * Remove an enumeration of data shapes from a parent requirement's text, leaving its subject,
  * scope and window intact: "Retrieve Bitcoin price sequence, high, low, and volume data for the
  * last 24 hours." becomes "Retrieve Bitcoin data for the last 24 hours.".
+ *
+ * Segment law: a clause is dropped ONLY when it names ONLY shape vocabulary; a clause with
+ * other content (the subject, the verb, a window) is kept whole. Shape words are never
+ * deleted in place — that is the mangling law this function exists to enforce.
  */
 function stripEnumerations(text: string): string {
-  return text
-    .replace(/\b(price|prices)\s+(?:path|sequence|trajectory|history|series)\b/gi, "data")
-    .replace(/\b(observed\s+)?(high|low)s?\b(?=\s*(?:and|,|\/|$|\.)|\s*,\s*(?:and\s+)?(?:high|low))/gi, "")
-    .replace(/\b(?:opening|open)(?:\/reference)?\s+price\b/gi, "")
-    .replace(/\b(?:closing|close)(?:\/current)?\s+price\b/gi, "")
-    .replace(/\b(?:timestamps?|dated|volume)\b/gi, "")
+  const clauses = enumerationClausesOf(text);
+  const kept = clauses.filter((c) => facetsNamedBy(c).size === 0);
+  return (kept.length > 0 ? kept.join(", ") : text)
     .replace(/\s*,(?:\s*,)+\s*/g, ", ")
     .replace(/\bdata\s*,/gi, "")
     .replace(/\s{2,}/g, " ")
@@ -942,7 +1021,11 @@ export function questionTypeOf(question: string): QuestionType {
   // not read as an explanation of something that already happened.
   if (/\b(?:could|would|might) affect\b|\bforward[- ]looking\b|\bupcoming (?:events?|catalysts?|decisions?|risks?)\b|\bcatalysts? ahead\b|\bover the next (?:few )?(?:days|weeks|months)\b/.test(q)) return "FORWARD_LOOKING";
     if (/\bmacro\b|\brisk assets\b|\brisk[- ]on\b|\brisk appetite\b|\bregime\b|\bconditions?\b|\bfinancial conditions\b|\bliquidity\b/.test(q)) return "MACRO_REGIME";
-  if (/\bdriv\w*|\bdriving\b|\bwhy\b|\bwhat(?:'s| is|s) (behind|pushing|pressuring|moving)\b|\bpressur\w*|\bcaus\w*|\bexplain\w*|\b(?:is|are|was|were)\b[^.?!]{0,60}\baffect\w*\b/.test(q)) return "CAUSAL";
+  // `drove` is the past tense of `drive` and is NOT matched by the `driv\w*` stem, so an
+  // ordinary causal question ("What drove the move in crude oil?") fell through to the
+  // SYNTHESIS catch-all and acquired no causal dimensions at all. Verb morphology is part of the
+  // question SHAPE, not a phrasing to special-case: the causal family folds to one vocabulary.
+  if (/\bdriv\w*|\bdrove\b|\bdriven\b|\bwhy\b|\bwhat(?:'s| is|s) (behind|pushing|pressuring|moving)\b|\bpressur\w*|\bcaus\w*|\bexplain\w*|\b(?:is|are|was|were)\b[^.?!]{0,60}\baffect\w*\b/.test(q)) return "CAUSAL";
   return "SYNTHESIS";
 }
 
@@ -1004,6 +1087,10 @@ const ENGINE_REQUIRED: Readonly<Record<QuestionType, readonly EngineRequirementS
       description: (s) => `the previous period's price performance for ${s} (for the comparison the question asks for)`,
       role: "CORE", importance: "CRITICAL", timeSensitivity: "CURRENT",
       evidenceClasses: ["OHLCV", "PRICE", "QUOTE", "MARKET_DATA", "HISTORICAL"],
+      // MC-2: this is a QUANTITATIVE market-data dimension. It declares the shape it needs, so a
+      // news headline (which carries only REPORTED_EVENT) can never satisfy it by naming the
+      // subject. The asset name is an admission fact, never a coverage proof.
+      dataFacets: ["SNAPSHOT"],
       covers: /previous (week|period|month|quarter|day)|prior (week|month|quarter|period)|last (week|month|quarter)|comparison period/i,
     },
     {
@@ -1016,6 +1103,7 @@ const ENGINE_REQUIRED: Readonly<Record<QuestionType, readonly EngineRequirementS
       description: (s) => `volume and range context for ${s} across the compared periods`,
       role: "SUPPORTING", importance: "SUPPORTING", timeSensitivity: "CURRENT",
       evidenceClasses: ["VOLUME", "OHLCV", "RANGE", "MARKET_DATA"],
+      dataFacets: ["VOLUME"],
       covers: /volume|range|high.{0,3}(and|or).{0,3}low/i,
     },
   ],
@@ -1120,7 +1208,10 @@ const ENGINE_REQUIRED: Readonly<Record<QuestionType, readonly EngineRequirementS
     {
       description: () => "evidence that challenges or contradicts the trader's stated thesis",
       role: "CHALLENGE", importance: "CRITICAL", timeSensitivity: "CURRENT",
-      evidenceClasses: ["COUNTEREVIDENCE", "DISCONFIRMING", "RISK", "NEWS"],
+      // MC-4: counterevidence is DISCONFIRMING evidence. Ordinary supporting news is not in the
+      // admissible set, so a headline that merely names the subject can never stand in for
+      // counterevidence; the row is answered only by evidence that votes against the reading.
+      evidenceClasses: ["COUNTEREVIDENCE", "DISCONFIRMING", "RISK"],
       covers: /challeng|contradict|against the thesis|weaken|oppos/i,
     },
   ],
@@ -1128,7 +1219,10 @@ const ENGINE_REQUIRED: Readonly<Record<QuestionType, readonly EngineRequirementS
     {
       description: (s) => `disconfirming evidence that would falsify the leading conclusion for ${s}`,
       role: "CHALLENGE", importance: "CRITICAL", timeSensitivity: "CURRENT",
-      evidenceClasses: ["COUNTEREVIDENCE", "DISCONFIRMING", "RISK", "NEWS"],
+      // MC-4: counterevidence is DISCONFIRMING evidence. Ordinary supporting news is not in the
+      // admissible set, so a headline that merely names the subject can never stand in for
+      // counterevidence; the row is answered only by evidence that votes against the reading.
+      evidenceClasses: ["COUNTEREVIDENCE", "DISCONFIRMING", "RISK"],
       covers: /falsif|disconfirm|prove.{0,12}wrong|invalidate|weaken/i,
     },
   ],
@@ -1179,6 +1273,9 @@ const ENGINE_REQUIRED: Readonly<Record<QuestionType, readonly EngineRequirementS
       description: (s) => `the current observed value or level for ${s} (a fresh measurement, not an interpretation)`,
       role: "CORE", importance: "CRITICAL", timeSensitivity: "CURRENT",
       evidenceClasses: ["PRICE", "QUOTE", "MARKET_DATA", "OHLCV", "RAW_DATA", "OBSERVATION"],
+      // MC-2: the measurement dimension declares the shape a measurement carries. A headline or
+      // a driver note is not a measurement, whatever subject it names.
+      dataFacets: ["SNAPSHOT"],
       covers: /current|spot|quote|observation|reading|level|value/i,
     },
   ],
@@ -1307,7 +1404,10 @@ export function completeRequirements(
     specs.push({
       description: () => "evidence that weakens or contradicts the leading conclusion (counterevidence)",
       role: "CHALLENGE", importance: "CRITICAL", timeSensitivity: "CURRENT",
-      evidenceClasses: ["COUNTEREVIDENCE", "DISCONFIRMING", "RISK", "NEWS"],
+      // MC-4: counterevidence is DISCONFIRMING evidence. Ordinary supporting news is not in the
+      // admissible set, so a headline that merely names the subject can never stand in for
+      // counterevidence; the row is answered only by evidence that votes against the reading.
+      evidenceClasses: ["COUNTEREVIDENCE", "DISCONFIRMING", "RISK"],
       covers: /contradict|weaken|oppos|counter.?evidence|disconfirm|falsif|downside|against/i,
     });
   }
@@ -1798,6 +1898,53 @@ function isReportingSourceType(
 }
 
 /**
+ * EVIDENCE CLASSES THAT ADMIT A REPORTED CLAIM (MC-3).
+ *
+ * A requirement whose declared admissible classes include one of these can legitimately be
+ * answered by reporting (a driver, a catalyst, a forward risk, a thesis-supporting development).
+ * A requirement whose declared classes are ALL observational (price/OHLCV/macro/rate/volume/...)
+ * may not: a headline is a claim ABOUT the market, never a measurement OF it.
+ */
+const REPORTED_ADMITTING_CLASSES: ReadonlySet<string> = new Set([
+  "NEWS", "HEADLINE", "ARTICLE", "PRESS", "RSS", "ANNOUNCEMENT", "EVENT", "REPORTED_EVENT",
+  "REPORT", "SECONDARY", "COMMUNITY", "DEVELOPMENT", "CATALYST", "DRIVER", "NARRATIVE",
+  // Analytic dimensions are REPORTED or DERIVED by construction: a transmission link, a
+  // mechanism, a synthesis or an implication is an analysis of the world, and reporting is
+  // exactly the evidence that establishes it. Only purely observational dimensions (price, OHLCV,
+  // volume, macro levels, historical series) are closed to news.
+  "TRANSMISSION", "RELATIONSHIP", "CROSS_DOMAIN", "CROSS_ASSET", "SPILLOVER", "PASS_THROUGH",
+  "MECHANISM", "ANALYSIS", "IMPLICATION",
+]);
+
+/**
+ * REPORTED EVIDENCE EXCLUSIVITY (MC-3): a reported claim cannot satisfy an engine dimension
+ * whose declared admissible classes are purely observational.
+ *
+ * The subject-name overlap defect: a news headline naming the asset satisfied a quantitative
+ * market-data row through vocabulary alone ("Bitcoin" appears on both sides). Subject overlap is
+ * an ADMISSION fact — is this about my subject? — and never a coverage proof. A row that declares
+ * only measurement classes is served only by measurement evidence. Analytic dimensions
+ * (drivers, forward factors, thesis support) declare a reported class and are untouched, so
+ * this law narrows nothing the question legitimately asked for.
+ */
+function admitsReportedEvidence(classes: readonly string[]): boolean {
+  return classes.some((c) => REPORTED_ADMITTING_CLASSES.has(c.toUpperCase()));
+}
+
+/**
+ * Is this coverage item a REPORTED NEWS claim rather than an observation?
+ *
+ * The NEWS DOMAIN is the signal (the evidence layer tagged this item as news/headline material).
+ * The conservative source-kind default is deliberately NOT used: a textual FACTUAL payload with
+ * no declared source class defaults to SECONDARY, and treating that default as "this is a
+ * headline" would demote genuine quantitative feeds that simply did not declare a class. The
+ * property the law needs is what the item IS (its class), decided by the ingestion boundary.
+ */
+function isNewsClaim(itemDomain: EvidenceDomain): boolean {
+  return itemDomain === "NEWS";
+}
+
+/**
  * The shapes a requirement demands, after implication.
  */
 export function requiredFacetsOf(req: Pick<ResearchRequirement, "dataFacets" | "description" | "engineRequired">): ReadonlySet<DataFacet> {
@@ -1846,8 +1993,18 @@ export function freshnessSufficient(req: Pick<ResearchRequirement, "timeSensitiv
     if (!Number.isNaN(observed)) {
       const ageDays = (now.getTime() - observed) / DAY_MS;
       const base = req.timeSensitivity === "CURRENT" ? CURRENT_MAX_AGE_DAYS : RECENT_MAX_AGE_DAYS;
-      const explicit = explicitWindowDays(req.description);
-      const limit = explicit !== undefined && domainOfEvidenceType(item.evidenceType) === "NEWS" ? Math.min(base, explicit) : base;
+      // EXPLICIT WINDOW LAW (all evidence kinds): when the requirement's own wording names a
+      // window — "today", "this week", "the last 48 hours" — that window bounds how old ANY
+      // observation may be, not only event-dated headlines. Age and span are different axes:
+      // a candle set from three weeks ago can SPAN 24 hours and still not answer "the last
+      // 24 hours", exactly as a headline from three weeks ago does not answer "this week".
+      // The window is read by the ONE temporal parser (temporal.ts), so every phrase it
+      // understands is understood here — the former second phrase list saw only
+      // today/this week/this month and bound only NEWS evidence. A requirement that names no
+      // window keeps its base limit, which is what keeps a state ask ("current price")
+      // satisfied by a fresh quote. min(): a named window can TIGHTEN the limit, never loosen it.
+      const explicitHours = requestedWindowHours(req.description);
+      const limit = explicitHours !== undefined ? Math.min(base, explicitHours / 24) : base;
       if (ageDays > limit) return false;
     }
   }
@@ -1945,6 +2102,24 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
     }
   }
   const itemDomain = domainOfEvidenceType(item.evidenceType);
+  // REPORTED EVIDENCE EXCLUSIVITY (MC-3): position AFTER the subject gates (a headline about a
+  // different subject is already NO_MATCH) and BEFORE any vocabulary/class overlap so overlap can
+  // never produce SATISFIES for a purely observational dimension. Engine dimensions are the ones
+  // that carry declared admissible classes; a planner row keeps its own vocabulary law.
+  if (
+    req.engineRequired === true &&
+    // QUANTITATIVE MARKET-DATA dimensions only: the acceptance law is about market data (a price
+    // path, a high/low, a volume, a previous-period performance). Macro/analyst dimensions keep
+    // their own class law, so a capability that legitimately reports a macro level is not demoted
+    // by the tag on its envelope.
+    req.domains.includes("PRICE_MARKET") &&
+    req.evidenceClasses !== undefined &&
+    req.evidenceClasses.length > 0 &&
+    !admitsReportedEvidence(req.evidenceClasses) &&
+    isNewsClaim(itemDomain)
+  ) {
+    return "NO_MATCH";
+  }
   // SEMANTIC SUBJECT GATE (no-instrument ≠ no-subject): when the question derives an abstract
   // non-crypto domain, crypto-native observations are not about the question. The declared
   // subject counts as vocabulary too (a provider tags a BTC payload "BTC" without naming it
@@ -2129,6 +2304,83 @@ export function matchRequirement(req: ResearchRequirement, item: CoverageEvidenc
 }
 
 /**
+ * MC-6 GROUP ASSEMBLY.
+ *
+ * A chunked provider serves ONE provider response as several segments (G1 emits one evidence
+ * object per month: `{month, candleCount, candles}`). Each segment honestly measures only its
+ * own span, so a row demanding a 12-month window could never be satisfied by any single chunk —
+ * the data that answers the question existed, arrived, and was ruled out piece by piece.
+ *
+ * The engine assembles each multi-segment response into ONE additional candidate observation:
+ * the union of its segments' facts (union facets, max span, finest resolution, earliest
+ * timestamp, single declared subject) with a payloadIdentity DERIVED from the group key (so
+ * the same response re-served under another capability still dedupes) and `groupRefs` naming
+ * the real segment evidence ids. A group is matched ONLY in addition to its segments, and the
+ * segment gates (subject, domain, freshness) bind it: assembly widens SPAN, never relevance.
+ * Single-segment payloads are not duplicated here — they already match as themselves.
+ */
+function assembledGroupItems(items: readonly CoverageEvidence[]): readonly CoverageEvidence[] {
+  const groups = new Map<string, CoverageEvidence[]>();
+  for (const item of items) {
+    const group = item.payloadGroup;
+    if (group === undefined) continue;
+    const members = groups.get(group) ?? [];
+    members.push(item);
+    groups.set(group, members);
+  }
+  const assembled: CoverageEvidence[] = [];
+  for (const [group, members] of groups) {
+    if (members.length < 2) continue; // a lone segment already matches as itself
+    const first = members[0];
+    if (first === undefined) continue;
+    const withFacets = members.filter((m) => m.dataFacets !== undefined);
+    const facets = withFacets.length === 0 ? undefined : [...new Set(withFacets.flatMap((m) => m.dataFacets ?? []))];
+    const withSpan = members.filter((m) => m.coverageHours !== undefined);
+    const span = withSpan.length === 0 ? undefined : Math.max(...withSpan.map((m) => m.coverageHours ?? 0));
+    const resolutions = members
+      .map((m) => m.resolution)
+      .filter((r): r is Resolution => r !== undefined);
+    const resolution = resolutions.length === 0 ? undefined : finestOf(resolutions);
+    const observedAt = members
+      .map((m) => m.observedAt)
+      .filter((t): t is string => t !== undefined)
+      .sort()[0];
+    const subjects = [...new Set(members.map((m) => m.subject).filter((s): s is string => s !== undefined && s.trim() !== ""))];
+    const freshness = members.every((m) => m.freshness === first.freshness) ? first.freshness : undefined;
+    assembled.push({
+      ref: `group:${group}`,
+      text: members.map((m) => m.text).join(" "),
+      ...(first.evidenceType !== undefined ? { evidenceType: first.evidenceType } : {}),
+      ...(freshness !== undefined ? { freshness } : {}),
+      ...(observedAt !== undefined ? { observedAt } : {}),
+      ...(subjects.length === 1 ? { subject: subjects[0] } : {}),
+      ...(first.sourceProvider !== undefined ? { sourceProvider: first.sourceProvider } : {}),
+      ...(first.sourceType !== undefined ? { sourceType: first.sourceType } : {}),
+      ...(facets !== undefined ? { dataFacets: facets } : {}),
+      ...(span !== undefined ? { coverageHours: span } : {}),
+      ...(resolution !== undefined ? { resolution } : {}),
+      // Identity derived from the group key, not from any single segment: the SAME response
+      // re-served under another capability name carries the same toolResultRef, so it still
+      // dedupes to one observation.
+      payloadIdentity: `group:${group}`,
+      payloadGroup: group,
+      groupRefs: members.map((m) => m.ref),
+    });
+  }
+  return assembled;
+}
+
+/** The finest resolution in a set (resolution.ts ladder order; first wins ties). */
+function finestOf(resolutions: readonly Resolution[]): Resolution | undefined {
+  const order: readonly Resolution[] = ["TICK", "MINUTE", "HOUR", "DAY", "WEEK", "MONTH"];
+  let finest: Resolution | undefined;
+  for (const r of resolutions) {
+    if (finest === undefined || order.indexOf(r) < order.indexOf(finest)) finest = r;
+  }
+  return finest;
+}
+
+/**
  * Coverage assessment: match every item against every requirement and derive statuses.
  * PENDING requirements with evidence become SATISFIED (fresh match) or PARTIALLY_SATISFIED
  * (stale-only match). EXHAUSTED/UNAVAILABLE are terminal states owned by the recovery loop.
@@ -2165,7 +2417,18 @@ export function assessCoverage(
     // count the trader reads as corroboration.
     const satisfiedIdentity = new Map<string, string>();
     const duplicates: string[] = [];
-    for (const item of items) {
+    // MC-6 GROUP ASSEMBLY: a chunked provider (G1 monthly candle blocks) serves ONE response as
+    // several segments; no single segment spans the window, so the matcher read each segment as
+    // NO_MATCH and a correct series was unresolvable. The engine assembles each response's
+    // segments into one additional candidate observation carrying the GROUP's span, facets,
+    // resolution and provenance, and matches THAT when at least one segment matched alone (the
+    // per-segment subject/temporal gates are the ones that must hold; the leading segment may
+    // short-circuit on the very span gate the group exists to satisfy). Segment refs stay
+    // segment refs — the group's evidence is its members, never a fabricated single fact.
+    // MC-6: assemble one observation per provider response that arrived as multiple segments
+    // (share a toolResultRef) and let each windowed row read the group's assembled span.
+    const assembled = assembledGroupItems(items);
+    for (const item of [...items, ...assembled]) {
       const result = matchRequirement(req, item, opts);
       if (result === "SATISFIES") {
         const identity = item.payloadIdentity;
@@ -2174,7 +2437,7 @@ export function assessCoverage(
           continue;
         }
         if (identity !== undefined) satisfiedIdentity.set(identity, item.ref);
-        satisfied.push(item.ref);
+        satisfied.push(...(item.groupRefs ?? [item.ref]));
       } else if (result === "STALE_ONLY") staleOnly.push(item.ref);
     }
     const status: RequirementStatus =

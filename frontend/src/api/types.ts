@@ -114,6 +114,13 @@ export interface ResearchDto {
   readonly userQuestion?: string;
   /** Internal Research objects of the same run (plan steps, flow phases). */
   readonly internalRefs?: readonly string[];
+  /**
+   * FOLLOW-UP LINEAGE (data, never derived): the run this run continues, and its depth
+   * (0 = root). Depth is reported on roots too, so a client can distinguish a root from a
+   * legacy run that carries no stamp at all.
+   */
+  readonly parentResearchId?: string;
+  readonly followUpDepth?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -527,9 +534,17 @@ export interface AnswerDto {
   readonly citedObjectRefs: readonly string[];
 }
 
-export type ResearchOutcomeDto = "COMPLETED" | "AWAITING_CONFIRMATION" | "REJECTED" | "MODEL_FAILURE";
+export type ResearchOutcomeDto = "COMPLETED" | "INSUFFICIENT" | "AWAITING_CONFIRMATION" | "REJECTED" | "MODEL_FAILURE";
 
 export interface RequirementDiagnosticDto {
+  /** The requirement's own stable id (structured requirement object; traceability anchor). */
+  readonly id?: string;
+  /**
+   * ORIGINAL WORDING (requirement-fidelity contract): the verbatim text this requirement was
+   * extracted from, when it differs from the normalized description. The diagnostics show
+   * what was actually asked, so no decomposition step can silently drop a stated entity.
+   */
+  readonly originalWording?: string;
   readonly description: string;
   /** CORE | SUPPORTING | CHALLENGE | CONTEXT (research-contract role). */
   readonly role?: string;
@@ -537,6 +552,10 @@ export interface RequirementDiagnosticDto {
   readonly timeSensitivity: string;
   readonly status: string;
   readonly evidenceCount: number;
+  /** Evidence that actually satisfies the requirement (bounded; provenance lives on the run). */
+  readonly evidenceRefs?: readonly string[];
+  /** Re-served copies of already-counted observations (same payload identity): provenance, not information. */
+  readonly duplicateEvidenceCount?: number;
   readonly staleEvidenceCount: number;
   readonly recoveryAttempts: number;
   readonly unresolvedReason?: string;

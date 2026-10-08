@@ -458,6 +458,17 @@ export interface Research {
    * the same conversation never makes two runs' evidence interchangeable.
    */
   readonly investigationRef?: string;
+  /**
+   * FOLLOW-UP LINEAGE (durable research object contract): the research run this run
+   * continues. Undefined = ROOT (a top-level investigation). Set through the run context for
+   * every Research object one follow-up submission creates, so a follow-up is always a CHILD
+   * of the investigation turn it continues — never an unrelated top-level research item.
+   * The follow-up executes as its own run (own evidence ownership unchanged); lineage only
+   * records the relationship, and the parent's material reaches it as labelled context.
+   */
+  readonly parentResearchId?: string;
+  /** 0 for a root; parent.depth + 1 when continuing parentResearchId. Present on child runs. */
+  readonly followUpDepth?: number;
   readonly status: ObjectStatus;
   readonly branchRefs: readonly string[];
   readonly claimRefs: readonly string[];
@@ -471,7 +482,7 @@ export interface Research {
 }
 
 export function createResearch(
-  input: { objective: string; question: string; flow: string; runId?: string; userQuestion?: string; investigationRef?: string },
+  input: { objective: string; question: string; flow: string; runId?: string; userQuestion?: string; investigationRef?: string; parentResearchId?: string; followUpDepth?: number },
   origin: ProvenanceOrigin,
   at = new Date(),
 ): Research {
@@ -483,6 +494,8 @@ export function createResearch(
     ...(input.runId !== undefined ? { runId: input.runId } : {}),
     ...(input.userQuestion !== undefined ? { userQuestion: input.userQuestion } : {}),
     ...(input.investigationRef !== undefined ? { investigationRef: input.investigationRef } : {}),
+    ...(input.parentResearchId !== undefined ? { parentResearchId: input.parentResearchId } : {}),
+    ...(input.followUpDepth !== undefined ? { followUpDepth: input.followUpDepth } : {}),
     status: "DRAFT",
     branchRefs: Object.freeze([]),
     claimRefs: Object.freeze([]),
