@@ -279,9 +279,50 @@ function resolutionOfOutput(output: ToolOutput): Resolution | undefined {
   return resolutionOfStamps(payloadStamps(output.content));
 }
 
+/**
+ * NESTED PAYLOAD DESCENT (MC-7).
+ *
+ * A provider that packages its observations under a conventional key
+ * (`{month, candleCount, candles: [...]}`, `{data: [...]}`, `{klines: [...]}`) is STILL a table of
+ * observations; the span and granularity laws must read the rows it actually carries, not only the
+ * wrapper object's own keys. Without this, a correct windowed candle payload reports NO span at
+ * all (its timestamps live one level down) and every windowed requirement becomes unsatisfiable by
+ * the very data that answers it. The key list matches `data-facets.ts` so shape and span are read
+ * from the same rows.
+ */
+const NESTED_OBSERVATION_KEYS = ["candles", "klines", "ohlcv", "data", "prices", "series", "points", "bars", "result", "items"] as const;
+
+/** Object rows inside an array (mirrors data-facets' `observationRows`). */
+function objectRows(value: readonly unknown[]): readonly Record<string, unknown>[] {
+  return value.filter(
+    (v): v is Record<string, unknown> =>
+      typeof v === "object" && v !== null && !Array.isArray(v) && Object.keys(v).length > 0,
+  );
+}
+
+/**
+ * Every row a payload carries, including rows nested under a conventional observation key.
+ * The wrapper object is included too, so an explicit `from`/`to` window beside the rows survives.
+ */
+function payloadRows(content: unknown): readonly Record<string, unknown>[] {
+  const roots = Array.isArray(content) ? content : [content];
+  const rows: Record<string, unknown>[] = [];
+  for (const root of roots) {
+    if (root === null || typeof root !== "object" || Array.isArray(root)) continue;
+    const record = root as Record<string, unknown>;
+    rows.push(record);
+    for (const key of NESTED_OBSERVATION_KEYS) {
+      const nested = record[key];
+      if (!Array.isArray(nested)) continue;
+      for (const row of objectRows(nested)) rows.push(row);
+    }
+  }
+  return rows;
+}
+
 /** Every observation timestamp a payload carries, in milliseconds. */
 function payloadStamps(content: unknown): number[] {
-  const rows = Array.isArray(content) ? content : [content];
+  const rows = payloadRows(content);
   const stamps: number[] = [];
   for (const row of rows) {
     if (row === null || typeof row !== "object" || Array.isArray(row)) continue;
@@ -337,13 +378,11 @@ function barHoursOf(timeframe: string | undefined): number | undefined {
  * answer: an undated observation cannot claim to cover any window.
  */
 function temporalBoundsOf(content: unknown): { start: number; end: number } | undefined {
-  const rows = Array.isArray(content) ? content : [content];
+  const rows = payloadRows(content);
   const stamps: number[] = [];
   let windowStart: number | undefined;
   let windowEnd: number | undefined;
-  for (const row of rows) {
-    if (row === null || typeof row !== "object" || Array.isArray(row)) continue;
-    const record = row as Record<string, unknown>;
+  for (const record of rows) {
     for (const [key, value] of Object.entries(record)) {
       const lowered = key.toLowerCase();
       const numeric = numericTime(value);

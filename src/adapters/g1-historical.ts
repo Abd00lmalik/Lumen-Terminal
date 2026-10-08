@@ -306,10 +306,19 @@ export class G1HistoricalDataAdapter implements HistoricalDataProvider {
 
   /** Fill unset query fields with capability defaults; explicit values are never overridden. */
   private withDefaults(params: Record<string, unknown>): HistoricalQuery {
-    const p = params as Partial<HistoricalQuery> & { asset?: string; requiredResolution?: unknown };
+    const p = params as Partial<HistoricalQuery> & { asset?: string; requiredResolution?: unknown; requiredWindowHours?: unknown };
     // GRANULARITY: the engine asks for a resolution (HOUR/DAY/WEEK...), not a hardcoded daily
     // bar. An explicit `interval` still wins; with neither, the historical default stays daily.
     const requestedInterval = p.interval ?? (isResolution(p.requiredResolution) ? intervalTokenFor(p.requiredResolution) : undefined);
+    // WINDOW (MC-5): the engine asks for a lookback in hours. Honouring it is what stops a
+    // provider from silently substituting its own default span (the live defect: a "last 7 days"
+    // ask was answered with three years of daily candles because the window never travelled).
+    // An explicit `from`/`to` still wins; with no window and no bounds, the historical default
+    // stays the deep three-year lookback that historical comparison needs.
+    const requestedWindowHours =
+      typeof p.requiredWindowHours === "number" && Number.isFinite(p.requiredWindowHours) && p.requiredWindowHours > 0
+        ? p.requiredWindowHours
+        : undefined;
     // Canonical-asset law: the engine's `asset` param may be a canonical instrument symbol
     // (GC=F for gold, CL=F for crude, ^GSPC for SPX) because the same value flows to the
     // equity/capability chain. Those are OUTSIDE this crypto venue's universe: serving them
@@ -329,7 +338,7 @@ export class G1HistoricalDataAdapter implements HistoricalDataProvider {
     return {
       symbol,
       metric: p.metric ?? "ohlcv",
-      from: p.from ?? new Date(nowMs - 3 * 365 * 86_400_000).toISOString(),
+      from: p.from ?? new Date(nowMs - (requestedWindowHours !== undefined ? requestedWindowHours : 3 * 365 * 24) * 3_600_000).toISOString(),
       to: p.to ?? new Date(nowMs).toISOString(),
       ...(requestedInterval !== undefined ? { interval: requestedInterval } : { interval: "1d" }),
     };

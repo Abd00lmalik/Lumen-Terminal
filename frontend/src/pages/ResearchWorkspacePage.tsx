@@ -94,6 +94,9 @@ interface RunLike extends ResearchResponseDto {
   readonly watchNext?: readonly string[];
   readonly confidence?: string;
   readonly stoppedBecause?: string;
+  /** FOLLOW-UP LINEAGE (data on the run, never inferred): what this run continues, and how deep. */
+  readonly parentResearchId?: string;
+  readonly followUpDepth?: number;
 }
 
 interface Turn {
@@ -208,6 +211,7 @@ function errorTurnOutcome(code: string): ResearchResponseDto["outcome"] {
 
 const PANEL_TITLES: Record<string, string> = {
   COMPLETED: "Research result",
+  INSUFFICIENT: "Insufficient evidence",
   AWAITING_CONFIRMATION: "Confirmation required",
   REJECTED: "Request rejected",
   MODEL_FAILURE: "Interpretation failed",
@@ -411,9 +415,14 @@ export function ResearchWorkspacePage() {
       if (threadInvestigationId === undefined) {
         historyTurns = [];
       } else {
-        // The newest few COMPLETED runs of THIS thread (oldest→newest, chat order); the
+        // The newest few terminal runs of THIS thread (oldest→newest, chat order); the
         // History page is the full, paginated surface across every investigation.
-        const history = await listResearch({ limit: 50, status: "COMPLETED", investigationRef: threadInvestigationId });
+        // NO STATUS FILTER: hydration asks for the thread's runs, not only its successes.
+        // Filtering to COMPLETED here is what made an INSUFFICIENT or FAILED run vanish
+        // from its own thread on reload — the trader asked, the run answered "not enough
+        // evidence", and after a refresh the question sat there with no run beneath it.
+        // researchDtoToTurn renders a run without a retained answer honestly (SUMMARY tier).
+        const history = await listResearch({ limit: 50, investigationRef: threadInvestigationId });
         const latest = history.slice(0, 3).reverse();
         const hydrated = await Promise.all(
           latest.map(async (r): Promise<Turn | undefined> => {
@@ -1005,6 +1014,14 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "0 0 10px" }}>
         <StatusBadge status={run.outcome} />
         <span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)" }}>{run.action.toLowerCase()}</span>
+        {/* FOLLOW-UP LINEAGE: the thread relationship is DATA on the run, shown beside the
+            outcome — a follow-up announces what it continues instead of silently standing in
+            for a fresh answer. Depth is the run's own stamp; no client-side inference. */}
+        {run.followUpDepth !== undefined && run.followUpDepth > 0 && (
+          <span className="badge gray" title="This run continues an earlier run of the same investigation">
+            follow-up · depth {run.followUpDepth}{run.parentResearchId !== undefined ? ` · of ${run.parentResearchId}` : ""}
+          </span>
+        )}
         {resolution !== undefined && (
           <span className="badge gray" title="Engine question-resolution verdict">question {resolution.status.replace(/_/g, " ").toLowerCase()}</span>
         )}

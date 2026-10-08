@@ -32,6 +32,84 @@ import type { Research } from "../domain/objects.js";
 const MAX_TURNS = 6;
 const MAX_FINDINGS = 8;
 const MAX_OPEN_QUESTIONS = 6;
+const MAX_UNRESOLVED = 6;
+const MAX_PRIOR_EVIDENCE_REFS = 8;
+
+/**
+ * The coverage state a completed run LEFT BEHIND, read from its persisted run record.
+ * Structural on purpose: the record's exact DTO type belongs to the api layer; this module
+ * reads only the three facts inheritance needs.
+ */
+export interface ParentCoverageItem {
+  readonly description: string;
+  /** SATISFIED | PARTIALLY_SATISFIED | PENDING | EXHAUSTED | UNAVAILABLE. */
+  readonly status: string;
+  /** Why it stayed open (the engine's own words), when it recorded one. */
+  readonly reason?: string;
+}
+
+export interface ParentCoverage {
+  /** The run whose state this continues. */
+  readonly runId: string;
+  /** The run's honest end state (COMPLETED | INSUFFICIENT | AWAITING_CONFIRMATION | REJECTED | MODEL_FAILURE). */
+  readonly outcome?: string;
+  /** Requirements the parent left unresolved, bounded. The follow-up's OPEN ledger. */
+  readonly unresolved: readonly ParentCoverageItem[];
+  /** Evidence the parent OWNS, as references only. The follow-up never inherits ownership. */
+  readonly evidenceRefs: readonly { readonly ref: string; readonly runId: string }[];
+}
+
+/** Minimal structural read of a persisted run record; absent/malformed fields are absent facts. */
+function parentCoverageOf(run: Research, workspace: Workspace): ParentCoverage | undefined {
+  const raw = workspace.getResearchResponse(run.id);
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const wrapper = raw as { recordVersion?: unknown; response?: unknown };
+  const payload =
+    typeof wrapper.response === "object" && wrapper.response !== null
+      ? (wrapper.response as Record<string, unknown>)
+      : (raw as Record<string, unknown>);
+  // Requirements live under the record's diagnostics block (ResearchResponseDTO shape);
+  // a flat `requirements` array is accepted as a defensive fallback, never as the norm.
+  const diagnostics =
+    typeof payload.researchDiagnostics === "object" && payload.researchDiagnostics !== null
+      ? (payload.researchDiagnostics as Record<string, unknown>)
+      : undefined;
+  const requirementRows = diagnostics !== undefined && Array.isArray(diagnostics.requirements)
+    ? diagnostics.requirements
+    : Array.isArray(payload.requirements)
+      ? payload.requirements
+      : undefined;
+  if (requirementRows === undefined && !Array.isArray(payload.evidenceRefs)) return undefined;
+  const unresolved: ParentCoverageItem[] = [];
+  if (requirementRows !== undefined) {
+    for (const item of requirementRows) {
+      if (typeof item !== "object" || item === null) continue;
+      const r = item as { status?: unknown; description?: unknown; unresolvedReason?: unknown };
+      const status = typeof r.status === "string" ? r.status : "";
+      // A requirement the parent SATISFIED is not an open thread; only its open rows continue.
+      if (status === "SATISFIED" || status === "") continue;
+      if (typeof r.description !== "string" || r.description.trim() === "") continue;
+      unresolved.push({
+        description: r.description,
+        status,
+        ...(typeof r.unresolvedReason === "string" && r.unresolvedReason.trim() !== "" ? { reason: r.unresolvedReason } : {}),
+      });
+    }
+  }
+  const evidenceRefs: { ref: string; runId: string }[] = [];
+  if (Array.isArray(payload.evidenceRefs)) {
+    for (const ref of payload.evidenceRefs) {
+      if (typeof ref !== "string" || ref === "") continue;
+      evidenceRefs.push({ ref, runId: run.id });
+    }
+  }
+  return {
+    runId: run.id,
+    ...(typeof payload.outcome === "string" ? { outcome: payload.outcome } : {}),
+    unresolved: unresolved.slice(0, MAX_UNRESOLVED),
+    evidenceRefs: evidenceRefs.slice(0, MAX_PRIOR_EVIDENCE_REFS),
+  };
+}
 
 /**
  * A piece of prior context handed to the next run. Every item carries the run that produced it,
@@ -53,6 +131,18 @@ export interface InvestigationContext {
   readonly subject?: string;
   /** The trader's verbatim question for THIS turn. */
   readonly question: string;
+  /**
+   * The thread's ROOT ask — the investigation's first trader question, verbatim. Carried
+   * separately from `question` (and outside the bounded turns window) so a follow-up five
+   * turns deep still knows what conversation it is continuing.
+   */
+  readonly originalQuestion?: string;
+  /**
+   * The most recent terminal run's coverage state: its outcome, the requirements it left
+   * unresolved, and the evidence it OWNS (as references). Context and references only — a
+   * follow-up still retrieves its own evidence and owns it.
+   */
+  readonly parentCoverage?: ParentCoverage;
   /** Recent conversation turns, oldest first (the trader's own words, not a summary). */
   readonly turns: readonly ConversationTurn[];
   /** Prior findings this turn may build on — each with its originating run. */
@@ -97,6 +187,25 @@ export function buildInvestigationContext(input: {
 
   const runs = workspace.investigationRuns(investigation.id);
   const turns = workspace.listTurns(investigation.id).slice(-MAX_TURNS);
+
+  // The thread's ORIGINAL ask: the first trader turn, verbatim — the root question survives
+  // here even after it has fallen out of the bounded recent-turns window. The earliest run's
+  // stamped userQuestion is the fallback (a thread created before turns were recorded).
+  const allTurns = workspace.listTurns(investigation.id);
+  const firstTraderTurn = allTurns.find((t) => t.role === "TRADER");
+  const originalQuestion =
+    firstTraderTurn?.content ?? runs.find((r: Research) => typeof r.userQuestion === "string" && r.userQuestion.trim() !== "")?.userQuestion;
+
+  // INHERITED COVERAGE: the newest run that finished with a persisted record is the state this
+  // turn continues from. Its unresolved requirements are the follow-up's OPEN ledger, and its
+  // evidence ids travel as REFERENCES (owner labelled) — never as this run's own evidence.
+  let parentCoverage: ParentCoverage | undefined;
+  for (let i = runs.length - 1; i >= 0; i -= 1) {
+    const run = runs[i] as Research;
+    if (run.status !== "COMPLETED") continue;
+    parentCoverage = parentCoverageOf(run, workspace);
+    if (parentCoverage !== undefined) break;
+  }
 
   const findings: InvestigationContextItem[] = [];
   const historicalReferences: InvestigationContextItem[] = [];
@@ -152,6 +261,8 @@ export function buildInvestigationContext(input: {
     investigationId: investigation.id,
     ...(investigation.subject !== "" ? { subject: investigation.subject } : {}),
     question,
+    ...(originalQuestion !== undefined ? { originalQuestion } : {}),
+    ...(parentCoverage !== undefined ? { parentCoverage } : {}),
     turns,
     findings: recentFindings,
     openQuestions: openQuestions.slice(-MAX_OPEN_QUESTIONS),
@@ -174,7 +285,22 @@ export function renderInvestigationContext(ctx: InvestigationContext): string {
   const lines: string[] = [];
   if (ctx.investigationId === undefined) return "";
   lines.push(`INVESTIGATION: ${ctx.subject ?? "ongoing investigation"} (${ctx.investigationId})`);
+  if (ctx.originalQuestion !== undefined && ctx.originalQuestion !== ctx.question) {
+    lines.push(`ORIGINAL QUESTION OF THIS INVESTIGATION: ${ctx.originalQuestion}`);
+  }
   lines.push(`THIS TURN'S QUESTION: ${ctx.question}`);
+  if (ctx.parentCoverage !== undefined) {
+    const pc = ctx.parentCoverage;
+    lines.push("", `PREVIOUS RUN (${pc.runId}${pc.outcome !== undefined ? `, ended ${pc.outcome}` : ""}):`);
+    if (pc.unresolved.length > 0) {
+      lines.push("  LEFT UNRESOLVED (carry these forward, resolve them, or say why they stay open):");
+      for (const u of pc.unresolved) lines.push(`    - [${u.status}] ${u.description}${u.reason !== undefined ? ` — ${u.reason}` : ""}`);
+    }
+    if (pc.evidenceRefs.length > 0) {
+      lines.push("  EVIDENCE IT OWNS (references only — this run must retrieve and own its own):");
+      for (const e of pc.evidenceRefs) lines.push(`    - ${e.ref} [run ${e.runId}]`);
+    }
+  }
   if (ctx.turns.length > 0) {
     lines.push("", "RECENT CONVERSATION (the trader's own words):");
     for (const turn of ctx.turns) {

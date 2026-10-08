@@ -140,7 +140,15 @@ export function HistoryPage() {
                       </div>
                     </div>
                     <div className="row-right" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                      <StatusBadge status={e.isCurrent === true ? "CURRENT" : e.status} />
+                      {/* STATUS VERBATIM: the run's own object status, never overwritten by
+                          selection. Which run is the workspace's current one is a DIFFERENT
+                          fact and gets its own badge below — collapsing the two hid an
+                          INSUFFICIENT or FAILED run behind a green "CURRENT". */}
+                      <StatusBadge status={e.status} />
+                      {e.isCurrent === true && <span className="badge blue" title="The workspace's current research run">current view</span>}
+                      {e.followUpDepth !== undefined && e.followUpDepth > 0 && (
+                        <span className="badge gray" title="This run continues an earlier run of the same investigation">follow-up</span>
+                      )}
                       {e.questionResolutionStatus !== undefined && (
                         <span className="badge gray" title="Engine question-resolution verdict">{e.questionResolutionStatus.replace(/_/g, " ").toLowerCase()}</span>
                       )}

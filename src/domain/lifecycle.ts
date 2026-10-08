@@ -19,6 +19,8 @@ export type ObjectStatus =
   | "INVALID"
   | "STOPPED"
   | "ARCHIVED"
+  // lifecycle failure: the run terminated without producing a valid result
+  | "FAILED"
   // object-specific states
   | "CANCELLED" // branch
   | "UNTESTED" // claim
@@ -39,7 +41,7 @@ export type ObjectStatus =
 export type ObjectKind = "research" | "branch" | "evidence" | "claim" | "hypothesis" | "judgment";
 
 const RESEARCH: ReadonlySet<ObjectStatus> = new Set([
-  "DRAFT", "ACTIVE", "PAUSED", "COMPLETED", "SUPERSEDED", "STALE", "INVALID", "STOPPED", "ARCHIVED",
+  "DRAFT", "ACTIVE", "PAUSED", "COMPLETED", "FAILED", "SUPERSEDED", "STALE", "INVALID", "STOPPED", "ARCHIVED",
 ]);
 
 const BRANCH: ReadonlySet<ObjectStatus> = new Set([
@@ -75,9 +77,12 @@ const STATES_BY_KIND: Record<ObjectKind, ReadonlySet<ObjectStatus>> = {
 export const TRANSITIONS: Record<ObjectKind, Readonly<Partial<Record<ObjectStatus, readonly ObjectStatus[]>>>> = {
   research: {
     DRAFT: ["ACTIVE"],
-    ACTIVE: ["PAUSED", "COMPLETED", "STOPPED", "STALE", "INVALID", "SUPERSEDED"],
+    // FAILED is a first-class terminal lifecycle state: a run that could not produce a valid
+    // result is FAILED, never silently COMPLETED and never a missing status.
+    ACTIVE: ["PAUSED", "COMPLETED", "FAILED", "STOPPED", "STALE", "INVALID", "SUPERSEDED"],
     PAUSED: ["ACTIVE"],
     COMPLETED: ["SUPERSEDED", "STALE", "ARCHIVED"],
+    FAILED: ["ARCHIVED"],
     STOPPED: ["ARCHIVED"],
     STALE: ["ACTIVE"],
     INVALID: ["ACTIVE"],

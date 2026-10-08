@@ -379,7 +379,7 @@ export function buildResearchContext(
   // context whole and the answer became a crypto summary. Opt-in like the subject gate:
   // callers without a requirement ledger keep run-scoped semantics. STALE_ONLY matches stay
   // admitted: stale evidence remains usable, explicitly labeled background.
-  const admissionRequirements = (options.requirements ?? [])
+  const mappedRequirements = (options.requirements ?? [])
     .filter((r) => r.description.trim() !== "")
     .map((r) => {
       const domains: readonly EvidenceDomain[] =
@@ -403,8 +403,16 @@ export function buildResearchContext(
         targetTerms: r.targetTerms,
         ...(r.relationshipType !== undefined ? { relationshipType: r.relationshipType } : {}),
       };
-    })
-    .filter((r) => isDiscriminatingRequirement(r));
+    });
+  // A requirement that states no criterion an observation could meet or fail must never be the
+  // reason the gate is ON (it would empty the context of every run that used it) — but it may
+  // still be the reason an item is ADMITTED. A plan's own task row ("collect developments",
+  // evidence class NEWS_ANALYSIS) is not discriminating enough to EXCLUDE, yet the evidence that
+  // task retrieved is exactly what the trader asked for. So: when at least one discriminating row
+  // exists the gate is active and EVERY row can admit; with none, the gate is disabled and the run
+  // keeps run-scoped semantics.
+  const discriminatingRequirements = mappedRequirements.filter((r) => isDiscriminatingRequirement(r));
+  const admissionRequirements = discriminatingRequirements.length > 0 ? mappedRequirements : [];
   let rejectedNoRequirement = 0;
   for (const e of candidateEvidence) {
     const isRunEvidence = runEvidenceRefs.has(e.id);
