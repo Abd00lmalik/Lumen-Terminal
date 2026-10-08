@@ -61,6 +61,10 @@ import {
 import { deriveInvestigationState } from "../research/investigation-state.js";
 import type { ConversationIntent, InvestigationState } from "../domain/investigation.js";
 import { currentRun } from "../domain/run-context.js";
+import { inheritedEvidenceScopeOf, synthesizeEvidenceOnlyFollowUp, type InheritedEvidenceScope } from "../research/follow-up-policy.js";
+import { computeConfidence } from "../research/confidence.js";
+import { evaluateQuestionResolution } from "../research/question-resolution.js";
+import type { ResearchRequirement } from "../research/requirements.js";
 
 /**
  * Canonical flows whose methodology is thesis-facing: the trader's own thesis is legitimate
@@ -613,6 +617,14 @@ export class Lui {
     // The verbatim message, kept for the target law (a model-resolved asset is only the
     // question's target when the QUESTION ITSELF names it).
     this.currentMessage = userMessage;
+    // FOLLOW-UP + EVIDENCE_ONLY = NO_NEW_RETRIEVAL (hard orchestration guard): a follow-up the
+    // trader scoped to the already-collected evidence NEVER reaches the planner, the flow
+    // classifier, or any capability. It is dispatched straight to the evidence-only synthesis
+    // path — one safety screen plus one bounded summary call over the parent's evidence —
+    // regardless of what any model might classify the message as.
+    if (currentRun()?.executionMode === "FOLLOW_UP_EVIDENCE_ONLY") {
+      return this.dispatchEvidenceOnlyFollowUp(origin, progress, deadlineMs);
+    }
     this.flowGuard = undefined;
     // THESIS + CAPABILITY GATES are decided from the trader's OWN words before any model
     // call, so they are inputs to the pipeline rather than a consequence of it.
@@ -1192,6 +1204,187 @@ export class Lui {
     result.flow7 = flow7;
     if (flow7.modelFailure !== undefined) result.modelFailure = flow7.modelFailure;
     void origin;
+  }
+
+  /**
+   * EVIDENCE-ONLY FOLLOW-UP (FOLLOW_UP + EVIDENCE_ONLY = NO_NEW_RETRIEVAL): the entire
+   * execution is ONE safety screen plus ONE bounded summary call over the parent's inherited
+   * evidence. No planner, no flow classification, no requirement expansion beyond the single
+   * follow-up row, no capability execution — the registry is never touched, so no web/search/
+   * RSS retrieval can occur by construction. The follow-up references the parent's evidence
+   * ids directly (never cloned) and may not assert anything outside that scope.
+   */
+  private async dispatchEvidenceOnlyFollowUp(
+    origin: ProvenanceOrigin,
+    progress?: ProgressListener,
+    _deadlineMs?: number,
+  ): Promise<LuiResult> {
+    const userMessage = this.currentMessage ?? "";
+    const workspace = this.options.workspace;
+    const now = () => this.options.now?.() ?? new Date();
+    progress?.(progressEvent("request_accepted", now(), "evidence-only follow-up: no new retrieval", { messageLength: userMessage.length }));
+
+    // SAFETY SCREEN (M3 §14): the one gate that must never be skipped, even on the fast path.
+    try {
+      const res = await this.ask<string>({
+        schemaName: "safety.screen",
+        schemaDescription: SAFETY_SCHEMA_DESC,
+        system: SAFETY_SYSTEM,
+        prompt: `Trader message: "${userMessage}"\nInterpreted objective: summarize the strongest finding from already-collected evidence\nPlan steps: RESEARCH\nRespond as JSON.`,
+        preferJson: true,
+      });
+      const safety = validateModelOutput<{ isExecutionCommand: boolean; detectedViolations: string[]; rationale: string }>(SAFETY_SCHEMA, res.raw).data;
+      if (safety.isExecutionCommand) {
+        return {
+          request: { primaryAction: "RESEARCH", compoundActions: [], objective: userMessage, isExplanationOnly: false, disclosureLevel: 0 },
+          target: { objectRefs: [], unresolved: [] },
+          ambiguity: { isAmbiguous: false, questions: [], reason: "evidence-only follow-up" },
+          consequence: { level: "INFORMATIONAL", rationale: "read-only synthesis of collected evidence", requiresConfirmation: false },
+          plan: { steps: [], requiresConfirmationFor: [] },
+          rejected: { reason: safety.rationale, violations: safety.detectedViolations },
+          response: {
+            answer: "Request rejected: this workbench is research-only and cannot execute trades or move funds.",
+            supportingReasons: [], opposingReasons: [], confidence: "UNKNOWN", keyUncertainty: "",
+            implication: "Rephrase as a research question if you want analysis on this topic.", citedObjectRefs: [],
+          },
+        };
+      }
+    } catch (error) {
+      return this.failureResult(userMessage, error);
+    }
+
+    const run = currentRun();
+    const scope: InheritedEvidenceScope | undefined = run !== undefined ? inheritedEvidenceScopeOf(workspace, run) : undefined;
+    // The follow-up's OWN research object: never a borrowed canonical flow identity (flow
+    // isolation law) — it is a continuation, recorded under its own non-canonical marker.
+    const research = workspace.addResearch({ objective: userMessage, question: userMessage, flow: "FOLLOW_UP" }, origin, now());
+    workspace.transitionResearch(research.id, "ACTIVE", { kind: "agent", detail: "evidence-only follow-up dispatch" }, "evidence-only follow-up activated (no retrieval permitted)", now());
+
+    const singleRequirement = (status: ResearchRequirement["status"], evidenceRefs: readonly string[], missingReason?: string): ResearchRequirement => ({
+      id: "rq_followup_1",
+      description: "the strongest finding supported by the parent run's collected evidence, in one sentence",
+      importance: "CRITICAL",
+      role: "CORE",
+      timeSensitivity: "ANY",
+      domains: ["GENERAL"],
+      status,
+      evidenceRefs,
+      staleOnlyRefs: [],
+      recoveryAttempts: 0,
+      engineRequired: true,
+      ...(missingReason !== undefined ? { missingReason } : {}),
+    });
+
+    const synthesis = await synthesizeEvidenceOnlyFollowUp({
+      provider: this.options.provider,
+      scope: scope ?? { parentResearchId: run?.parentResearchId ?? "", parentQuestion: "", items: [], parentFindings: "", parentRequirementState: [], allowedEvidenceIds: [] },
+      question: userMessage,
+    });
+    const answered = synthesis.ok && scope !== undefined;
+    workspace.transitionResearch(
+      research.id,
+      answered ? "COMPLETED" : "FAILED",
+      { kind: "agent", detail: "evidence-only follow-up" },
+      answered ? "follow-up answered from the parent's evidence (no new retrieval)" : `follow-up unresolved: ${synthesis.reason ?? "parent evidence insufficient"}`,
+      now(),
+    );
+    const finalResearch = workspace.getResearch(research.id) ?? research;
+
+    // Judgment: minted ONLY for an answered follow-up, over the PARENT's evidence refs —
+    // never a copy of the parent's evidence objects (reference, don't duplicate).
+    if (answered && scope !== undefined) {
+      workspace.addJudgment(
+        {
+          researchRef: research.id,
+          statement: synthesis.finding,
+          basis: { supportingEvidence: [...synthesis.evidenceRefs], opposingEvidence: [], keyClaims: [], hypotheses: [] },
+          confidence: synthesis.confidence,
+          uncertainty: synthesis.reason !== undefined ? [synthesis.reason] : [],
+          unresolvedQuestions: [],
+          implications: ["follow-up answered from the parent run's evidence; no new retrieval was performed"],
+        },
+        { kind: "agent", detail: "evidence-only follow-up synthesis" },
+        now(),
+      );
+    }
+
+    const requirements: readonly ResearchRequirement[] = [
+      answered
+        ? singleRequirement("SATISFIED", synthesis.evidenceRefs)
+        : singleRequirement("UNAVAILABLE", [], synthesis.reason ?? "parent evidence insufficient"),
+    ];
+    const confidence = computeConfidence({
+      requirements,
+      stoppedBecause: answered ? "EVIDENCE_SUFFICIENT" : "MODEL_INSUFFICIENT_EVIDENCE",
+      failedPaths: 0,
+      calculationsMissing: 0,
+    });
+    const questionResolution = evaluateQuestionResolution({
+      question: userMessage,
+      ledger: requirements,
+      evidenceText: (scope?.items ?? []).map((i) => i.text).join(" ").slice(0, 20000),
+      prose: synthesis.finding,
+      executedCapabilities: [],
+      evidenceCount: scope?.items.length ?? 0,
+    });
+
+    const outcome: AdaptiveLoopOutcome = {
+      research: finalResearch,
+      plan: { objective: userMessage, scopeIncluded: [], scopeExcluded: [], tasks: [], completionCriteria: ["one-sentence finding cited to the parent's collected evidence"], adaptationPolicy: "stop" },
+      rounds: [],
+      executions: [],
+      finalDecision: {
+        decision: answered ? "COMPLETE" : "INSUFFICIENT_EVIDENCE",
+        rationale: answered
+          ? "answered from the parent run's collected evidence; no new retrieval was performed"
+          : `not answered from the parent's evidence alone: ${synthesis.reason ?? "insufficient inherited evidence"}`,
+        nextTasks: [],
+      },
+      evidence: [],
+      stoppedBecause: answered ? "EVIDENCE_SUFFICIENT" : "MODEL_INSUFFICIENT_EVIDENCE",
+      // Inherited evidence travels as CONTEXT (referenced, never re-owned): the response's
+      // evidence list stays empty (no cloned objects), while citations keep the parent ids.
+      context: {
+        researchRef: research.id,
+        objective: userMessage,
+        currentResearchRef: research.id,
+        currentResearchQuestion: userMessage,
+        items: (scope?.items ?? []).map((i) => ({
+          ref: i.ref,
+          kind: i.kind,
+          text: i.text,
+          sourceRefs: i.sourceRefs,
+          ...(i.observedAt !== undefined ? { timestamp: i.observedAt } : {}),
+        })),
+        runEvidenceRefs: [],
+        claims: [],
+        hypotheses: [],
+        contradictions: [],
+        limitations: [],
+      },
+      requirements,
+      confidence,
+      questionResolution,
+      answer: synthesis.finding,
+    };
+
+    return {
+      request: { primaryAction: "RESEARCH", compoundActions: [], objective: userMessage, isExplanationOnly: false, disclosureLevel: 0 },
+      target: { objectRefs: [], unresolved: [] },
+      ambiguity: { isAmbiguous: false, questions: [], reason: "evidence-only follow-up" },
+      consequence: { level: "INFORMATIONAL", rationale: "read-only synthesis of collected evidence", requiresConfirmation: false },
+      plan: { steps: [{ action: "RESEARCH", description: userMessage, capabilities: [], params: { objective: userMessage } }], requiresConfirmationFor: [] },
+      research: outcome,
+      response: {
+        answer: synthesis.finding,
+        supportingReasons: [],
+        opposingReasons: [],
+        confidence: synthesis.confidence,
+        keyUncertainty: answered ? "" : (synthesis.reason ?? "parent evidence insufficient"),
+        implication: answered ? "This summary used only the parent run's collected evidence; no new research was performed." : "The parent's evidence was insufficient; re-run the research or ask a new question.",
+        citedObjectRefs: [...synthesis.evidenceRefs],
+      },
+    };
   }
 
   private async dispatchResearch(

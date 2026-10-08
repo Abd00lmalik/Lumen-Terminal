@@ -48,6 +48,7 @@ import {
   coverageItemOf,
   CAPABILITY_SUPPORT,
   blockingRequirements,
+  isCurrentWindowMetricRow,
   completeRequirements,
   dropForbiddenRequirementRoles,
   coverageVerdict,
@@ -873,6 +874,52 @@ export async function runAdaptiveResearch(
       questionMarketClass: engineMarketClass(currentRun()?.userQuestion ?? objective, resolvedAsset),
       now: at(),
     });
+
+    // CURRENT-DATA FAIL-FAST (freshness contract): when every blocking requirement is a
+    // current-window market-metric row (or a challenge/context row, which is assessed from
+    // collected evidence, not new retrieval) and NO untried registered capability could serve
+    // any of them, no further round can help — stop NOW and name the gap explicitly instead of
+    // spending the remaining budget on rounds that cannot. A simple market-data ask must fail
+    // in a round, never after minutes of futile recovery. Requirement validation is NOT
+    // weakened: the rows end UNRESOLVED/EXHAUSTED and the run ends REQUIREMENT_GAPS_UNRESOLVED,
+    // exactly as a budget stop would have.
+    {
+      const blocking = blockingRequirements(requirements);
+      // DBG-FailFast
+      if (process.env.DEBUG_FAILFAST === "1") console.error("DBG-GATE round", round, "blocking:", blocking.map((b) => `${b.id}/${b.role}/${isCurrentWindowMetricRow(b)}/${b.status}`));
+      const allRetrievalRowsSpent =
+        blocking.length > 0 &&
+        blocking.every((r) => isCurrentWindowMetricRow(r) || r.role === "CHALLENGE" || r.role === "CONTEXT");
+      if (allRetrievalRowsSpent) {
+        const untried = recoveryCapabilities(blocking, {
+          isAvailable: capabilityUsable,
+          exclude: allExecutions.map((e) => e.capability),
+        });
+        // Only a live market-data capability can serve a freshness-validated current metric.
+        // A web/RSS search is not a current market-data source — a page-quoted price carries no
+        // validated observation timestamp (the live Polygon-news contamination class) — and
+        // session knowledge has no clock. While an untried market-data path exists the loop
+        // continues; when none does, more rounds cannot help and the run stops explicitly.
+        const marketDataPaths: ReadonlySet<string> = new Set([
+          "CRYPTO_MARKET_DATA", "EQUITY_MARKET_DATA", "COMMODITY_MARKET_DATA", "FX_MARKET_DATA",
+          "MARKET_DATA_ANALYSIS", "TECHNICAL_ANALYSIS", "ONCHAIN_ANALYSIS", "DERIVATIVES_ANALYSIS",
+        ]);
+        const untriedMarketPaths = untried.filter((cap) => marketDataPaths.has(cap));
+        if (untriedMarketPaths.length === 0) {
+          // The rows stay UNRESOLVED (never exhausted into a terminal state): the lifecycle
+          // law reads an unresolved CRITICAL row at finish as "this run could not produce a
+          // valid result" — FAILED, not a success-shaped COMPLETED.
+          stoppedBecause = "REQUIREMENT_GAPS_UNRESOLVED";
+          finalDecision = {
+            decision: "INSUFFICIENT_EVIDENCE",
+            rationale: `current market-data requirements could not be satisfied from the serving sources (every registered capability already executed): ${coverageGapRationale(requirements)}`,
+            nextTasks: [],
+          };
+          options.onProgress?.(progressEvent("research_stopped", at(), `research stopped: ${stoppedBecause} (current-data fail-fast)`, { reason: stoppedBecause }));
+          break;
+        }
+      }
+    }
 
     // In-round budget stop: the task loop was cut short by the deadline — skip the model
     // decision (it asked for research that will not happen) and leave the round loop with the

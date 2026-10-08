@@ -16,7 +16,7 @@ import { AppShell } from "../components/AppShell.js";
 import { BackendDownNote } from "../components/BackendDownNote.js";
 import { Panel, StatusBadge, ConfidenceMeter, Empty, Note, timeAgo } from "../components/ui.js";
 import { listResearch } from "../api/index.js";
-import { HISTORY_PAGE_SIZE, formatStamp, groupHistoryByDay } from "../data/history.js";
+import { HISTORY_PAGE_SIZE, formatStamp, groupHistoryByDay, nestFollowUpsUnderParents } from "../data/history.js";
 import { isResearchRef } from "../data/identity.js";
 import type { ResearchRunSummaryDto } from "../api/index.js";
 
@@ -63,7 +63,14 @@ export function HistoryPage() {
     return () => clearTimeout(t);
   }, [query, load]);
 
-  const groups = groupHistoryByDay(entries);
+  // FOLLOW-UP NESTING: derive parent/child order + labels from the persisted
+  // parentResearchId (never timestamps or position), THEN group by day — so a follow-up
+  // renders as "└ follow-up" beneath its parent, not as an unrelated root investigation.
+  const nested = nestFollowUpsUnderParents(entries);
+  const depthByRef = new Map(nested.map((n) => [n.entry.ref, n.depth] as const));
+  const parentByRef = new Map(nested.filter((n) => n.parentRef !== undefined).map((n) => [n.entry.ref, n] as const));
+  const orderedEntries = nested.map((n) => n.entry);
+  const groups = groupHistoryByDay(orderedEntries);
   const degradedCount = entries.filter((e) => e.degraded === true).length;
 
   return (
@@ -124,9 +131,16 @@ export function HistoryPage() {
                 // Only a research ref is openable. A row that is not one is rendered as a
                 // plain row (never navigated to a question string, never a dead link).
                 const openable = isResearchRef(e.ref);
+                const depth = depthByRef.get(e.ref) ?? 0;
+                const parentInfo = parentByRef.get(e.ref);
                 const body = (
                   <>
-                    <div style={{ minWidth: 0 }}>
+                    <div style={{ minWidth: 0, marginLeft: depth * 18 }}>
+                      {depth > 0 && (
+                        <div style={{ fontSize: 11.5, color: "var(--text-3)", marginBottom: 2 }} title={parentInfo?.parentQuestion ?? ""}>
+                          └ follow-up{parentInfo?.parentQuestion ? ` of: ${parentInfo.parentQuestion.slice(0, 80)}` : " of an earlier run"}
+                        </div>
+                      )}
                       <div className="row-title">{e.question.length > 0 ? e.question : e.objective}</div>
                       {e.insightPreview !== undefined && (
                         <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis" }}>

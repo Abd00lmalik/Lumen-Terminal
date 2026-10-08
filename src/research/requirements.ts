@@ -1965,6 +1965,30 @@ export function requirementWindowHours(req: Pick<ResearchRequirement, "windowHou
   return req.windowHours ?? requestedWindowHours(req.description);
 }
 
+/** Metric shapes a CURRENT market-data ask is made of (price/high/low/volume family).
+ *  TIMESTAMP/WINDOW are included: the atomic observation-time row of a current-window price
+ *  requirement is itself a current-data row (its staleness is the same staleness). */
+const CURRENT_METRIC_FACETS: ReadonlySet<DataFacet> = new Set([
+  "SNAPSHOT", "HIGH", "LOW", "VOLUME", "AGGREGATE_VOLUME", "OPEN", "CLOSE", "OHLC", "TIMESTAMP", "WINDOW",
+]);
+const CURRENT_METRIC_WORDS = /\b(?:current|latest|today(?:'s)?|24[- ]?hour(?:ly)?|24h|intraday)\b[^.?!]{0,40}\b(?:price|high|low|volume|candles?|observation)s?\b|\b(?:price|high|low|volume)\b[^.?!]{0,30}\b(?:today|now|currently|24)\b/i;
+
+/**
+ * CURRENT-DATA METRIC ROW (fail-fast contract): a mandatory row that asks for current-window
+ * market metrics (current price, today's high/low, 24h volume) — the rows a simple market-data
+ * query either satisfies or provably cannot. When every blocking row is one of these and the
+ * run's registered market-data paths are spent, waiting out the rest of the budget cannot help;
+ * the loop must stop and name the gap instead of burning minutes on inadequate evidence.
+ */
+export function isCurrentWindowMetricRow(req: ResearchRequirement): boolean {
+  const hours = requirementWindowHours(req);
+  if (hours === undefined || hours > 48) return false;
+  const facets = requiredFacetsOf(req);
+  if (facets.size === 0) return CURRENT_METRIC_WORDS.test(req.description);
+  for (const facet of facets) if (CURRENT_METRIC_FACETS.has(facet)) return true;
+  return false;
+}
+
 /**
  * The resolution a requirement demands, when it demands one; an explicit declaration wins over
  * wording. Undefined means the requirement names no granularity and is not gated on it.

@@ -194,7 +194,16 @@ export function evidenceFromToolResult(
       evidenceType: options.evidenceType ?? result.capability,
       evidenceClass,
       sourceRefs: options.sourceRefs ?? (result.rawReference ? [result.rawReference] : [`tool-result:${result.id}`]),
-      ...(result.sourceTimestamp !== undefined ? { timestamp: result.sourceTimestamp } : {}),
+      // FRESHNESS SOURCE (current-data contract): the observation's OWN event time wins.
+      // An output-level sourceTimestamp is the payload's declared event time (a candle's bar
+      // time, a quote's print time); the result-level one is the response's. Without the
+      // output-level time, a stale candle payload could not be freshness-checked at all and a
+      // CURRENT-window requirement would accept it blindly — the live 24h-stale candle defect.
+      ...(output.sourceTimestamp !== undefined
+        ? { timestamp: output.sourceTimestamp }
+        : result.sourceTimestamp !== undefined
+          ? { timestamp: result.sourceTimestamp }
+          : {}),
       supports: options.claimRefs?.supports ?? [],
       contradicts: options.claimRefs?.contradicts ?? [],
       freshness: options.freshness ?? result.freshness,
