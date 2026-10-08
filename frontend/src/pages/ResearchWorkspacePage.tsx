@@ -17,15 +17,19 @@ import {
   ProxyNote, UnavailableNote, KV, Note, Empty, AnswerProse, timeAgo,
 } from "../components/ui.js";
 import { evidenceFromDto, judgmentFromDto, thesisFromDto } from "../data/adapters.js";
+import { condenseText, looksLikePayload } from "../data/answerSections.js";
 import { isResearchRef, preferTurn, runOpenRef, turnIdentity } from "../data/identity.js";
 import {
   followUpAllowed,
   isExpandedTurn,
   isNewResearchRequest,
+  linkedRunIsPending,
+  mergePendingLiveTurn,
   railBelongsToActive,
   selectActiveTurnRef,
   workspaceLifecycle,
 } from "./researchView.js";
+import type { IdentifiedTurn } from "./researchView.js";
 import { listInvestigations, startNewInvestigation } from "../api/research.js";
 import type { InvestigationDto } from "../api/types.js";
 import { ApiError, getWorkspace, listResearch, getResearch, listSaved, createSaved, deleteSaved, createThesis } from "../api/index.js";
@@ -106,6 +110,23 @@ interface Turn {
   readonly degraded?: boolean;
   /** How completely this run could be reconstructed: FULL | JUDGMENT | SUMMARY. */
   readonly recordTier?: ResearchRecordTierDto;
+  /**
+   * Status shown in the run header when the run carries NO retained record outcome — a
+   * SUMMARY-tier turn (its real persisted lifecycle status; the synthesized COMPLETED above
+   * must never be presented as the run's state) or a transport failure (reads FAILED, never
+   * the catch-all COMPLETED). Full records render their own `outcome` and set neither.
+   */
+  readonly displayStatus?: string;
+}
+
+/** Identity of a turn for selection/dedupe (research ref when it has one, else requestId). */
+function identifyTurn(t: Turn): IdentifiedTurn {
+  return {
+    question: t.question,
+    requestId: t.run.requestId,
+    ...(t.run.researchRef !== undefined ? { researchRef: t.run.researchRef } : {}),
+    ...(t.degraded === true ? { degraded: true } : {}),
+  };
 }
 
 /**
@@ -151,11 +172,14 @@ function researchDtoToTurn(dto: (ResearchDto & Partial<ResearchResponseDto>) & {
   const answer = dto.answer;
   if (answer === undefined) {
     // No retained answer at all (SUMMARY tier): render the summary honestly, never a
-    // fabricated answer, and never pretend the record is complete.
+    // fabricated answer, and never pretend the record is complete. The header shows the
+    // run's REAL persisted status — the synthesized outcome below is the run's place in
+    // the response vocabulary, never a claim that this run completed.
     return {
       question,
       degraded: true,
       recordTier: "SUMMARY",
+      displayStatus: dto.status,
       run: {
         requestId: researchRef, // identity is the research ref, not a UUID
         researchRef,
@@ -215,6 +239,7 @@ const PANEL_TITLES: Record<string, string> = {
   AWAITING_CONFIRMATION: "Confirmation required",
   REJECTED: "Request rejected",
   MODEL_FAILURE: "Interpretation failed",
+  FAILED: "Research run failed",
 };
 
 export function ResearchWorkspacePage() {
@@ -260,10 +285,29 @@ export function ResearchWorkspacePage() {
   useEffect(() => {
     investigationRefRef.current = investigation?.id;
   }, [investigation?.id]);
+  /**
+   * STATE EPOCH: bumped by the New research reset BEFORE any async read it kicks off.
+   * Every in-flight thread/investigation read captures the epoch it started under and
+   * discards its result if the epoch moved — a late response from the PREVIOUS thread can
+   * never re-install that thread's investigation or runs into the fresh workspace (the
+   * "New research needs two clicks / old report resurrects" production failure).
+   */
+  const stateEpoch = useRef(0);
+  /** The URL-linked run (/research/:ref), mirrored for `refresh` (created once). */
+  const linkedRefRef = useRef<string | undefined>(undefined);
+  /**
+   * A History/link selection made AFTER the live run completed: it supersedes the stream's
+   * result as the active view (the completion still wins over a selection made BEFORE it —
+   * that ordering is what `selectActiveTurnRef` encodes; the page simply stops offering the
+   * live identity once the trader explicitly opened a different run).
+   */
+  const [liveSuperseded, setLiveSuperseded] = useState(false);
 
   const refreshInvestigation = useCallback(async (): Promise<void> => {
+    const epoch = stateEpoch.current;
     try {
       const rows = await listInvestigations();
+      if (epoch !== stateEpoch.current) return; // superseded (e.g. by New research)
       // SINGLE SOURCE OF TRUTH: the backend marks exactly one investigation current. An older
       // thread is NEVER substituted for "none" — that fallback is what left the previous
       // investigation on screen after New research while the rest of the page read as empty.
@@ -271,7 +315,8 @@ export function ResearchWorkspacePage() {
       setInvestigation(current);
       if (current !== undefined) setResetPending(false);
     } catch {
-      setInvestigation(undefined);
+      // A TRANSIENT read failure keeps whatever is on screen (and keeps resetPending as-is):
+      // a blip must never wipe the current thread to "no investigation".
     }
   }, []);
 
@@ -357,6 +402,11 @@ export function ResearchWorkspacePage() {
         ...prev.filter((t) => (liveRef !== undefined ? t.run.researchRef !== liveRef : t.question !== stream.question)),
         { question: stream.question, run: stream.result! },
       ]);
+      // SELECTION FOLLOWS THE RESULT: the completed run becomes the explicitly selected run
+      // (not merely "newest"), and any earlier History selection stops superseding it. A
+      // selection made AFTER this point still wins (the page clears the supersede here).
+      if (liveRef !== undefined) setViewedRef(liveRef);
+      setLiveSuperseded(false);
       void refresh();
       // The investigation gained a turn and a run: re-read the thread so the sidebar and the
       // next follow-up's target reflect what actually happened.
@@ -369,8 +419,13 @@ export function ResearchWorkspacePage() {
     if (stream.errorId > 0) {
       const code = stream.error!.code;
       const outcome = errorTurnOutcome(code);
+      // Transport-class failures land in the honest catch-all COMPLETED outcome (the message
+      // speaks for itself), but they must READ as a failed run — badge and panel — never as a
+      // completed research result.
+      const displayStatus = outcome === "COMPLETED" ? "FAILED" : undefined;
       setRuns((prev) => [...prev, {
         question: stream.question,
+        ...(displayStatus !== undefined ? { displayStatus } : {}),
         run: {
           requestId: crypto.randomUUID(),
           action: "RESEARCH",
@@ -403,6 +458,7 @@ export function ResearchWorkspacePage() {
     //   just received must not vanish because a read hiccuped) — turns are merged, not set;
     // - the snapshot load retries once (bounded) to absorb cold-start/deploy blips before
     //   the honest banner is shown; previous state stays visible meanwhile.
+    const epoch = stateEpoch.current;
     let historyTurns: readonly Turn[] | undefined;
     // THREAD SCOPE (the New Research bug): the thread is hydrated from the CURRENT
     // investigation's runs ONLY. Reading global history here is what produced, after "New
@@ -439,6 +495,10 @@ export function ResearchWorkspacePage() {
     } catch {
       // Thread unavailable (cold store, transient fault); existing turns stay untouched.
     }
+    // STALE READ DISCARD: if a New research reset started while this read was in flight, its
+    // result belongs to the thread just abandoned — applying it (even the hold consumption
+    // below) would resurrect the previous conversation. The reset's own refresh takes over.
+    if (epoch !== stateEpoch.current) return;
     // D6: consume the one-shot hydration hold (see mountedForNewResearch). The thread stays
     // clean for this fresh conversation; later refreshes hydrate the thread again as always.
     // Consumed even when the read failed, so the hold cannot leak into a LATER refresh.
@@ -452,7 +512,19 @@ export function ResearchWorkspacePage() {
       // report survive inside a thread that had just been reset.
       if (threadOwnerRef.current !== threadInvestigationId) {
         threadOwnerRef.current = threadInvestigationId;
-        setRuns(historyTurns);
+        // RETAIN THE LINKED RUN: a run the trader explicitly opened from History (its ref is
+        // in the URL) survives this replacement even when the new thread's window does not
+        // list it — dropping it was the "History click → empty research page" failure. Every
+        // OTHER turn of the old conversation is still replaced (one thread at a time).
+        setRuns((prev) => {
+          const linked = linkedRefRef.current;
+          if (linked === undefined) return historyTurns;
+          const fromHistory = historyTurns.filter((t) => turnIdentity({ requestId: t.run.requestId, ...(t.run.researchRef !== undefined ? { researchRef: t.run.researchRef } : {}) }) === linked);
+          const fromPrev = fromHistory.length > 0
+            ? []
+            : prev.filter((t) => turnIdentity({ requestId: t.run.requestId, ...(t.run.researchRef !== undefined ? { researchRef: t.run.researchRef } : {}) }) === linked);
+          return [...fromHistory, ...fromPrev, ...historyTurns.filter((t) => turnIdentity({ requestId: t.run.requestId, ...(t.run.researchRef !== undefined ? { researchRef: t.run.researchRef } : {}) }) !== linked)];
+        });
       } else {
       setRuns((prev) => {
         // MERGE LAW, identity-keyed: turns are deduped by research ref (never by requestId,
@@ -484,6 +556,7 @@ export function ResearchWorkspacePage() {
     }
     try {
       const snapshot = await getWorkspace();
+      if (epoch !== stateEpoch.current) return; // superseded by a reset
       setWs({
         evidence: snapshot.recentEvidence.map(evidenceFromDto),
         judgment: (() => { const current = judgmentBelongsToCurrentRun(snapshot); return current !== undefined ? judgmentFromDto(current) : undefined; })(),
@@ -497,6 +570,7 @@ export function ResearchWorkspacePage() {
       await new Promise((r) => setTimeout(r, 1200));
       try {
         const snapshot = await getWorkspace();
+        if (epoch !== stateEpoch.current) return; // superseded by a reset
         setWs({
           evidence: snapshot.recentEvidence.map(evidenceFromDto),
           judgment: (() => { const current = judgmentBelongsToCurrentRun(snapshot); return current !== undefined ? judgmentFromDto(current) : undefined; })(),
@@ -508,6 +582,7 @@ export function ResearchWorkspacePage() {
       } catch {
         // Confirmed failure: keep previous state on screen, surface the honest banner.
       }
+      if (epoch !== stateEpoch.current) return; // superseded by a reset
       setWs((prev) => ({ ...prev, loadError: err }));
     }
   }, []);
@@ -530,11 +605,15 @@ export function ResearchWorkspacePage() {
   useEffect(() => {
     const ref = params.ref;
     if (ref === undefined || ref.length === 0) {
+      linkedRefRef.current = undefined;
       setLinkedNotFound(false);
       setRefLoadError(undefined);
       setViewedRef(undefined);
+      // No explicit selection anymore: the live result (if any) may own the active area again.
+      setLiveSuperseded(false);
       return;
     }
+    linkedRefRef.current = ref;
     let cancelled = false;
     void (async () => {
       try {
@@ -545,6 +624,11 @@ export function ResearchWorkspacePage() {
         setLinkedNotFound(false);
         setRefLoadError(undefined);
         setViewedRef(ref);
+        // A selection made AFTER a completion supersedes that completion's claim on the
+        // active area (the ordering rule inside selectActiveTurnRef still gives a
+        // just-completed run precedence over an OLDER selection; the page stops offering the
+        // live identity the moment the trader explicitly opens another run).
+        setLiveSuperseded(true);
         // Dedupe on the SAME identity the list exposes: reopening a run already on screen
         // replaces its turn (preferring the fuller reconstruction) instead of appending a
         // duplicate row.
@@ -591,6 +675,7 @@ export function ResearchWorkspacePage() {
         if (turn !== undefined) {
           setRefLoadError(undefined);
           setViewedRef(params.ref!);
+          setLiveSuperseded(true);
           setRuns((prev) => (prev.some((t) => turnIdentity({ requestId: t.run.requestId, ...(t.run.researchRef !== undefined ? { researchRef: t.run.researchRef } : {}) }) === params.ref) ? prev : [...prev, turn]));
         }
         return;
@@ -654,6 +739,10 @@ export function ResearchWorkspacePage() {
   // `{ question }` state is a different handoff and is never treated as this one.
   useEffect(() => {
     if (!isNewResearchRequest(location.state)) return;
+    // EPOCH BUMP FIRST: every read already in flight belongs to the thread being abandoned;
+    // from here on its results are discarded, so a late response cannot re-install the old
+    // investigation or its runs (the "first click does nothing" resurrection failure).
+    stateEpoch.current += 1;
     resetStream();
     setRuns([]);
     setViewedRef(undefined);
@@ -678,6 +767,11 @@ export function ResearchWorkspacePage() {
     setInvestigation(undefined);
     void startNewInvestigation()
       .then(async () => { await refreshInvestigation(); setResetPending(false); })
+      // One bounded retry: a cold/deploy-window write must not leave the backend still
+      // reporting the old investigation as current. The UI is already clean either way —
+      // if the retry also fails the page stays honestly NO_INVESTIGATION until a confirmed
+      // current arrives; a failed clear is not a failed reset.
+      .catch(() => startNewInvestigation().then(async () => { await refreshInvestigation(); setResetPending(false); }))
       .catch(() => { /* the UI is already clean; a failed clear is not a failed reset */ });
     navigate(location.pathname, { replace: true }); // consume the flag
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -709,23 +803,44 @@ export function ResearchWorkspacePage() {
   }, [stream.running, submitting, submit, investigation]);
 
   const evidenceById = new Map(ws.evidence.map((e) => [e.ref, e]));
+  // COMPLETION WITHOUT A PAINT GAP: the terminal stream result renders from the SAME render
+  // that flips running to false; the append-effect above then persists it into `runs` (this
+  // merge is identity-identical with that effect, so the turn never duplicates or flashes
+  // away). An incoherent response never becomes a pending turn — it gets the explicit
+  // integrity notice below instead of silently leaving an empty page.
+  const pendingLiveTurn: Turn | undefined = stream.result !== undefined && isCoherentRunResponse(stream.result)
+    ? { question: stream.question, run: stream.result }
+    : undefined;
+  const withheldResult = stream.result !== undefined && pendingLiveTurn === undefined;
+  const displayRuns = mergePendingLiveTurn(runs, pendingLiveTurn, identifyTurn);
+  // A direct History open loads EXACTLY that run: while it is loading an explicit loading
+  // state renders — never the empty state, never a newest-run fallback pretending to be it.
+  const linkedRef = params.ref !== undefined && params.ref.length > 0 ? params.ref : undefined;
+  const linkedPending = linkedRunIsPending({
+    ...(linkedRef !== undefined ? { linkedRef } : {}),
+    runLoaded: linkedRef !== undefined && displayRuns.some((t) => {
+      const id = identifyTurn(t);
+      return id.researchRef === linkedRef || id.requestId === linkedRef;
+    }),
+    notFound: linkedNotFound,
+    loadFailed: refLoadError !== undefined,
+  });
   // Active-result selection (state-isolation law): while a run is in flight NOTHING from a
   // previous research is expanded; otherwise the user's explicit selection or the newest
   // identified run is the one active result. The rail renders state/judgment only for it.
-  const identifiedTurns = runs.map((t) => ({
-    question: t.question,
-    requestId: t.run.requestId,
-    ...(t.run.researchRef !== undefined ? { researchRef: t.run.researchRef } : {}),
-    ...(t.degraded === true ? { degraded: true } : {}),
-  }));
+  const identifiedTurns = displayRuns.map(identifyTurn);
   const activeRef = selectActiveTurnRef({
     turns: identifiedTurns,
     ...(viewedRef !== undefined ? { viewedRef } : {}),
-    ...(stream.result?.researchRef !== undefined ? { liveRef: stream.result.researchRef } : {}),
+    // The URL-linked run owns the active area until the URL changes (loading or loaded).
+    ...(linkedRef !== undefined ? { pinnedRef: linkedRef } : {}),
+    // The live result is offered until the trader explicitly opens ANOTHER run (then that
+    // later selection wins; see liveSuperseded).
+    ...(!liveSuperseded && stream.result?.researchRef !== undefined ? { liveRef: stream.result.researchRef } : {}),
     // A terminal response that is NOT a research run (clarification, confirmation request,
     // rejection) is still the answer to the question just asked, so it owns the active area
     // instead of hiding behind the previous run.
-    ...(stream.result !== undefined && stream.result.researchRef === undefined && stream.result.researchRunId === undefined
+    ...(!liveSuperseded && stream.result !== undefined && stream.result.researchRef === undefined && stream.result.researchRunId === undefined
       ? { liveIdentity: turnIdentity({ requestId: stream.result.requestId }) }
       : {}),
     running: stream.running,
@@ -910,17 +1025,30 @@ export function ResearchWorkspacePage() {
       {refLoadError !== undefined && (
         <BackendDownNote error={refLoadError}> The run is still on the server; this is a read failure, not missing history.</BackendDownNote>
       )}
-      {runs.length === 0 && !stream.running && ws.loadError === undefined && (
+      {/* A History-opened run is loading: an explicit state, never the empty state and never
+          a different run pretending to be the opened one. */}
+      {linkedPending && (
+        <Panel kicker="history" title="Opening saved research…">
+          <div className="panel-body" style={{ paddingTop: 6 }}>Loading that run from Research history.</div>
+        </Panel>
+      )}
+      {/* Run coherence rejected the live result: said out loud, never silently empty. The
+          response is persisted server-side; nothing is rendered as if it were an answer. */}
+      {withheldResult && (
+        <Panel kicker="integrity" title="Result withheld from this thread">
+          <div className="panel-body" style={{ paddingTop: 6 }}>
+            This response failed the run-coherence check (its artifacts do not all belong to one
+            research run), so it is not rendered here. It was not discarded server-side — open
+            Research history to inspect the persisted record. Nothing is synthesized in its place.
+          </div>
+        </Panel>
+      )}
+      {displayRuns.length === 0 && !stream.running && stream.result === undefined && !linkedPending && ws.loadError === undefined && (
         <Empty title="No research in this workspace yet" hint="Type a natural-language question above; the agent plans and investigates." />
       )}
 
-      {runs.map((turn) => {
-        const turnIdentified = {
-          question: turn.question,
-          requestId: turn.run.requestId,
-          ...(turn.run.researchRef !== undefined ? { researchRef: turn.run.researchRef } : {}),
-          ...(turn.degraded === true ? { degraded: true } : {}),
-        };
+      {displayRuns.map((turn) => {
+        const turnIdentified = identifyTurn(turn);
         // Identity for rendering is the research ref when the turn has one, else its own
         // request id (failure turns). Never a UUID where a ref is expected.
         const identity = turnIdentity({ requestId: turn.run.requestId, ...(turn.run.researchRef !== undefined ? { researchRef: turn.run.researchRef } : {}) });
@@ -961,9 +1089,10 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
 }) {
   const run = turn.run;
   const runRef = run.researchRef;
-  // DEEPER VIEW state: closed by default (a trader reads the answer first), remembered for
-  // this run so a re-render does not slam it shut again.
-  const [deeperOpen, setDeeperOpen] = useState(false);
+  // WHAT THE HEADER SHOWS: the record's own outcome; a turn without a retained record
+  // outcome shows the explicit display status instead (SUMMARY tier → the run's real
+  // persisted lifecycle status, transport failure → FAILED). Never the synthesized one.
+  const shownStatus = turn.displayStatus ?? run.outcome;
   // Contextual save control(s) render only when the run has a research identity (a transport
   // failure turn has nothing to save). One control per artifact, near the artifact itself.
   const saveControl = (kind: SavedKindDto, sourceRef: string | undefined, label: string) => {
@@ -994,15 +1123,6 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
   const recordTier: ResearchRecordTierDto = turn.recordTier ?? "FULL";
   const insight = run.actionableInsight ?? resolution?.actionableInsight;
   const watchNext = run.watchNext ?? insight?.watchItems ?? [];
-  // How much sits behind the disclosure (the summary line tells the trader what they can open).
-  const deeperCount =
-    (insight !== undefined ? 1 : 0)
-    + (supporting.length > 0 ? 1 : 0)
-    + (opposing.length > 0 ? 1 : 0)
-    + (run.evidence.length > 0 ? 1 : 0)
-    + ((run.researchGaps ?? []).length + run.limitations.length > 0 ? 1 : 0)
-    + (watchNext.length > 0 ? 1 : 0)
-    + (run.judgments.length > 0 ? 1 : 0);
 
   return (
     <>
@@ -1012,7 +1132,7 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
 
       {/* RESEARCH STATUS: explicit state, immediately after the question. */}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "0 0 10px" }}>
-        <StatusBadge status={run.outcome} />
+        <StatusBadge status={shownStatus} />
         <span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)" }}>{run.action.toLowerCase()}</span>
         {/* FOLLOW-UP LINEAGE: the thread relationship is DATA on the run, shown beside the
             outcome — a follow-up announces what it continues instead of silently standing in
@@ -1041,7 +1161,7 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
           "Judgment" kicker with a conviction meter, would re-create analytically the very output
           the request excluded. The observation and its provenance are shown as data, with no
           verdict framing and no recommendation language. */}
-      {run.executionMode === "RAW_OBSERVATION" && run.outcome === "COMPLETED" ? (
+      {run.executionMode === "RAW_OBSERVATION" && run.outcome === "COMPLETED" && turn.displayStatus === undefined ? (
         <section className="surface-judgment" aria-label="Retrieved observation">
           <div className="judgment-head">
             <span className="judgment-kicker">Observation · raw retrieval</span>
@@ -1056,12 +1176,14 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
             Retrieved as requested. No judgment, synthesis or falsification was performed.
           </p>
         </section>
-      ) : run.outcome === "COMPLETED" ? (
+      ) : run.outcome === "COMPLETED" && turn.displayStatus === undefined ? (
         // §8A: the JUDGMENT is the visual focal point for an ANALYTICAL run; elevated surface,
-        // larger type. Failure/ambiguous states keep honest panel treatment.
+        // larger type. Failure/ambiguous states keep honest panel treatment. `displayStatus`
+        // turns (SUMMARY tier, transport failure) never present a synthesized outcome on the
+        // judgment surface — they render as the honest panel below.
         <section className="surface-judgment" aria-label="Research judgment">
           <div className="judgment-head">
-            <span className="judgment-kicker">Judgment · {run.action.toLowerCase()}</span>
+            <span className="judgment-kicker">executive judgment · {run.action.toLowerCase()}</span>
             <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
               <ConfidenceMeter confidence={run.answer.confidence} />
               {saveControl("RESEARCH", undefined, "this research")}
@@ -1085,22 +1207,35 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
             )}
             <AnswerProse className="answer-prose" text={premiseStripped(run.premiseCheck, run.answer.answer)} />
           </div>
+          {/* STRUCTURED ROWS (no raw glyphs): uncertainty and implication read as labelled
+              rows with a clear status marker, never ◆/↳ characters. */}
           {run.answer.keyUncertainty.length > 0 && (
-            <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--warn)" }}>◆ {run.answer.keyUncertainty}</p>
+            <div className="uncertainty-row">
+              <span className="badge amber">key uncertainty</span>
+              <span>{run.answer.keyUncertainty}</span>
+            </div>
           )}
           {run.answer.implication.length > 0 && (
-            <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--text-3)" }}>↳ {run.answer.implication}</p>
+            <div className="insight-row">
+              <span className="panel-kicker">implication</span>
+              <span>{run.answer.implication}</span>
+            </div>
           )}
         </section>
       ) : (
         <Panel
-          kicker={`${run.outcome === "MODEL_FAILURE" ? "model unavailable" : run.outcome.toLowerCase().replace(/_/g, " ")} · ${run.action.toLowerCase()}`}
-          title={PANEL_TITLES[run.outcome] ?? "Run could not complete"}
+          kicker={`${shownStatus === "MODEL_FAILURE" ? "model unavailable" : shownStatus.toLowerCase().replace(/_/g, " ")} · ${run.action.toLowerCase()}`}
+          title={PANEL_TITLES[shownStatus] ?? "Run could not complete"}
         >
           <div className="panel-body" style={{ padding: 14 }}>
-            <p style={{ margin: 0, fontSize: 14, lineHeight: 1.65 }}>{run.answer.answer}</p>
+            {/* Same structured renderer as the judgment surface: markdown headings become
+                real sections here too (this branch used to show raw **What happened**). */}
+            <AnswerProse className="answer-prose" text={run.answer.answer} />
             {run.answer.keyUncertainty.length > 0 && (
-              <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--warn)" }}>◆ {run.answer.keyUncertainty}</p>
+              <div className="uncertainty-row">
+                <span className="badge amber">key uncertainty</span>
+                <span>{run.answer.keyUncertainty}</span>
+              </div>
             )}
           </div>
         </Panel>
@@ -1127,20 +1262,11 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
           the client never fetches the whole library to filter it, and only real saves appear. */}
       {runRef !== undefined && isResearchRef(runRef) && <SavedFromResearch runRef={runRef} reloadKey={save.savedSectionNonce} onOpenSaved={save.onOpenSaved} />}
 
-      {/* DEEPER VIEW (progressive disclosure, product law): the audit surface stays, but out
-          of the primary read. A trader asked a question and wants a short answer first; the
-          insight ledger, the supporting/opposing breakdown, the evidence list, the coverage
-          gaps, the watch list, the engine diagnostics and the judgment objects are one click
-          away, never a wall in front of the answer. Nothing is removed or hidden from audit:
-          the same objects are here, open. */}
-      <details className="deeper" open={deeperOpen} onToggle={(e) => setDeeperOpen((e.target as HTMLDetailsElement).open)}>
-        <summary className="deeper-summary">
-          <span className="mono">DEEPER VIEW</span>
-          <span>
-            {deeperCount} item{deeperCount === 1 ? "" : "s"}: evidence, provenance, gaps, diagnostics
-          </span>
-        </summary>
-
+      {/* VISIBLE RESULT HIERARCHY (product law): the report reads in order — executive
+          judgment, actionable insight, strongest support, meaningful opposition, evidence,
+          uncertainty, watch items, diagnostics/requirement ledger, research objects. Every
+          section is a real heading over structured data; nothing sits behind a disclosure
+          wall, and nothing is removed from audit. */}
       {/* ACTIONABLE INSIGHT (engine-derived): what the evidence shows, what it does NOT
           show, what it means, and what would change the conclusion. Never trade
           instructions; the trader keeps the decision. */}
@@ -1197,23 +1323,50 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
           <div>
             {run.evidence.slice(0, 6).map((e) => {
               const item = evidenceById.get(e.ref) ?? evidenceFromDto(e);
+              // Readable rendering first (displayText is the backend's prose rendering of
+              // the observation); the full text stays one disclosure away — a raw payload is
+              // shown as itself, never dumped into the prose path.
+              const readable = e.displayText ?? item.observation;
+              const condensed = condenseText(readable, 480);
+              const payload = looksLikePayload(condensed.full);
+              const sourceTitle = item.sourceProvider ?? item.sourceRefs[0] ?? e.evidenceType.toLowerCase();
               return (
                 <div className="ev-item" key={e.ref}>
                   <EpistemicRail cls={item.evidenceClass} />
                   <div className="ev-body">
-                    <div style={{ fontSize: 13, lineHeight: 1.55 }}>{item.observation}</div>
+                    <div className="ev-title">
+                      <span>{sourceTitle}</span>
+                      <span className="mono ev-type">{e.evidenceType.toLowerCase()}</span>
+                    </div>
+                    <div className={payload ? "ev-text mono" : "ev-text"}>{condensed.preview}</div>
+                    {condensed.truncated && (
+                      <details className="raw-inspect">
+                        <summary>Inspect raw evidence</summary>
+                        <div className="ev-raw">{condensed.full}</div>
+                      </details>
+                    )}
                     <div className="ev-meta">
                       <ClassBadge cls={item.evidenceClass} />
                       <FreshnessBadge freshness={item.freshness} />
+                      {item.sourceType !== undefined && (
+                        <span className="badge gray" title="Source kind from provenance">{item.sourceType.toLowerCase()}</span>
+                      )}
+                      {item.duplicateContent === true && (
+                        <span className="badge amber" title="Same underlying report as another item; never independent corroboration">repeated content</span>
+                      )}
                       {item.proxyBasis !== undefined && <ProxyNote basis={item.proxyBasis} />}
-                      <span className="ev-time mono">{item.ref} · {timeAgo(item.observedAt)}</span>
+                      <span className="ev-time mono">{item.ref} · observed {timeAgo(item.observedAt)}</span>
                       {saveControl("EVIDENCE", e.ref, "this evidence")}
                     </div>
                     {item.eventTimestamp !== undefined && (
-                      <div className="ev-time mono" style={{ marginTop: 4 }}>observed: {item.eventTimestamp}</div>
+                      <div className="ev-time mono" style={{ marginTop: 4 }}>event: {item.eventTimestamp}</div>
+                    )}
+                    {e.toolResultRef !== undefined && (
+                      <div className="ev-time mono" style={{ marginTop: 4 }}>tool result: {e.toolResultRef}</div>
                     )}
                     {item.sourceRefs.length > 0 && (
                       <div className="src-refs">
+                        <span className="mono" style={{ fontSize: 10, color: "var(--text-3)" }}>provenance</span>
                         {item.sourceRefs.slice(0, 3).map((s, i) => (
                           <span className="src-ref" key={i} title={s}>{s}</span>
                         ))}
@@ -1262,7 +1415,7 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
           <div className="panel-body" style={{ paddingTop: 6 }}>
             {watchNext.slice(0, 6).map((w, i) => (
               <div className="finding" key={i} style={{ background: "none" }}>
-                <span className="tick" aria-hidden>◇</span>
+                <span className="tick mark" aria-hidden />
                 <span>{w}</span>
                 {saveControl("WATCH_NEXT", `watch_${i}`, "this watch item")}
               </div>
@@ -1295,7 +1448,6 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
           </div>
         </Panel>
       )}
-      </details>
 
       {/* DECISION OWNERSHIP (product law): Lumen researches; the human decides. Nothing on
           this page is an instruction, a recommendation or an execution. */}
@@ -1400,7 +1552,7 @@ function RunDiagnostics({ run, recordTier }: { run: RunLike; recordTier: Researc
 function Finding({ text, tone }: { text: string; tone: "sup" | "opp" }) {
   return (
     <div className={`finding ${tone}`}>
-      <span className="tick" aria-hidden>{tone === "sup" ? "▲" : "▼"}</span>
+      <span className="tick mark" aria-hidden />
       <span>{text}</span>
     </div>
   );

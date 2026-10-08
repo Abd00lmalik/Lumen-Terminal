@@ -144,6 +144,12 @@ export interface ResearchRunSummaryDto extends ResearchDto {
   readonly saved?: boolean;
   /** True when the full run record is NOT retained: opening it renders honestly degraded. */
   readonly degraded?: boolean;
+  /**
+   * The retained run record's outcome (the run view's own vocabulary) — the History badge
+   * shows this verbatim so a list row and the opened run can never disagree. Absent when no
+   * record is retained; the badge then falls back to the lifecycle `status` verbatim.
+   */
+  readonly outcome?: ResearchOutcomeDto;
 }
 
 /** How completely a run could be reconstructed (the aggregate reports which). */

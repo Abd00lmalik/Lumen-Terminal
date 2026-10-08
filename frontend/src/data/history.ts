@@ -119,3 +119,14 @@ export function formatStamp(iso: string | undefined): string {
   if (Number.isNaN(d.getTime())) return "";
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
+
+/**
+ * STATUS VERBATIM, record-first: the row shows the retained run record's OUTCOME — the exact
+ * vocabulary the opened run view renders for that same record — and falls back to the
+ * lifecycle `status` only when no record is retained (degraded rows). Rendering `status`
+ * alone is what made a History row say FAILED while the opened run said INSUFFICIENT for the
+ * very same persisted record.
+ */
+export function historyDisplayStatus(row: { readonly outcome?: string; readonly status: string }): string {
+  return row.outcome ?? row.status;
+}

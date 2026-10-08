@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "../components/AppShell.js";
-import { Panel, StatusBadge, Note, Empty, ClassBadge, EpistemicRail, FreshnessBadge, ConfidenceMeter, UnavailableNote, timeAgo } from "../components/ui.js";
+import { Panel, StatusBadge, Note, Empty, ClassBadge, EpistemicRail, FreshnessBadge, ConfidenceMeter, UnavailableNote, AnswerProse, timeAgo } from "../components/ui.js";
 import { useResearchStream } from "../hooks/useResearchStream.js";
 import { evidenceFromDto } from "../data/adapters.js";
 import type { ResearchResponseDto } from "../api/index.js";
@@ -226,9 +226,12 @@ function ResultView({ result, onInspectEvidence }: { result: ResearchResponseDto
         right={<ConfidenceMeter confidence={result.answer.confidence} />}
       >
         <div className="panel-body answer-card" style={{ borderLeft: "none", padding: 14 }}>
-          <p style={{ margin: 0, fontSize: 14, lineHeight: 1.65 }}>{result.answer.answer}</p>
+          <AnswerProse className="answer-prose" text={result.answer.answer} />
           {result.answer.keyUncertainty.length > 0 && (
-            <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--warn)" }}>◆ {result.answer.keyUncertainty}</p>
+            <div className="uncertainty-row">
+              <span className="badge amber">key uncertainty</span>
+              <span>{result.answer.keyUncertainty}</span>
+            </div>
           )}
         </div>
       </Panel>

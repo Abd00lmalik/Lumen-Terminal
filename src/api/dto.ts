@@ -327,6 +327,14 @@ export interface ResearchRunSummaryDTO extends ResearchDTO {
   readonly saved?: boolean;
   /** True when the full run record is NOT retained (honest degraded listing). */
   readonly degraded?: boolean;
+  /**
+   * The retained run record's OUTCOME — the exact vocabulary the run view renders
+   * (COMPLETED | INSUFFICIENT | AWAITING_CONFIRMATION | REJECTED | MODEL_FAILURE), so a
+   * list row and the opened run can never disagree (the INSUFFICIENT/FAILED divergence).
+   * Present only when a record is retained; a degraded row keeps the lifecycle `status` as
+   * its honest fallback rather than a synthesized outcome.
+   */
+  readonly outcome?: ResearchResponseDTO["outcome"];
 }
 
 /**

@@ -97,28 +97,39 @@ describe("run identity (B1)", () => {
     // The thread asks the backend for a window instead of slicing an unbounded list, and the
     // History page is the full surface with pagination. The window is scoped to ONE
     // investigation: a thread that had been reset must not refill itself from every run in
-    // the workspace (the "New research showed the old report" bug).
-    expect(workspacePage).toContain("listResearch({ limit: 50, status: \"COMPLETED\", investigationRef: threadInvestigationId })");
+    // the workspace (the "New research showed the old report" bug). NO STATUS FILTER: the
+    // thread's runs are asked for as they are, so an INSUFFICIENT or FAILED run cannot vanish
+    // from its own thread on reload.
+    expect(workspacePage).toContain("listResearch({ limit: 50, investigationRef: threadInvestigationId })");
+    expect(workspacePage).not.toContain("status: \"COMPLETED\", investigationRef");
     expect(historyPage).toContain("HISTORY_PAGE_SIZE");
     expect(historyPage).toContain("listResearch({ limit: HISTORY_PAGE_SIZE, offset: from");
   });
 
-  it("keeps the audit surface behind one disclosure instead of in front of the answer", () => {
-    // PRIMARY VIEW = concise trader intelligence; DEEPER VIEW = provenance and diagnostics.
-    // Everything stays reachable (a disclosure, not a deletion).
-    expect(workspacePage).toContain('<details className="deeper"');
-    expect(workspacePage).toContain("DEEPER VIEW");
-    const deeperIdx = workspacePage.indexOf('<details className="deeper"');
-    const closeIdx = workspacePage.indexOf("</details>", deeperIdx);
-    const insightIdx = workspacePage.indexOf("actionable insight");
-    const evidenceIdx = workspacePage.indexOf("Evidence behind this response");
-    const diagnosticsIdx = workspacePage.indexOf("<RunDiagnostics");
-    expect(deeperIdx).toBeGreaterThan(-1);
-    expect(closeIdx).toBeGreaterThan(deeperIdx);
-    expect(insightIdx).toBeGreaterThan(deeperIdx);
-    expect(evidenceIdx).toBeGreaterThan(deeperIdx);
-    expect(diagnosticsIdx).toBeGreaterThan(deeperIdx);
-    expect(workspacePage.indexOf("</details>", diagnosticsIdx)).toBeGreaterThan(diagnosticsIdx);
+  it("renders the result as a visible hierarchy of real sections, not behind one disclosure", () => {
+    // The old DEEPER VIEW collapsed insight, evidence, gaps, diagnostics and judgments
+    // behind a single disclosure — the "disorganized result" complaint. The required order
+    // is now VISIBLE in the source: executive judgment → actionable insight → support →
+    // opposition → evidence → uncertainty → watch → diagnostics → research objects.
+    expect(workspacePage).not.toContain('<details className="deeper"');
+    expect(workspacePage).not.toContain("DEEPER VIEW");
+    const order = [
+      "executive judgment · ",
+      'kicker="actionable insight"',
+      '"Strongest support"',
+      '"Meaningful opposition"',
+      '"Evidence behind this response"',
+      '"What this research could not establish"',
+      'kicker="watch next"',
+      "<RunDiagnostics run=",
+      'kicker="research objects"',
+    ].map((needle) => workspacePage.indexOf(needle));
+    for (const idx of order) expect(idx).toBeGreaterThan(-1);
+    for (let i = 1; i < order.length; i += 1) expect(order[i]!).toBeGreaterThan(order[i - 1]!);
+    // The evidence cards carry an inspect disclosure for long/raw payloads instead of
+    // dumping them into the prose path.
+    expect(workspacePage).toContain("Inspect raw evidence");
+    expect(workspacePage).toContain("condenseText(");
   });
 
   it("the thread reads are scoped to the current investigation", () => {

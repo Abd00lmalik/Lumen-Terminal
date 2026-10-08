@@ -29,6 +29,13 @@ export interface ActiveViewInput {
   readonly turns: readonly IdentifiedTurn[];
   /** Research explicitly selected by the user (history click or a linked URL ref). */
   readonly viewedRef?: string;
+  /**
+   * The run a direct link opened (/research/:ref). While set it OWNS the active area — the
+   * newest turn is never a fallback — so opening History row X can only ever render X:
+   * X loads first (a loading state, never another run), then stays selected until the URL
+   * changes. Selection and lifecycle remain separate concerns: this never feeds lifecycle.
+   */
+  readonly pinnedRef?: string;
   /** Research identity of the live stream result, when the stream has completed. */
   readonly liveRef?: string;
   /**
@@ -53,6 +60,10 @@ export interface ActiveViewInput {
   // sent "Focus specifically on ETF flows." and read their earlier answer back.
   if (input.liveIdentity !== undefined && input.liveIdentity !== "") return input.liveIdentity;
   if (input.viewedRef !== undefined && input.viewedRef !== "") return input.viewedRef;
+  // rule 2c: a URL-linked run owns the active area over any "newest turn" fallback. Before it
+  // loads there is nothing to expand (the page shows an explicit loading state), never a
+  // different run pretending to be the opened one.
+  if (input.pinnedRef !== undefined && input.pinnedRef !== "") return input.pinnedRef;
   // rule 3: newest turn carrying an identity
   for (let i = input.turns.length - 1; i >= 0; i -= 1) {
     const ref = input.turns[i]?.researchRef;
@@ -173,4 +184,47 @@ export function railBelongsToActive(input: RailScopeInput): boolean {
   if (input.running) return false;
   if (input.activeRef === undefined || input.snapshotRef === undefined) return false;
   return input.snapshotRef === input.activeRef;
+}
+
+/**
+ * COMPLETION WITHOUT A PAINT GAP (pure): the stream's terminal result merged into the
+ * displayed turns for the SAME render that flips `running` to false. The append-effect then
+ * persists it into `runs`; until then the trader already sees the result — never a one-frame
+ * empty thread, and never a coherence-rejected result silently disappearing (the caller
+ * simply does not build `pending` for an incoherent response and shows an explicit notice).
+ *
+ * Dedupe mirrors the append-effect: research ref when there is one, question text otherwise.
+ */
+export function mergePendingLiveTurn<T>(
+  turns: readonly T[],
+  pending: T | undefined,
+  identityOf: (t: T) => { readonly question: string; readonly requestId: string; readonly researchRef?: string },
+): readonly T[] {
+  if (pending === undefined) return turns;
+  const id = identityOf(pending);
+  const key = id.researchRef !== undefined && id.researchRef !== "" ? id.researchRef : id.question;
+  const kept = turns.filter((t) => {
+    const ti = identityOf(t);
+    const tKey = ti.researchRef !== undefined && ti.researchRef !== "" ? ti.researchRef : ti.question;
+    return tKey !== key && ti.requestId !== id.requestId;
+  });
+  return [...kept, pending];
+}
+
+/**
+ * Is the URL-linked run still loading (pure)? While true the page renders an explicit
+ * loading state — NEVER the empty state and never a newest-run fallback, which is what made
+ * opening a History row flash "No research in this workspace yet" or show a different run.
+ * A genuinely missing run (404) or a failed read exits the pending state so their own
+ * honest surfaces take over.
+ */
+export function linkedRunIsPending(input: {
+  readonly linkedRef?: string;
+  readonly runLoaded: boolean;
+  readonly notFound: boolean;
+  readonly loadFailed: boolean;
+}): boolean {
+  if (input.linkedRef === undefined || input.linkedRef === "") return false;
+  if (input.notFound || input.loadFailed) return false;
+  return !input.runLoaded;
 }

@@ -16,7 +16,7 @@ import { AppShell } from "../components/AppShell.js";
 import { BackendDownNote } from "../components/BackendDownNote.js";
 import { Panel, StatusBadge, ConfidenceMeter, Empty, Note, timeAgo } from "../components/ui.js";
 import { listResearch } from "../api/index.js";
-import { HISTORY_PAGE_SIZE, formatStamp, groupHistoryByDay, nestFollowUpsUnderParents } from "../data/history.js";
+import { HISTORY_PAGE_SIZE, formatStamp, groupHistoryByDay, historyDisplayStatus, nestFollowUpsUnderParents } from "../data/history.js";
 import { isResearchRef } from "../data/identity.js";
 import type { ResearchRunSummaryDto } from "../api/index.js";
 
@@ -154,11 +154,13 @@ export function HistoryPage() {
                       </div>
                     </div>
                     <div className="row-right" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                      {/* STATUS VERBATIM: the run's own object status, never overwritten by
-                          selection. Which run is the workspace's current one is a DIFFERENT
-                          fact and gets its own badge below — collapsing the two hid an
-                          INSUFFICIENT or FAILED run behind a green "CURRENT". */}
-                      <StatusBadge status={e.status} />
+                      {/* STATUS VERBATIM: the retained record's OUTCOME (the run view's own
+                          vocabulary), falling back to the lifecycle status only when no record
+                          exists — a row and its opened run can never disagree. Which run is
+                          the workspace's current one is a DIFFERENT fact and gets its own
+                          badge below — collapsing the two hid an INSUFFICIENT or FAILED run
+                          behind a green "CURRENT". */}
+                      <StatusBadge status={historyDisplayStatus(e)} />
                       {e.isCurrent === true && <span className="badge blue" title="The workspace's current research run">current view</span>}
                       {e.followUpDepth !== undefined && e.followUpDepth > 0 && (
                         <span className="badge gray" title="This run continues an earlier run of the same investigation">follow-up</span>

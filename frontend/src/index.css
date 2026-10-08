@@ -382,6 +382,107 @@ a.row:hover { background: var(--panel-2); text-decoration: none; }
 .cap-chip .mono { color: var(--text-2); }
 .cap-chip .counts { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); }
 
+/* ---------- result presentation (structured hierarchy) ---------- */
+/* Real section headings over parsed answer sections, labelled uncertainty /
+   implication rows (no raw glyphs), and evidence cards with a concise read path
+   plus an inspect disclosure for long/raw payloads. */
+.answer-section + .answer-section { margin-top: 12px; }
+.section-h {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin: 0 0 5px;
+}
+.surface-judgment .section-h { color: var(--text-2); }
+.section-body { font-size: 14px; line-height: 1.65; }
+
+.uncertainty-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-top: 10px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--warn);
+}
+.insight-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+
+.note-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warn);
+  flex: 0 0 7px;
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.finding .tick.mark {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 1.5px;
+  background: var(--text-3);
+  flex: 0 0 7px;
+  margin-top: 5px;
+  padding: 0;
+}
+.finding.sup .tick.mark { background: var(--up); }
+.finding.opp .tick.mark { background: var(--down); }
+
+.ev-title {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.ev-type { font-size: 10px; font-weight: 400; color: var(--text-3); }
+.ev-text {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-2);
+  margin-top: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ev-text.mono {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.raw-inspect { margin-top: 6px; }
+.raw-inspect summary { cursor: pointer; font-size: 11.5px; color: var(--text-3); user-select: none; }
+.ev-raw {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 280px;
+  overflow: auto;
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 1100px) {
   .context-rail { position: fixed; right: 0; top: 0; bottom: 0; z-index: 40; transform: translateX(100%); transition: transform .2s ease; box-shadow: var(--shadow-2); }

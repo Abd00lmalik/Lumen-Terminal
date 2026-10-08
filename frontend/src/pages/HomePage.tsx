@@ -111,7 +111,10 @@ export function HomePage() {
             <div className="rail-section">
               <div className="rail-title">Open uncertainties</div>
               {uncertainties.slice(0, 4).map((u, i) => (
-                <div key={i} style={{ fontSize: 12, color: "var(--text-3)", padding: "4px 0", borderTop: i === 0 ? undefined : "1px dashed var(--line)" }}>◆ {u}</div>
+                <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 12, color: "var(--text-3)", padding: "4px 0", borderTop: i === 0 ? undefined : "1px dashed var(--line)" }}>
+                  <span className="note-dot" style={{ marginTop: 0 }} aria-hidden />
+                  <span>{u}</span>
+                </div>
               ))}
             </div>
           )}

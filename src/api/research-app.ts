@@ -1124,6 +1124,11 @@ export class ResearchApp {
         ...(insightPreview !== undefined && insightPreview.length > 0 ? { insightPreview: preview(insightPreview) } : {}),
         ...(judgmentPreview !== undefined && judgmentPreview.length > 0 ? { judgmentPreview: preview(judgmentPreview) } : {}),
         ...(runIsSaved(artifacts, memberIds) ? { saved: true } : {}),
+        // OUTCOME VERBATIM: the list row reports the retained record's outcome so History
+        // and the opened run view speak the same vocabulary for the same record. Without it
+        // the row fell back to the lifecycle status (FAILED) while the run view rendered the
+        // record's outcome (INSUFFICIENT) for the very same run.
+        ...(record !== undefined ? { outcome: record.outcome } : {}),
         // Honest listing: the full run record is not retained, so opening it will render at
         // a lower reconstruction tier (the aggregate reports which).
         ...(record === undefined ? { degraded: true } : {}),
