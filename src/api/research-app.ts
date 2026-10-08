@@ -23,6 +23,7 @@ import type { SavedArtifact, SavedKind, ThesisStatus } from "../domain/thesis.js
 import { isSavedKind, SAVED_KINDS, reviseThesis } from "../domain/thesis.js";
 import { newId, idPrefixes } from "../domain/ids.js";
 import { beginRun, endRun } from "../domain/run-context.js";
+import { researchExecutionModeOf } from "../research/follow-up-policy.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
 import type { ProgressListener } from "../research/progress.js";
 import {
@@ -325,10 +326,15 @@ export class ResearchApp {
         );
 
     // FOLLOW-UP LINEAGE (durable research object contract): when this turn continues a thread,
-    // the run it produces is a CHILD of the investigation's most recent completed run, carrying
+    // the run it produces is a CHILD of the investigation's most recent TERMINAL run, carrying
     // parentResearchId + followUpDepth so History nests it under its parent instead of listing
     // it as an unrelated top-level investigation. Root runs carry neither field.
-    const parentRun = continuing ? [...ws0.investigationRuns(investigation.id)].reverse().find((r) => r.status === "COMPLETED") : undefined;
+    // The parent is the newest run whatever its terminal state (COMPLETED preferred) — a
+    // follow-up to an INSUFFICIENT/FAILED parent is still a follow-up of THAT run; requiring
+    // COMPLETED silently cut the lineage exactly when the parent had failed, which is when
+    // continuation context matters most.
+    const priorRuns = continuing ? [...ws0.investigationRuns(investigation.id)].reverse() : [];
+    const parentRun = priorRuns.find((r) => r.status === "COMPLETED") ?? priorRuns.find((r) => r.status !== "ACTIVE");
 
     const traderTurn = ws0.appendTurn(
       createTurn({
@@ -348,6 +354,11 @@ export class ResearchApp {
       ...(parentRun !== undefined
         ? { followUpDepth: (parentRun.followUpDepth ?? 0) + 1 }
         : {}),
+      // EXECUTION MODE (follow-up contract): decided deterministically from the trader's own
+      // words + continuation state BEFORE any model call, and enforced at the orchestration
+      // layer. FOLLOW_UP + EVIDENCE_ONLY = NO_NEW_RETRIEVAL — the engine never sees the
+      // planner, the flow classifier, or the capability registry on that path.
+      executionMode: researchExecutionModeOf(submittedQuestion, continuing),
     });
     try {
       // Honest wall-clock budget: finish (and persist) before the caller's execution window
@@ -503,7 +514,14 @@ export class ResearchApp {
     // is describing; only the backend knows which observations this run actually retrieved,
     // so an id from another run can never reach the recorded answer, the minted judgment, or
     // the UI's traceability list.
+    // CITATION SCOPE: a run's citable refs are its OWN evidence PLUS refs it was explicitly
+    // granted to reference — an evidence-only follow-up's inherited parent evidence travels as
+    // context items (referenced, never re-owned as new evidence objects), so its citations to
+    // those parent ids are legitimate and must survive the provenance filter.
     const runEvidenceIds = new Set<string>(evidence.map((d) => d.ref));
+    for (const item of result.research?.context?.items ?? []) {
+      if (typeof item.ref === "string") runEvidenceIds.add(item.ref);
+    }
     const groundedAnswer: AnswerDTO = answer.citedObjectRefs.length === 0
       ? answer
       : Object.freeze({
@@ -724,12 +742,19 @@ export class ResearchApp {
     const ranResearch = researchRef !== undefined;
     const answerRunStatus = ranResearch ? ws.getResearch(answerRunId!)?.status : undefined;
     const resolution = researchDiagnostics?.questionResolution;
+    // CONFIDENCE-CONSISTENCY LAW: a COMPLETED outcome claims the question was answered, and an
+    // UNKNOWN confidence contradicts that claim ("answered, but we cannot say how well" is not
+    // a supported state). The run is demoted to INSUFFICIENT — lifecycle status alone must never
+    // imply successful question resolution. A TYPED model failure is the exception: its failure
+    // response legitimately carries UNKNOWN, the law above keeps it a partial COMPLETED so the
+    // persisted record and its judgment backstop survive — the failure field already says why.
     const outcome: ResearchResponseDTO["outcome"] =
       result.rejected !== undefined ? "REJECTED"
       : result.awaitingConfirmation !== undefined ? "AWAITING_CONFIRMATION"
       : result.modelFailure !== undefined && !ranResearch ? "MODEL_FAILURE"
       : answerRunStatus === "FAILED" ? "INSUFFICIENT"
       : resolution !== undefined && resolution.status === "NOT_ANSWERED" ? "INSUFFICIENT"
+      : result.modelFailure === undefined && answer.confidence === "UNKNOWN" ? "INSUFFICIENT"
       : "COMPLETED";
 
     // JUDGMENT BACKSTOP (completion law): a completed run is not complete until its

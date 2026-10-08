@@ -35,7 +35,25 @@ export interface ResearchRun {
    */
   readonly parentResearchId?: string;
   readonly followUpDepth?: number;
+  /**
+   * EXECUTION MODE (follow-up contract): how THIS submission is allowed to execute.
+   * ROOT_RESEARCH = a fresh investigation (full planner + retrieval).
+   * FOLLOW_UP_EVIDENCE_ONLY = a continuation that must synthesize from the parent's existing
+   * evidence and findings — NO new external retrieval, NO root research planner, NO fresh
+   * requirement expansion, NO independent flow classification.
+   * FOLLOW_UP_WITH_NEW_RESEARCH = a continuation that may retrieve (the default follow-up).
+   * Determined by the application layer from the trader's own words + parent context, and
+   * enforced at the orchestration layer — never left to prompt wording (FOLLOW_UP +
+   * EVIDENCE_ONLY = NO_NEW_RETRIEVAL).
+   */
+  readonly executionMode?: ResearchExecutionMode;
 }
+
+/** The execution mode a submission runs under (see ResearchRun.executionMode). */
+export type ResearchExecutionMode =
+  | "ROOT_RESEARCH"
+  | "FOLLOW_UP_EVIDENCE_ONLY"
+  | "FOLLOW_UP_WITH_NEW_RESEARCH";
 
 let active: ResearchRun | undefined;
 

@@ -45,6 +45,56 @@ function labelFor(key: string | undefined, now: Date): string {
 }
 
 /**
+ * FOLLOW-UP NESTING (durable relationship, never position): order the history rows so each
+ * follow-up renders directly beneath the run it continues, annotated with its depth and its
+ * parent's question. Nesting is derived ONLY from the persisted `parentResearchId` — never
+ * from timestamps or list position — and a follow-up whose parent is not in the loaded page
+ * still carries the relationship (it renders with its parent reference, just not nested).
+ */
+export interface NestedHistoryEntry<T> {
+  readonly entry: T;
+  /** 0 = root run; 1+ = follow-up depth under its parent. */
+  readonly depth: number;
+  /** Present for a follow-up whose parent run is in the loaded list. */
+  readonly parentRef?: string;
+  readonly parentQuestion?: string;
+}
+
+export function nestFollowUpsUnderParents<
+  T extends { readonly ref: string; readonly parentResearchId?: string; readonly question?: string; readonly objective?: string },
+>(entries: readonly T[]): readonly NestedHistoryEntry<T>[] {
+  const byRef = new Map(entries.map((e) => [e.ref, e] as const));
+  const childrenOf = new Map<string, T[]>();
+  const roots: T[] = [];
+  for (const e of entries) {
+    const parent = e.parentResearchId !== undefined ? byRef.get(e.parentResearchId) : undefined;
+    if (parent !== undefined) {
+      const list = childrenOf.get(parent.ref) ?? [];
+      list.push(e);
+      childrenOf.set(parent.ref, list);
+    } else {
+      roots.push(e);
+    }
+  }
+  const out: NestedHistoryEntry<T>[] = [];
+  const emitted = new Set<string>();
+  const walk = (e: T, depth: number, parent: T | undefined): void => {
+    if (emitted.has(e.ref)) return; // a lineage cycle can never loop the render
+    emitted.add(e.ref);
+    out.push({
+      entry: e,
+      depth,
+      ...(parent !== undefined ? { parentRef: parent.ref, parentQuestion: parent.question ?? parent.objective ?? "" } : {}),
+    });
+    for (const c of childrenOf.get(e.ref) ?? []) walk(c, depth + 1, e);
+  };
+  for (const r of roots) walk(r, 0, undefined);
+  // A cycle orphan (never emitted) still renders — as a root, honestly unlabeled.
+  for (const e of entries) if (!emitted.has(e.ref)) out.push({ entry: e, depth: 0 });
+  return out;
+}
+
+/**
  * Group entries by their (already sorted) day, preserving input order inside each group and
  * the order of the groups themselves — the backend's newest-first order is authoritative.
  */

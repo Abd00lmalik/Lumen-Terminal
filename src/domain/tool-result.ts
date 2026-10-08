@@ -83,6 +83,13 @@ export interface ToolOutput {
   readonly about?: string; // subject/asset/entity this output concerns
   readonly timeframe?: string; // e.g. "1h", "2026-09-01..2026-09-12"
   /**
+   * THIS output's observed/source timestamp (event time), when the adapter can declare one.
+   * Outputs of one response can carry DIFFERENT event times (chunked candle segments); the
+   * evidence layer prefers this over the response-level sourceTimestamp so freshness is
+   * validated from the data's own time, never from the retrieval wall clock.
+   */
+  readonly sourceTimestamp?: string;
+  /**
    * THE SHAPE OF THIS OUTPUT, declared by the adapter that received it. An adapter serving a
    * spot quote declares SNAPSHOT; one serving a candle table declares the OHLCV set. The
    * declaration is authoritative when present and is otherwise inferred from the payload, so
