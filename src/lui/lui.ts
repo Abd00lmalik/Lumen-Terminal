@@ -38,7 +38,7 @@ import { isSavedKind, legacyKindFromType, type SavedKind } from "../domain/thesi
 import type { ProvenanceOrigin } from "../domain/provenance.js";
 import { resolveInstrument, questionNamesAsset } from "../domain/instruments.js";
 import type { WorkspaceStore } from "../persistence/index.js";
-import { runAdaptiveResearch, type AdaptiveLoopOutcome, MAX_RESEARCH_ROUNDS } from "../research/adaptive.js";
+import { runAdaptiveResearch, memberDeadline, type AdaptiveLoopOutcome, MAX_RESEARCH_ROUNDS } from "../research/adaptive.js";
 import { progressEvent, type ProgressListener } from "../research/progress.js";
 import { buildResearchContext, renderResearchContext, type ResearchContext } from "../research/context.js";
 import { guardFlow, type FlowGuardResult } from "./flow-guard.js";
@@ -883,9 +883,28 @@ export class Lui {
       return result;
     }
 
+    // SHARED-DEADLINE FAIR SHARE (scheduler contract): a compound plan runs its research
+    // methodologies SEQUENTIALLY against ONE wall-clock deadline. Without a share the first
+    // methodology can spend the whole budget and every methodology behind it stops at
+    // TIME_BUDGET_EXHAUSTED with no evidence, even though the trader asked for all of them. The
+    // engine therefore slices the REMAINING budget across the research-bearing steps still
+    // ahead, so each gets a fair share; a single research step keeps the whole deadline.
+    const RESEARCH_BEARING_ACTIONS = new Set<ActionPlan["steps"][number]["action"]>(["RESEARCH", "ANALYZE", "CHALLENGE"]);
+    const researchBearingSteps = plan.steps.filter((s) => RESEARCH_BEARING_ACTIONS.has(s.action)).length;
+    let researchStepsStarted = 0;
+    const stepDeadlineFor = (step: ActionPlan["steps"][number]): number | undefined => {
+      if (deadlineMs === undefined || !RESEARCH_BEARING_ACTIONS.has(step.action)) return deadlineMs;
+      researchStepsStarted += 1;
+      const remainingMembers = researchBearingSteps - researchStepsStarted + 1;
+      const nowMs = (this.options.now?.() ?? new Date()).getTime();
+      return memberDeadline(deadlineMs, nowMs, remainingMembers);
+    };
+
     for (let stepIndex = 0; stepIndex < plan.steps.length; stepIndex += 1) {
       const step = plan.steps[stepIndex];
       if (step === undefined) break; // noUncheckedIndexedAccess guard (array cannot shrink here)
+      // The share this step may use (the whole deadline for a lone/non-research step).
+      const stepDeadline = stepDeadlineFor(step);
       progress?.(progressEvent("step_started", new Date(), `step ${stepIndex} started: ${step.action}`, { stepIndex, action: step.action }));
       const needsConfirmation = plan.requiresConfirmationFor.includes(stepIndex) || consequence.requiresConfirmation;
 
@@ -934,16 +953,16 @@ export class Lui {
           // recorded as INDEPENDENT_RESEARCH — never by borrowing a canonical flow's identity,
           // and never by inventing a ninth canonical flow.
           if (isObservationMode(this.executionConstraints)) {
-            const research = await this.dispatchResearch(step, origin, progress, deadlineMs, target.asset, undefined);
+            const research = await this.dispatchResearch(step, origin, progress, stepDeadline, target.asset, undefined);
             result.research = research.outcome;
             if (research.modelFailure !== undefined) result.modelFailure = research.modelFailure;
             break;
           }
           if (flow === "WHY_IT_HAPPENED" || flow === "WHAT_DOES_ALL_INFORMATION_SAY" || flow === "WHAT_COULD_AFFECT_IT" || flow === "DOES_MY_THESIS_HOLD" || flow === "EVALUATE_WITH_MY_FRAMEWORK" || flow === "HAS_THIS_HAPPENED_BEFORE") {
-            await this.dispatchM4Flow(flow, step, result, origin, progress, deadlineMs);
+            await this.dispatchM4Flow(flow, step, result, origin, progress, stepDeadline);
             break;
           }
-          const research = await this.dispatchResearch(step, origin, progress, deadlineMs, target.asset, flow);
+          const research = await this.dispatchResearch(step, origin, progress, stepDeadline, target.asset, flow);
           result.research = research.outcome;
           if (research.modelFailure !== undefined) result.modelFailure = research.modelFailure;
           break;
@@ -952,7 +971,7 @@ export class Lui {
           if (step.params["mode"] === "thesis" || step.params["thesis"] !== undefined) {
             await this.dispatchThesisAssessment(step, result);
           } else {
-            await this.dispatchAnalyze(step, result, origin, progress, deadlineMs);
+            await this.dispatchAnalyze(step, result, origin, progress, stepDeadline);
           }
           break;
         case "CHALLENGE":
@@ -980,7 +999,7 @@ export class Lui {
           const guardOverridesFalsification =
             guardHadSay && target.flow !== "WHAT_COULD_PROVE_ME_WRONG";
           if ((stepScopedFalsification || targetScopedFalsification) && !guardOverridesFalsification) {
-            await this.dispatchFlow7(step, result, origin, progress, deadlineMs);
+            await this.dispatchFlow7(step, result, origin, progress, stepDeadline);
             break;
           }
           // Phase G: thesis-facing challenge utterances ("challenge my thesis", "what could
@@ -1009,7 +1028,7 @@ export class Lui {
             }
             await this.dispatchFlow7(
               { ...step, params: { ...step.params, thesisRef: resolution.thesisId, mode: "falsification" } },
-              result, origin, progress, deadlineMs,
+              result, origin, progress, stepDeadline,
             );
             break;
           }

@@ -124,6 +124,117 @@ export function withinWaveBudget(
 const hasWaveBudget = withinWaveBudget;
 
 /**
+ * ONE CAPABILITY'S WALL-CLOCK SLICE (engine-owned budget): the longest a single capability
+ * call may hold its wave open. Sized to cover ONE provider chain including its own bounded
+ * retries (three attempts at the 15s transport timeout plus backoff), so a genuinely slow but
+ * working provider still completes, while a hung or runaway capability is abandoned instead of
+ * holding the whole wave (and therefore every independent sibling in it) hostage.
+ */
+export const CAPABILITY_SLICE_MS = 60_000;
+
+/**
+ * The per-call slice actually applied: an injected value (deterministic tests) or the
+ * production `CAPABILITY_SLICE_MS`. This bounds ONE call; the run's overall deadline is enforced
+ * separately by the wave gate (adaptive loop) and the between-round check (flow runner), whose
+ * semantics stay unchanged: a wave that has already started still delivers its partial evidence.
+ */
+export function capabilitySlice(sliceMs?: number): number {
+  return sliceMs !== undefined && sliceMs > 0 ? sliceMs : CAPABILITY_SLICE_MS;
+}
+
+/**
+ * FAIR MEMBER SHARE of a shared wall-clock deadline (shared-deadline law).
+ *
+ * A compound request runs several research methodologies SEQUENTIALLY against ONE deadline.
+ * Without a share the first member can spend the whole budget and every member behind it stops
+ * at TIME_BUDGET_EXHAUSTED with no evidence, even though the trader asked for all of them. The
+ * engine therefore slices the REMAINING budget across the research members still to run, so each
+ * methodology gets a fair share. A single remaining member (or a run without a deadline) keeps
+ * the whole deadline, so the simple case is unchanged. Never extends past the deadline.
+ */
+export function memberDeadline(
+  deadlineMs: number | undefined,
+  now: number,
+  remainingMembers: number,
+): number | undefined {
+  if (deadlineMs === undefined) return undefined;
+  if (remainingMembers <= 1) return deadlineMs;
+  const remaining = deadlineMs - now;
+  if (remaining <= 0) return deadlineMs;
+  return Math.min(deadlineMs, now + Math.floor(remaining / remainingMembers));
+}
+
+/**
+ * The honest result of a capability that outlived its slice: an EMPTY, TIMEOUT-typed
+ * TOOL_RESULT, shaped exactly like a transport timeout so every downstream consumer treats it
+ * identically (a failure is never negative evidence, coverage is unaffected, and no output
+ * enters the evidence graph because there is none). Nothing is fabricated.
+ */
+export function capabilityDeadlineResult(
+  capability: string,
+  params: Record<string, unknown>,
+  origin: ProvenanceOrigin,
+  at: Date,
+  allowanceMs: number,
+): ToolResult {
+  return normalizedResult(
+    {
+      tool: "engine/capability-budget",
+      capability,
+      transport: "engine:budget",
+      params,
+      outputs: [],
+      completeness: "EMPTY",
+      validation: "VALID",
+      failure: {
+        type: "TIMEOUT",
+        message: `capability ${capability} exceeded its ${Math.round(allowanceMs)}ms budget slice and was abandoned; independent siblings in the same wave continued`,
+        retriable: true,
+      },
+      limitations: [`${capability} did not finish inside its budget slice`],
+    },
+    origin,
+    at,
+  );
+}
+
+/**
+ * BOUNDED CAPABILITY EXECUTION (scheduling contract): execute a capability through the
+ * registry, but never wait on it longer than its allowance. One slow or hung capability must
+ * not starve the independent capabilities running beside it in the same wave, and a wave must
+ * not outlive the run's budget.
+ *
+ * The provider call itself is not force-aborted here (adapters own their transports and their
+ * own bounded timeouts, and a fetch that ignores its signal cannot be killed from this layer);
+ * the ENGINE stops WAITING on it and returns the honest TIMEOUT result above. The underlying
+ * promise is abandoned, not awaited, so the wave settles and its siblings deliver.
+ */
+export async function executeCapabilityBounded(
+  registry: CapabilityRegistry,
+  capability: string,
+  params: Record<string, unknown>,
+  origin: ProvenanceOrigin,
+  at: Date,
+  allowanceMs: number,
+): Promise<ToolResult> {
+  if (allowanceMs <= 0) return capabilityDeadlineResult(capability, params, origin, at, 0);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      registry.execute(capability, params, origin, at),
+      new Promise<ToolResult>((resolve) => {
+        timer = setTimeout(
+          () => resolve(capabilityDeadlineResult(capability, params, origin, at, allowanceMs)),
+          allowanceMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
  * Whether a scheduled recovery round may still start under the research budget. A run without
  * a deadline always recovers (the round cap alone bounds it); a deadline that is already past
  * or lacks the minimum headroom does not — recovery would be killed mid-flight and the
@@ -461,6 +572,12 @@ export interface AdaptiveLoopOptions {
    * wave started inside the deadline still completes before the platform's function limit.
    */
   readonly taskWindowMs?: number;
+  /**
+   * Wall clock a SINGLE capability call may consume (`CAPABILITY_SLICE_MS` by default). A call
+   * that outlives it is abandoned with an honest TIMEOUT result so it cannot starve the
+   * independent capabilities sharing its wave. Injectable for deterministic tests.
+   */
+  readonly capabilitySliceMs?: number;
   readonly now?: () => Date;
   /** F0 SSE seam: optional listener for REAL lifecycle events (never model reasoning/payloads). */
   readonly onProgress?: ProgressListener;
@@ -787,9 +904,15 @@ export async function runAdaptiveResearch(
       // executes each through its own provider chain with bounded transport timeouts, and one
       // failure never cancels siblings. Evidence ingestion stays in plan order after all
       // settle, so determinism of the research graph is preserved.
+      // ONE SLICE PER CAPABILITY (scheduler contract): each call is raced against its own
+      // bounded allowance, so a hung or runaway capability is abandoned at the slice boundary
+      // and its independent siblings in the same wave still deliver their evidence. The run's
+      // overall deadline remains the wave gate's job (checked before every task above).
+      const capabilityAllowance = capabilitySlice(options.capabilitySliceMs);
       const pending = task.capabilities.map(async (capability) => {
         options.onProgress?.(progressEvent("capability_started", at(), `capability ${capability} started`, { capability }));
-        const result = await options.registry.execute(
+        const result = await executeCapabilityBounded(
+          options.registry,
           capability,
           {
             ...(options.capabilityParams ?? {}),
@@ -806,6 +929,7 @@ export async function runAdaptiveResearch(
           },
           systemOrigin,
           at(),
+          capabilityAllowance,
         );
         options.onProgress?.(progressEvent("capability_completed", at(), `capability ${capability} completed: ${result.failure.type === "NONE" ? result.completeness : `failed (${result.failure.type})`}`, { capability, ...(result.failure.type === "NONE" ? { completeness: result.completeness } : { failureType: result.failure.type }) }));
         return { capability, result };

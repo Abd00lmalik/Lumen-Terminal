@@ -63,3 +63,75 @@ research requirements. Fix directions (for a dedicated engine change):
 
 **Status/evidence semantics were not changed by this pass** — the row, the record and the
 run view all report the engine's own words verbatim.
+
+---
+
+## E1 (fix) — each member now gets its own slice of the shared deadline
+
+Implemented fix direction **1** above, generically (no asset-, provider- or question-specific
+branch), plus a second defect (E2) found while tracing the same execution path.
+
+`src/research/adaptive.ts`
+
+- `memberDeadline(deadlineMs, now, remainingMembers)` — slices the REMAINING wall clock across
+the research members still to run, so a slow early member can no longer spend the budget the
+trailing answer-bearing member needs. A lone member keeps the whole deadline.
+
+`src/lui/lui.ts`
+
+- `stepDeadlineFor` computes each research-bearing step's fair share (RESEARCH / ANALYZE /
+CHALLENGE) and passes it to that step's dispatch, so a compound submission's members share the
+one 210s deadline instead of racing for it. A submission with a single research step is
+unchanged.
+
+**Direction 2-4 of the E1 entry remain open** (they belong to the answer/diagnostics keying
+work): only synthesize the trailing member while budget remains; key diagnostics/evidence to
+the answer-bearing member; surface which member the diagnostics came from. This change makes the
+trailing member budgeted rather than starved, which removes the specific `TIME_BUDGET_EXHAUSTED`
++ 0-evidence shape in the trace above, but it does not move the diagnostics keying.
+
+---
+
+## E2 — a capability wave waited unbounded on a single slow/hung capability
+
+**Symptom:** a wave of independent capabilities was awaited with no per-call bound
+(`Promise.all` in the adaptive loop; each flow-runner worker awaited `registry.execute`
+directly). One slow or hung capability held its whole wave open — its independent siblings
+delivered nothing until it returned (never, if it hung) — and a slow provider chain could push
+a wave past the deadline and get the serverless function killed mid-flight, destroying the
+partial state the budget exists to protect.
+
+**Root cause (code):** the deadline was enforced BETWEEN tasks/rounds, never per call; the
+engine relied on each adapter's own transport timeout, which a present or future adapter may
+not honour, and which stacks across the registry's provider-fallback chain and retries.
+
+**Fix (`src/research/adaptive.ts`, `src/research/flow-runner.ts`):**
+
+- `CAPABILITY_SLICE_MS` (60s) + `capabilitySlice()` — the longest ONE capability call may hold
+its wave open; sized to cover one provider chain including its bounded retries.
+- `executeCapabilityBounded()` — races each call against its slice; on overrun it resolves with
+an honest `TIMEOUT` `TOOL_RESULT` (EMPTY, no outputs — a failure is never negative evidence and
+never fabricates output) while the independent siblings continue. The provider call is
+abandoned, not force-aborted (adapters own their transports); the engine stops waiting.
+- Both the adaptive loop and the flow runner dispatch every capability through it, so any
+capability registered through the existing architecture inherits the bound.
+
+Nothing here weakens an evidence-quality gate: coverage validation, the outcome contract
+(`EVIDENCE_SUFFICIENT` / `MODEL_INSUFFICIENT_EVIDENCE` / `REQUIREMENT_GAPS_UNRESOLVED` /
+`TIME_BUDGET_EXHAUSTED` / `MODEL_FAILURE`) and the FAILED lifecycle are unchanged.
+
+---
+
+## Verification (this pass)
+
+- Backend `vitest run`: **118 files, 1411 passed, 29 skipped, 0 failed** (exit 0).
+- Backend `tsc --noEmit` and `tsc --noEmit -p tsconfig.api.json`: clean (exit 0).
+- Frontend `tsc --noEmit` clean; `vitest run` 126 passed; production `vite build` success.
+- New suite `tests/research/capability-timeout.test.ts` (6 tests): the `capabilitySlice` /
+`memberDeadline` primitives; a hung capability abandoned as `TIMEOUT`/EMPTY with no evidence
+while its fast sibling's evidence survives, asserted for **crypto, equity and commodity**
+capability pairs; the same law through the shared flow runner (Flow 6).
+
+**Limitation:** no live smoke test was possible (no provider/model credentials in the build
+environment); the behaviour is proven deterministically with controlled mocks, not against live
+providers.

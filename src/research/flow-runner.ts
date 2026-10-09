@@ -18,7 +18,7 @@
  */
 
 import type { CapabilityRegistry } from "../adapters/capability-registry.js";
-import { PLANNER_CAPABILITIES, partialDecision, engineMarketClass, retrievalBrief, withinWaveBudget } from "./adaptive.js";
+import { PLANNER_CAPABILITIES, partialDecision, engineMarketClass, retrievalBrief, withinWaveBudget, capabilitySlice, executeCapabilityBounded } from "./adaptive.js";
 import { computeConfidence, type ConfidenceComponents } from "./confidence.js";
 import { validateContractOutcome } from "./contract-boundary.js";
 import { type QuestionResolution } from "./question-resolution.js";
@@ -260,6 +260,12 @@ export interface FlowRunnerOptions {
   readonly deadlineMs?: number;
   /** Wall clock one capability wave needs before it may START (`RESEARCH_TASK_WINDOW_MS`). */
   readonly taskWindowMs?: number;
+  /**
+   * Wall clock a SINGLE capability call may consume (`CAPABILITY_SLICE_MS` by default). A call
+   * that outlives it is abandoned with an honest TIMEOUT result so it cannot starve the
+   * independent capabilities sharing its wave. Injectable for deterministic tests.
+   */
+  readonly capabilitySliceMs?: number;
   readonly now?: () => Date;
   /** F0 SSE seam: optional listener for REAL lifecycle events (never model reasoning/payloads). */
   readonly onProgress?: ProgressListener;
@@ -639,7 +645,17 @@ async function executeBatch(
       const { capability } = call;
       const parallel = workerCount > 1;
       options.onProgress?.(progressEvent("capability_started", at(), `capability ${capability} started`, { capability }));
-      const result = await options.registry.execute(capability, { ...(options.capabilityParams ?? {}) }, systemOrigin, at());
+      // ONE SLICE PER CAPABILITY (scheduler contract): a hung or runaway capability is
+      // abandoned at its slice boundary so it cannot hold the run (or a sibling worker) open.
+      // The run's overall deadline is unchanged (checked between rounds).
+      const result = await executeCapabilityBounded(
+        options.registry,
+        capability,
+        { ...(options.capabilityParams ?? {}) },
+        systemOrigin,
+        at(),
+        capabilitySlice(options.capabilitySliceMs),
+      );
       options.onProgress?.(progressEvent("capability_completed", at(), `capability ${capability} completed: ${result.failure.type === "NONE" ? result.completeness : `failed (${result.failure.type})`}`, { capability, ...(result.failure.type === "NONE" ? { completeness: result.completeness } : { failureType: result.failure.type }) }));
       const evidenceIds: string[] = [];
       let duplicatesSkipped = 0;
