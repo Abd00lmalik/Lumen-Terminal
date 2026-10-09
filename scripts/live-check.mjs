@@ -4,6 +4,11 @@
  * markers honestly. Usage: node scripts/live-check.mjs [question ...]
  */
 const BASE = process.env.LUMEN_BASE ?? "https://asklumen.vercel.app";
+/* Production gates every non-health route behind a Firebase ID token. When LUMEN_ID_TOKEN
+   is set (obtained from a real email-link sign-in — see docs/runbooks/manual-smoke-test.md),
+   send it as a bearer credential so the live engine can actually be exercised. With no token
+   the checks still run and honestly report the typed 401. */
+const TOKEN = process.env.LUMEN_ID_TOKEN ?? "";
 const DEFAULT_QUESTIONS = [
   "What is driving oil prices this week?",
   "What macro conditions favor risk assets right now?",
@@ -30,7 +35,10 @@ async function ask(question) {
   try {
     const res = await fetch(`${BASE}/api/research`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(TOKEN === "" ? {} : { authorization: `Bearer ${TOKEN}` }),
+      },
       body: JSON.stringify({ message: question }),
       signal: controller.signal,
     });
