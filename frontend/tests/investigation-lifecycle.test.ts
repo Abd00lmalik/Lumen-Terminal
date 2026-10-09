@@ -157,7 +157,13 @@ describe("2/3/8 — source guards", () => {
   });
 
   it("the empty-research hint reflects the lifecycle instead of always saying 'first investigation'", () => {
-    expect(workspacePage).toMatch(/Ask a question to start a new investigation\./);
+    // The hint is decided ONCE in the rail's state function, keyed on the thread's existence;
+    // the page derives that from the same lifecycle it shows everywhere else.
+    const researchView = readFileSync(join(SRC, "pages", "researchView.ts"), "utf8").replace(/\r\n/g, "\n");
+    expect(researchView).toMatch(/Ask a question to start a new investigation\./);
+    expect(researchView).toMatch(/Open a run from this investigation to see its research state\./);
+    expect(workspacePage).toMatch(/hasInvestigation: investigation !== undefined && lifecycle !== "NO_INVESTIGATION"/);
+    expect(workspacePage).toMatch(/<ResearchStateRail state=\{railState\}/);
   });
 
   it("the page never substitutes an older investigation for 'no current investigation'", () => {

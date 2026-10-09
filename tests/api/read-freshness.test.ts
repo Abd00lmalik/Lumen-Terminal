@@ -13,6 +13,7 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildApi } from "../../src/api/server.js";
+import { toRunRecord } from "../../src/api/research-app.js";
 import { CapabilityRegistry } from "../../src/adapters/capability-registry.js";
 import { resetIdCounters } from "../../src/domain/ids.js";
 import { MemoryStore } from "../../src/persistence/index.js";
@@ -20,6 +21,7 @@ import { Workspace } from "../../src/domain/workspace.js";
 import { FakeModelProvider } from "../model/fakes.js";
 import type { FastifyInstance } from "fastify";
 import type { ProvenanceOrigin } from "../../src/domain/provenance.js";
+import type { ResearchResponseDTO } from "../../src/api/dto.js";
 
 const trader: ProvenanceOrigin = { kind: "trader", detail: "test" };
 const T0 = new Date("2026-03-01T08:00:00.000Z");
@@ -92,6 +94,70 @@ describe("fresh aggregate read (D7/D5): GET /api/research/:ref", () => {
 
     const missing = await app.inject({ method: "GET", url: "/api/research/rs_999999" });
     expect(missing.statusCode).toBe(404); // honest NOT_FOUND, not a freshness artifact
+    await app.close();
+  });
+});
+
+/** A minimal valid retained run record whose outcome is the record's own verdict. */
+function recordWithOutcome(researchRef: string, outcome: ResearchResponseDTO["outcome"]): ResearchResponseDTO {
+  return {
+    requestId: `req-${researchRef}`,
+    action: "RESEARCH",
+    outcome,
+    answer: {
+      answer: "recorded verdict",
+      supportingReasons: [],
+      opposingReasons: [],
+      counterevidenceStatus: "NONE_ASSESSED_PLACEHOLDER" as never,
+      confidence: "MODERATE",
+      keyUncertainty: "",
+      implication: "",
+      citedObjectRefs: [],
+    },
+    limitations: [],
+    researchGaps: [],
+    researchRef,
+    evidenceRefs: [],
+    evidence: [],
+    judgments: [],
+  };
+}
+
+describe("fresh history list (R1): GET /api/research", () => {
+  it("absorbs the other instance's run record, so the row carries the record's OUTCOME beside its FAILED lifecycle status", async () => {
+    const store = new MemoryStore();
+    const ws = new Workspace();
+    const question = "What happened to BTC?";
+    const r = ws.addResearch({ objective: question, question, flow: "WHAT_HAPPENED" }, trader, T0);
+    ws.transitionResearch(r.id, "ACTIVE", trader, "run started", T0);
+    // The production symptom's lifecycle half: the run ended FAILED on this instance.
+    ws.transitionResearch(r.id, "FAILED", trader, "run could not complete", T0);
+    await store.save(ws.toSnapshot());
+    const app = await warmApp(store); // loads with NO retained record for this run
+
+    type Row = { ref: string; status: string; outcome?: string; degraded?: boolean };
+    const list = async (): Promise<Row[]> => (await app.inject({ method: "GET", url: "/api/research" })).json() as Row[];
+
+    // Warm read: no record here → no outcome, honest degraded flag, lifecycle status only.
+    const beforeRow = (await list()).find((row) => row.ref === r.id)!;
+    expect(beforeRow.status).toBe("FAILED");
+    expect(beforeRow.outcome).toBeUndefined();
+    expect(beforeRow.degraded).toBe(true);
+
+    // Another instance retains the REAL record for the SAME run — its own outcome: INSUFFICIENT.
+    const other = (await store.load())!;
+    other.saveResearchResponse(r.id, toRunRecord(recordWithOutcome(r.id, "INSUFFICIENT")));
+    await store.save(other.toSnapshot());
+
+    // Absorb-then-list: the row now speaks the record's vocabulary — FAILED (lifecycle,
+    // untouched) beside INSUFFICIENT (the record), no degraded flag. Before the fix the warm
+    // instance served the first read forever: History said FAILED, the opened run said
+    // INSUFFICIENT, for one and the same record.
+    const row = (await list()).find((entry) => entry.ref === r.id)!;
+    expect(row.outcome).toBe("INSUFFICIENT");
+    expect(row.status).toBe("FAILED");
+    expect(row.degraded).toBeUndefined();
+
     await app.close();
   });
 });

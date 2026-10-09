@@ -16,6 +16,7 @@ import { CapabilityRegistry } from "../../src/adapters/capability-registry.js";
 import { ResearchApp } from "../../src/api/research-app.js";
 import { resetIdCounters } from "../../src/domain/ids.js";
 import { beginRun, endRun } from "../../src/domain/run-context.js";
+import { createTurn } from "../../src/domain/investigation.js";
 import { routeConversation, topicSwitchVerdict } from "../../src/lui/conversation-routing.js";
 import { buildInvestigationContext, renderInvestigationContext } from "../../src/research/investigation-context.js";
 import { deriveInvestigationState } from "../../src/research/investigation-state.js";
@@ -409,6 +410,56 @@ describe("TEST 11 — conversation summary", () => {
     const response = cumulativeSynthesisResponse(state);
     expect(response.confidence).toBe("UNKNOWN");
     expect(response.answer).toMatch(/research context, not a recommendation/i);
+  });
+});
+
+describe("TEST 11b — run-count consistency: the in-flight run counts exactly once", () => {
+  it("counts the thread's run before the link lands, and never twice after it", async () => {
+    const a = await app();
+    await a.submitResearchRequest(Q1);
+    const ws = a.getWorkspace();
+    const inv = ws.currentInvestigation()!;
+    expect(deriveInvestigationState(ws, ws.getInvestigation(inv.id)!).runCount).toBe(1);
+
+    // IN FLIGHT: a second submission's run exists — stamped with its investigation at
+    // creation (run context) — but its turn has not linked it into investigation.runRefs
+    // yet. Both members of the submission share one run id: they count as ONE run.
+    beginRun({ runId: "run_000777", userQuestion: Q2, investigationId: inv.id });
+    const memberA = ws.addResearch({ objective: "internal plan step", question: `internal objective: ${Q2}`, flow: "WHAT_HAPPENED" }, trader);
+    const memberB = ws.addResearch({ objective: "synthesis step", question: `internal objective: ${Q2}`, flow: "WHAT_HAPPENED" }, trader);
+    endRun("run_000777");
+    expect(memberB.runId).toBe(memberA.runId);
+
+    const beforeLink = deriveInvestigationState(ws, ws.getInvestigation(inv.id)!);
+    // 1 linked + 1 in-flight submission — the N-1 defect said 1 inside the very synthesis
+    // answer the rail then showed as 2.
+    expect(beforeLink.runCount).toBe(2);
+    const response = cumulativeSynthesisResponse(beforeLink);
+    expect(response.answer).toMatch(/Across 2 research runs/);
+    // Content fields read the LINKED runs only: the in-flight run's absence from the thread's
+    // established state is honest — the count is the only field that counts it early.
+    expect(beforeLink.findings).toEqual(deriveInvestigationState(ws, ws.getInvestigation(inv.id)!).findings);
+
+    // AFTER THE LINK: the same run, still counted once — the count does not jump to 3, and
+    // the second member of the same submission never adds a phantom run either.
+    ws.appendTurn(
+      createTurn({ investigationId: inv.id, role: "LUMEN", content: "done", intent: "RESEARCH", continuedInvestigation: true, researchRunId: memberA.id }),
+      memberA.id,
+    );
+    const afterLink = deriveInvestigationState(ws, ws.getInvestigation(inv.id)!);
+    expect(afterLink.runCount).toBe(2);
+    expect(cumulativeSynthesisResponse(afterLink).answer).toMatch(/Across 2 research runs/);
+  });
+
+  it("an investigation-scoped run never counts toward ANOTHER thread", () => {
+    const ws = new Workspace();
+    const invA = ws.addInvestigation({ title: "A", subject: "Bitcoin" }, trader);
+    const invB = ws.addInvestigation({ title: "B", subject: "Ethereum" }, trader);
+    beginRun({ runId: "run_000888", userQuestion: Q1, investigationId: invA.id });
+    ws.addResearch({ objective: "step", question: `internal: ${Q1}`, flow: "WHAT_HAPPENED" }, trader);
+    endRun("run_000888");
+    expect(deriveInvestigationState(ws, ws.getInvestigation(invA.id)!).runCount).toBe(1);
+    expect(deriveInvestigationState(ws, ws.getInvestigation(invB.id)!).runCount).toBe(0);
   });
 });
 

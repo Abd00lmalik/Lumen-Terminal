@@ -1076,9 +1076,10 @@ export class ResearchApp {
    */
   listResearch(options: ResearchListOptions = {}): ResearchRunSummaryDTO[] {
     const ws = this.ws();
-    // NOTE: listResearch stays SYNCHRONOUS (an SSE-critical hot path); freshness is served by
-    // the caller-side absorption in submitResearchRequest/persist and by getResearch. The
-    // CURRENT pointer it reports is computed from the absorbed graph at snapshot time.
+    // NOTE: listResearch stays SYNCHRONOUS (an SSE-critical hot path); freshness for the HTTP
+    // list route is served by listResearchFresh (absorb-then-list), and single-run freshness by
+    // getResearch. The CURRENT pointer it reports is computed from the absorbed graph at
+    // snapshot time.
     const all = ws.listResearch();
     const activeId = ws.getContinuitySnapshot().activeResearchTarget?.id;
     const groups = new Map<string, Research[]>();
@@ -1168,6 +1169,20 @@ export class ResearchApp {
     const offset = options.offset ?? 0;
     const limit = options.limit ?? DEFAULT_RESEARCH_LIMIT;
     return sorted.slice(offset, offset + limit);
+  }
+
+  /**
+   * List read with EXECUTION READ FRESHNESS (the list-side twin of `getResearchFresh` /
+   * `listInvestigationsFresh`): absorb another instance's completed runs — including their
+   * response records — before projecting the history rows. Without it a warm instance serves
+   * rows whose record lookup misses (`outcome` absent, `degraded: true`), so History showed the
+   * lifecycle status FAILED while the opened run for the very same record said INSUFFICIENT.
+   * `listResearch` stays synchronous for its in-process hot-path callers; the HTTP route reads
+   * through this method.
+   */
+  async listResearchFresh(options: ResearchListOptions = {}): Promise<ResearchRunSummaryDTO[]> {
+    await this.refreshExecutionState();
+    return this.listResearch(options);
   }
 
   /**

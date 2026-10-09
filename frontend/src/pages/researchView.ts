@@ -186,6 +186,93 @@ export function railBelongsToActive(input: RailScopeInput): boolean {
   return input.snapshotRef === input.activeRef;
 }
 
+// ---------------------------------------------------------------------------
+// "Research state" rail section (four distinct facts, decided ONCE)
+// ---------------------------------------------------------------------------
+
+/** The selected run's own facts for the rail: identity, record-first status, row facts. */
+export interface ActiveRunState {
+  readonly ref: string;
+  /** Record-first: the turn's displayStatus (summary/transport) ?? the record's outcome. */
+  readonly status: string;
+  readonly flow?: string;
+  readonly evidenceCount?: number;
+}
+
+/** The continuity snapshot's active research (its own fact; only ever a COMPLETED run). */
+export interface SnapshotActiveState {
+  readonly ref: string;
+  readonly flow: string;
+  readonly status: string;
+  readonly evidenceCount: number;
+}
+
+export interface ResearchRailInput {
+  /** EXECUTION state: a run is in flight right now. */
+  readonly running: boolean;
+  readonly runningQuestion?: string;
+  readonly runningStage?: string;
+  /** SELECTED RUN: present whenever the active result is a research run (persisted or live). */
+  readonly activeRun?: ActiveRunState;
+  /** Snapshot's active research — the fallback fact, scoped by railBelongsToActive. */
+  readonly snapshotActive?: SnapshotActiveState;
+  readonly railScoped: boolean;
+  /** A thread exists (investigation selected with lifecycle beyond NO_INVESTIGATION). */
+  readonly hasInvestigation: boolean;
+}
+
+export type ResearchRailState =
+  | { readonly kind: "running"; readonly question?: string; readonly stage: string }
+  | {
+      readonly kind: "run";
+      readonly ref: string;
+      readonly status: string;
+      readonly flow?: string;
+      readonly evidenceCount?: number;
+    }
+  | { readonly kind: "empty"; readonly hint: string };
+
+/**
+ * THE ONE rail decision (the acceptance failure was "No active research" beside a live
+ * investigation with a persisted run): execution state, the selected run and the persisted
+ * lifecycle are DISTINCT facts, read in that order —
+ *
+ * 1. running            → execution state only;
+ * 2. a selected run     → its OWN persisted state, record-first (INSUFFICIENT/FAILED/COMPLETED
+ *                         from the turn record — never re-inferred), whatever the snapshot says.
+ *                         This is what makes an INSUFFICIENT or FAILED run show its state instead
+ *                         of the empty state (snapshot.activeResearch only ever holds COMPLETED
+ *                         runs, and member-ref ≠ turn-ref broke the old equality gate);
+ * 3. snapshot + scoped  → the COMPLETED active research the snapshot holds;
+ * 4. genuinely empty    → Empty, with the hint matching whether a thread exists at all.
+ */
+export function researchRailState(input: ResearchRailInput): ResearchRailState {
+  if (input.running) {
+    return { kind: "running", ...(input.runningQuestion !== undefined ? { question: input.runningQuestion } : {}), stage: input.runningStage ?? "starting" };
+  }
+  if (input.activeRun !== undefined) {
+    return {
+      kind: "run",
+      ref: input.activeRun.ref,
+      status: input.activeRun.status,
+      ...(input.activeRun.flow !== undefined ? { flow: input.activeRun.flow } : {}),
+      ...(input.activeRun.evidenceCount !== undefined ? { evidenceCount: input.activeRun.evidenceCount } : {}),
+    };
+  }
+  if (input.snapshotActive !== undefined && input.railScoped) {
+    return { kind: "run", ref: input.snapshotActive.ref, status: input.snapshotActive.status, flow: input.snapshotActive.flow, evidenceCount: input.snapshotActive.evidenceCount };
+  }
+  return {
+    kind: "empty",
+    hint: input.hasInvestigation
+      // The thread HAS results; this rail simply does not belong to a selected run right now.
+      // Saying "no completed run yet" there was a second, contradictory statement about the
+      // same investigation.
+      ? "Open a run from this investigation to see its research state."
+      : "Ask a question to start a new investigation.",
+  };
+}
+
 /**
  * COMPLETION WITHOUT A PAINT GAP (pure): the stream's terminal result merged into the
  * displayed turns for the SAME render that flips `running` to false. The append-effect then

@@ -26,9 +26,11 @@ import {
   linkedRunIsPending,
   mergePendingLiveTurn,
   railBelongsToActive,
+  researchRailState,
   selectActiveTurnRef,
   workspaceLifecycle,
 } from "./researchView.js";
+import { ResearchStateRail } from "../components/ResearchStateRail.js";
 import type { IdentifiedTurn } from "./researchView.js";
 import { listInvestigations, startNewInvestigation } from "../api/research.js";
 import type { InvestigationDto } from "../api/types.js";
@@ -864,40 +866,57 @@ export function ResearchWorkspacePage() {
     ...(ws.snapshot?.activeResearch?.ref !== undefined ? { snapshotRef: ws.snapshot.activeResearch.ref } : {}),
     ...(activeRef !== undefined ? { activeRef } : {}),
   });
+  /**
+   * THE RAIL'S FOUR FACTS, decided once in `researchRailState` (see its law there). The
+   * selected run's own record decides its status — record-first, never re-inferred — so a
+   * persisted INSUFFICIENT/FAILED run shows its state instead of the empty state, and the
+   * row join supplies the run row's flow/evidence facts.
+   */
+  const activeTurnForRail = activeRef !== undefined
+    ? displayRuns.find((t) => {
+        const id = identifyTurn(t);
+        return id.researchRef === activeRef || id.requestId === activeRef;
+      })
+    : undefined;
+  const activeRunRow = activeRef !== undefined
+    ? (investigation?.runs ?? []).find((r) => r.researchRef === activeRef)
+    : undefined;
+  const railActiveRun = activeTurnForRail !== undefined && activeTurnForRail.run.researchRef !== undefined
+    ? {
+        ref: activeTurnForRail.run.researchRef,
+        status: activeTurnForRail.displayStatus ?? activeTurnForRail.run.outcome,
+        ...(activeRunRow !== undefined ? { flow: activeRunRow.flow, evidenceCount: activeRunRow.evidenceCount } : {}),
+      }
+    : undefined;
+  const railState = researchRailState({
+    running: stream.running,
+    ...(stream.running
+      ? {
+          runningQuestion: stream.question,
+          runningStage: stream.stages[stream.stages.length - 1]?.name ?? "starting",
+        }
+      : {}),
+    ...(railActiveRun !== undefined ? { activeRun: railActiveRun } : {}),
+    ...(ws.snapshot?.activeResearch !== undefined
+      ? {
+          snapshotActive: {
+            ref: ws.snapshot.activeResearch.ref,
+            flow: ws.snapshot.activeResearch.flow,
+            status: ws.snapshot.activeResearch.status,
+            evidenceCount: ws.snapshot.activeResearch.evidenceRefs.length,
+          },
+        }
+      : {}),
+    railScoped,
+    hasInvestigation: investigation !== undefined && lifecycle !== "NO_INVESTIGATION",
+  });
 
   return (
     <AppShell
       title="Research"
       contextRail={
         <>
-          <div className="rail-section">
-            <div className="rail-title">Research state</div>
-            {stream.running ? (
-              <>
-                <KV k="research" v="running" />
-                <div style={{ fontSize: 12, lineHeight: 1.5, color: "var(--text-3)", margin: "6px 0" }}>{stream.question}</div>
-                <KV k="stage" v={stream.stages[stream.stages.length - 1]?.name ?? "starting"} />
-              </>
-            ) : ws.snapshot?.activeResearch !== undefined && railScoped ? (
-              <>
-                <KV k="research" v={ws.snapshot.activeResearch.ref} />
-                <KV k="flow" v={ws.snapshot.activeResearch.flow.replace(/_/g, " ").toLowerCase()} />
-                <KV k="status" v={ws.snapshot.activeResearch.status} />
-                <KV k="evidence" v={String(ws.snapshot.activeResearch.evidenceRefs.length)} />
-              </>
-            ) : (
-              <Empty
-                title="No active research"
-                hint={investigation !== undefined && lifecycle !== "NO_INVESTIGATION"
-                  // The thread HAS results; this rail simply does not belong to a selected
-                  // run right now. Saying "no completed run yet" there was a second,
-                  // contradictory statement about the same investigation.
-                  ? "Open a run from this investigation to see its research state."
-                  : "Ask a question to start a new investigation."}
-              />
-            )}
-            <button className="btn sm ghost" style={{ marginTop: 8 }} onClick={() => void refresh()}>Refresh state ↻</button>
-          </div>
+          <ResearchStateRail state={railState} onRefresh={() => void refresh()} />
           {ws.thesis !== undefined && (
             <div className="rail-section">
               <div className="rail-title">Active thesis</div>
@@ -1130,10 +1149,14 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
         <div className="bubble">{turn.question}</div>
       </div>
 
-      {/* RESEARCH STATUS: explicit state, immediately after the question. */}
+      {/* RESEARCH STATUS: explicit state, immediately after the question. `{" "}` between the
+          text-bearing children so the row reads as separate labels in text extraction /
+          screen readers — ignored by flex layout, so spacing is unchanged. */}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "0 0 10px" }}>
         <StatusBadge status={shownStatus} />
+        {" "}
         <span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)" }}>{run.action.toLowerCase()}</span>
+        {" "}
         {/* FOLLOW-UP LINEAGE: the thread relationship is DATA on the run, shown beside the
             outcome — a follow-up announces what it continues instead of silently standing in
             for a fresh answer. Depth is the run's own stamp; no client-side inference. */}
@@ -1142,12 +1165,15 @@ function RunView({ turn, evidenceById, onInspectEvidence, onConfirm, save }: {
             follow-up · depth {run.followUpDepth}{run.parentResearchId !== undefined ? ` · of ${run.parentResearchId}` : ""}
           </span>
         )}
+        {" "}
         {resolution !== undefined && (
           <span className="badge gray" title="Engine question-resolution verdict">question {resolution.status.replace(/_/g, " ").toLowerCase()}</span>
         )}
+        {" "}
         {run.stoppedBecause !== undefined && run.stoppedBecause !== "EVIDENCE_SUFFICIENT" && (
           <span className="badge gray" title="Why the engine stopped">stopped: {run.stoppedBecause.replace(/_/g, " ").toLowerCase()}</span>
         )}
+        {" "}
         {recordTier !== "FULL" && (
           <span className="badge amber" title="This run's record is not fully retained">
             {recordTier === "JUDGMENT" ? "conclusion only" : "summary only"}
@@ -1484,9 +1510,13 @@ function RunDiagnostics({ run, recordTier }: { run: RunLike; recordTier: Researc
           <>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               <KV k="coverage" v={d.coverage} />
+              {" "}
               <KV k="gate" v={d.completionGate} />
+              {" "}
               {d.confidence !== undefined && <KV k="confidence" v={d.confidence} />}
+              {" "}
               {d.questionType !== undefined && <KV k="question type" v={d.questionType} />}
+              {" "}
               <KV k="recovery rounds" v={String(d.recoveryRounds)} />
             </div>
             {d.confidenceBasis !== undefined && d.confidenceBasis !== "" && (
@@ -1498,7 +1528,7 @@ function RunDiagnostics({ run, recordTier }: { run: RunLike; recordTier: Researc
                 {d.requirements.map((r, i) => (
                   <div key={i} style={{ fontSize: 12, padding: "4px 0", borderTop: i === 0 ? undefined : "1px dashed var(--line)" }}>
                     <span className="mono" style={{ color: "var(--text-3)" }}>{r.importance}/{r.role ?? "CORE"} · {r.status}</span>{" "}
-                    {r.description}
+                    {r.description}{" "}
                     <span className="mono" style={{ color: "var(--text-3)" }}> · {r.evidenceCount} evidence</span>
                     {r.unresolvedReason !== undefined && <div style={{ color: "var(--text-3)" }}>unresolved: {r.unresolvedReason}</div>}
                   </div>
@@ -1521,6 +1551,7 @@ function RunDiagnostics({ run, recordTier }: { run: RunLike; recordTier: Researc
                 {d.causalLinks.map((l, i) => (
                   <div key={i} style={{ fontSize: 12, padding: "2px 0" }}>
                     <span className="mono">{l.source !== undefined ? `${l.source} → ` : ""}{l.targetLabel}</span> · {l.status}
+                    {" "}
                     {d.weakestCausalLink === l.target && <span className="badge amber" style={{ marginLeft: 6 }}>weakest link</span>}
                   </div>
                 ))}

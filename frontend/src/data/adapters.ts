@@ -10,9 +10,10 @@
 import type {
   EvidenceDto, JudgmentDto, ResearchDto, ThesisDto, ThesisAssessmentDto,
   MonitorDto, MemoryDto, SavedArtifactDto, ContinuitySnapshotDto, ResearchResponseDto,
-  SavedItemDto, SavedItemSummaryDto,
+  SavedItemDto, SavedItemSummaryDto, ResearchRunSummaryDto,
 } from "../api/types.js";
 import { isResearchRef } from "./identity.js";
+import { historyDisplayStatus } from "./history.js";
 import type {
   EvidenceItem, JudgmentView, ResearchSummary, ThesisView, ThesisAssessmentView,
   MonitorView, MemoryItem, SavedArtifactView, ChallengeView, WorkspaceListItem, SavedItemView,
@@ -248,7 +249,7 @@ export interface HomeData {
   readonly artifacts: readonly SavedArtifactView[];
 }
 
-export function homeDataFromSnapshot(s: ContinuitySnapshotDto, allResearch: readonly ResearchDto[]): HomeData {
+export function homeDataFromSnapshot(s: ContinuitySnapshotDto, allResearch: readonly ResearchRunSummaryDto[]): HomeData {
   // RESEARCH HISTORY IS RESEARCH ONLY (B8): monitor rows used to be appended to the research
   // list, so clicking one navigated to `/research/mon_...` — an unresolvable reference that
   // produced the "history entry is not available" panel the identity bug was blamed for.
@@ -260,7 +261,12 @@ export function homeDataFromSnapshot(s: ContinuitySnapshotDto, allResearch: read
       ref: r.ref,
       title: r.question.length > 0 ? r.question : r.objective,
       kind: "research" as const,
-      status: r.isCurrent === true ? "CURRENT" : r.status,
+      // OUTCOME FIRST (History parity): the badge shows the retained record's outcome and
+      // falls back to lifecycle status only when no record exists — a Home row and its
+      // opened run can never disagree. Current-ness is a DIFFERENT fact and stays its own
+      // badge instead of hiding the outcome behind "CURRENT".
+      status: historyDisplayStatus(r),
+      isCurrent: r.isCurrent,
       updatedAt: runTimestamp(r),
       meta: r.flow.replace(/_/g, " ").toLowerCase(),
     }));

@@ -248,4 +248,6 @@ export interface WorkspaceListItem {
   readonly status: string;
   readonly updatedAt: string;
   readonly meta: string;
+  /** Explicit current-ness of a research row (data from the list endpoint, never inferred). */
+  readonly isCurrent?: boolean;
 }

@@ -168,15 +168,20 @@ function ResearchQuality({ result }: { result: ResearchResponseDto }) {
       <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 12.5 }}>
           {d.questionType !== undefined && <StatusBadge status={d.questionType} />}
+          {" "}
           <span className="counts">coverage {d.coverage.toLowerCase()}</span>
+          {" "}
           {d.confidence !== undefined && <span className="counts">confidence {d.confidence.toLowerCase()} (engine-computed)</span>}
+          {" "}
           <span className="counts">gate {d.completionGate}</span>
+          {" "}
           {d.recoveryRounds > 0 && <span className="counts">{d.recoveryRounds} recovery round(s)</span>}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {[...byRole.entries()].map(([role, c]) => (
             <div key={role} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
               <span style={{ color: "var(--text-2)" }}>{role.toLowerCase()} requirements</span>
+              {" "}
               <span className="counts">{c.covered}/{c.total} established</span>
             </div>
           ))}
@@ -190,6 +195,7 @@ function ResearchQuality({ result }: { result: ResearchResponseDto }) {
                   {l.source !== undefined ? `${l.source.toLowerCase()} → ${l.targetLabel}` : l.targetLabel}
                   {l.target === d.weakestCausalLink ? " · weakest link" : ""}
                 </span>
+                {" "}
                 <span className="counts" style={l.status === "SUPPORTED" ? undefined : { color: "var(--warn)" }}>
                   {l.status.toLowerCase().replace(/_/g, " ")}
                 </span>
@@ -203,6 +209,7 @@ function ResearchQuality({ result }: { result: ResearchResponseDto }) {
             {d.requirements.map((r) => (
               <div key={r.description} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12 }}>
                 <span style={{ color: "var(--text-2)" }}>{r.role ?? "CORE"} · {r.description}</span>
+                {" "}
                 <span className="counts">{r.status}{r.status === "SATISFIED" ? ` (${r.evidenceCount})` : ""}</span>
               </div>
             ))}

@@ -454,7 +454,10 @@ export function registerRoutes(app: FastifyInstance, context: RouteContext): voi
   // ------------------------------------------------------------------
 
   app.get("/api/research", {
-    handler: withErrors(async (req) => (await appForRequest(req)).listResearch(readResearchListOptions(req.query))),
+    // FRESH list read: absorb another instance's completed runs (and their response records)
+    // before projecting the history rows, so a row and its opened run can never disagree
+    // about the same record (row said FAILED while the report said INSUFFICIENT).
+    handler: withErrors(async (req) => (await appForRequest(req)).listResearchFresh(readResearchListOptions(req.query))),
   });
   app.get("/api/research/:ref", {
     // FRESH aggregate read (D4/D5/D7): absorbs execution state before resolving the ref so a

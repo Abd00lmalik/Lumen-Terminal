@@ -11,10 +11,10 @@ import { Panel, StatusBadge, Empty, Note, timeAgo } from "../components/ui.js";
 import { BackendDownNote } from "../components/BackendDownNote.js";
 import { listResearch, getWorkspace } from "../api/index.js";
 import { homeDataFromSnapshot, thesisFromDto } from "../data/adapters.js";
+import { historyDisplayStatus } from "../data/history.js";
 import { isResearchRef } from "../data/identity.js";
 import { listTheses } from "../api/index.js";
 import type { WorkspaceListItem, ThesisView } from "../data/types.js";
-import type { ResearchDto } from "../api/index.js";
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -58,7 +58,10 @@ export function HomePage() {
             ref: r.ref,
             title: r.question.length > 0 ? r.question : r.objective,
             kind: "research" as const,
-            status: r.isCurrent === true ? "CURRENT" : r.status,
+            // OUTCOME FIRST (History parity): record outcome verbatim, lifecycle status only
+            // when no record exists; current-ness stays its own badge (see HistoryPage).
+            status: historyDisplayStatus(r),
+            isCurrent: r.isCurrent === true,
             updatedAt: r.updatedAt ?? "",
             meta: r.flow.replace(/_/g, " ").toLowerCase(),
           })));
@@ -74,7 +77,10 @@ export function HomePage() {
     })();
   }, []);
 
-  const active = research.filter((r) => (r as WorkspaceListItem & { status?: string }).status === "ACTIVE" || (r as { status?: string }).status === "CURRENT");
+  // "Current research" partition: an in-flight run (lifecycle ACTIVE) or the run the
+  // workspace points at (explicit isCurrent from the list endpoint — never inferred from
+  // status text or position).
+  const active = research.filter((r) => r.status === "ACTIVE" || r.isCurrent === true);
   const recent = research.filter((r) => !active.includes(r));
 
   return (
@@ -166,7 +172,10 @@ export function HomePage() {
                   <div className="row-title">{r.title}</div>
                   <div className="row-meta">{r.meta}{timeAgo(r.updatedAt) !== "" ? ` · ${timeAgo(r.updatedAt)}` : ""}</div>
                 </div>
-                <div className="row-right"><StatusBadge status={r.status} /></div>
+                <div className="row-right">
+                  <StatusBadge status={r.status} />{" "}
+                  {r.isCurrent === true && <span className="badge blue" title="The workspace's current research run">current</span>}
+                </div>
               </button>
             ))}
           </div>
@@ -207,7 +216,10 @@ export function HomePage() {
                 <div className="row-title">{r.title}</div>
                 <div className="row-meta">{r.meta}{timeAgo(r.updatedAt) !== "" ? ` · ${timeAgo(r.updatedAt)}` : ""}</div>
               </div>
-              <div className="row-right"><StatusBadge status={r.status} /></div>
+              <div className="row-right">
+                <StatusBadge status={r.status} />{" "}
+                {r.isCurrent === true && <span className="badge blue" title="The workspace's current research run">current</span>}
+              </div>
             </button>
           ))}
           {loaded && error === undefined && research.length === 0 && (
@@ -218,5 +230,3 @@ export function HomePage() {
     </AppShell>
   );
 }
-
-void ({} as unknown as ResearchDto);

@@ -161,16 +161,22 @@ export function HistoryPage() {
                           badge below — collapsing the two hid an INSUFFICIENT or FAILED run
                           behind a green "CURRENT". */}
                       <StatusBadge status={historyDisplayStatus(e)} />
+                      {" "}
                       {e.isCurrent === true && <span className="badge blue" title="The workspace's current research run">current view</span>}
+                      {" "}
                       {e.followUpDepth !== undefined && e.followUpDepth > 0 && (
                         <span className="badge gray" title="This run continues an earlier run of the same investigation">follow-up</span>
                       )}
+                      {" "}
                       {e.questionResolutionStatus !== undefined && (
                         <span className="badge gray" title="Engine question-resolution verdict">{e.questionResolutionStatus.replace(/_/g, " ").toLowerCase()}</span>
                       )}
+                      {" "}
                       {e.confidence !== undefined && <ConfidenceMeter confidence={e.confidence} />}
+                      {" "}
                       <span style={{ display: "flex", gap: 4 }}>
                         {e.saved === true && <span className="badge blue" title="A saved artifact derives from this run">saved</span>}
+                        {" "}
                         {e.degraded === true && <span className="badge amber" title="The full record is not retained; the conclusion is still real">partial record</span>}
                       </span>
                     </div>

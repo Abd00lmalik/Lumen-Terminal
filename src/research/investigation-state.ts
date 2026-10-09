@@ -45,12 +45,16 @@ function truncate(text: string, max = 220): string {
 /**
  * Derive the investigation's accumulated state from its runs.
  *
- * Runs are read through the investigation's OWN runRefs, so nothing from outside the thread can
- * enter the state — including a stale run from a previous investigation about the same asset.
+ * Facts, findings and every content field are read through the investigation's OWN runRefs, so
+ * nothing from outside the thread can enter the state — including a stale run from a previous
+ * investigation about the same asset. The RUN COUNT additionally counts this thread's run that
+ * is still in flight (see `unlinkedRunCount`): it is scoped by the same investigation stamp, so
+ * nothing foreign enters either.
  */
 export function deriveInvestigationState(ws: Workspace, investigation: Investigation): InvestigationState {
   const runs = ws.investigationRuns(investigation.id);
   const completed = runs.filter((r) => r.status === "COMPLETED");
+  const runCount = runs.length + unlinkedRunCount(ws, investigation.id, runs);
 
   const establishedFacts: InvestigationState["establishedFacts"][number][] = [];
   const findings: InvestigationState["findings"][number][] = [];
@@ -141,8 +145,35 @@ export function deriveInvestigationState(ws: Workspace, investigation: Investiga
     ...(thesis !== undefined ? { thesis } : {}),
     challenges,
     historicalComparisons,
-    runCount: runs.length,
+    runCount,
   };
+}
+
+/**
+ * THE TURN'S OWN RUN, COUNTED BEFORE IT IS LINKED (count-consistency law): a synthesis turn
+ * builds its answer ("Across N research runs") while the run it just produced is not yet in
+ * `investigation.runRefs` — the application links the run only AFTER the response is built —
+ * so a count over runRefs alone says N-1 inside the very answer the rail then shows as N.
+ * Research objects are stamped with their investigation at creation (run context), so the
+ * in-flight run is identifiable before linking. Each runId counts once, a run already
+ * represented in runRefs counts nowhere here, and content fields still read only the linked
+ * runs (they grow when the link lands). Post-link this returns 0, so the count is identical
+ * before and after linking.
+ */
+function unlinkedRunCount(ws: Workspace, investigationId: string, linked: readonly { readonly id: string; readonly runId?: string }[]): number {
+  const represented = new Set<string>();
+  for (const run of linked) {
+    represented.add(run.id);
+    if (run.runId !== undefined) represented.add(run.runId);
+  }
+  const unlinked = new Set<string>();
+  for (const run of ws.listResearch()) {
+    if (run.investigationRef !== investigationId) continue;
+    const key = run.runId ?? run.id;
+    if (represented.has(key) || represented.has(run.id)) continue;
+    unlinked.add(key);
+  }
+  return unlinked.size;
 }
 
 /** The blocking requirements a run reported, read from its retained diagnostics when present. */

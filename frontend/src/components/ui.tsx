@@ -86,7 +86,9 @@ export function Panel({ title, kicker, right, children }: {
       {(title || kicker || right) && (
         <header className="panel-head">
           {kicker && <span className="panel-kicker">{kicker}</span>}
+          {" "}
           {title && <span className="panel-title">{title}</span>}
+          {" "}
           {right && <span style={{ marginLeft: "auto" }}>{right}</span>}
         </header>
       )}
@@ -96,7 +98,7 @@ export function Panel({ title, kicker, right, children }: {
 }
 
 export function KV({ k, v }: { k: string; v: string }) {
-  return <div className="kv"><span className="k">{k}</span><span className="v">{v}</span></div>;
+  return <div className="kv"><span className="k">{k}</span>{" "}<span className="v">{v}</span></div>;
 }
 
 export function Note({ tone, children }: { tone?: "warn" | "info"; children: ReactNode }) {
