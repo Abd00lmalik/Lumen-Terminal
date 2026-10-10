@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { McpTransport, DEFAULT_MCP_ENDPOINT } from "../../../src/adapters/transports/mcp.js";
+import { McpTransport, DEFAULT_MCP_ENDPOINT, classifyMcpToolError } from "../../../src/adapters/transports/mcp.js";
 import { TransportError, Throttler } from "../../../src/adapters/transports/resilience.js";
 
 /**
@@ -327,5 +327,209 @@ describe("MCP transport boundary (final lock §7, failure-recovery.md §12–14)
     expect(sorted[2]!.start).toBeGreaterThanOrEqual(sorted[1]!.end);
     // …and total span reflects serialized spacing (slots 0/60/120), not simultaneous starts.
     expect(sorted[2]!.start).toBeGreaterThanOrEqual(2 * minIntervalMs - 15);
+  });
+});
+
+/**
+ * REGRESSION SUITE (2026-10-09): full-exchange deadline + retry classification.
+ * Production defects this guards:
+ * - the transport cleared its timeout after HEADERS arrived, so an SSE keep-alive body
+ *   could hold `response.text()` indefinitely — a capability stayed pending past every budget
+ * - tool-level `isError: true` was uniformly retriable, so deterministic rejections
+ *   ("Unknown action") wasted the whole bounded retry budget (3 × ~32s)
+ */
+describe("MCP transport; full-exchange deadline (regression 2026-10-09)", () => {
+  /** Handshake completes normally; tools/call returns headers immediately but the body hangs until abort. */
+  function stalledBodyFetch(): typeof fetch {
+    return (async (_url: unknown, init?: RequestInit) => {
+      const bodyText = init?.body === undefined ? "" : String(init.body);
+      const parsed = (() => { try { return JSON.parse(bodyText) as { method?: string }; } catch { return {}; } })();
+      if (parsed.method === "initialize") {
+        return new Response(
+          JSON.stringify({ jsonrpc: "2.0", id: 0, result: { protocolVersion: "2025-03-26", serverInfo: { name: "m", version: "1" }, capabilities: {} } }),
+          { status: 200, headers: { "mcp-session-id": "sid-stall" } },
+        );
+      }
+      if (parsed.method === "notifications/initialized") return new Response("", { status: 202 });
+      // Headers arrive; the body stream never completes (SSE ping loop / hung upstream).
+      const signal = init?.signal;
+      return {
+        status: 200,
+        headers: new Headers({ "content-type": "text/event-stream" }),
+        text: () =>
+          new Promise<string>((_resolve, reject) => {
+            if (signal?.aborted === true) {
+              const e = new Error("aborted");
+              e.name = "AbortError";
+              reject(e);
+              return;
+            }
+            signal?.addEventListener("abort", () => {
+              const e = new Error("aborted");
+              e.name = "AbortError";
+              reject(e);
+            }, { once: true });
+          }),
+      } as unknown as Response;
+    }) as typeof fetch;
+  }
+
+  it("a body that never completes times out as retriable TIMEOUT (was: hang forever past every budget)", async () => {
+    const transport = new McpTransport({
+      fetchImpl: stalledBodyFetch(),
+      requestTimeoutMs: 30,
+      retryPolicy: { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 5 },
+      retryOptions: { sleep: () => Promise.resolve() },
+      throttler: { minIntervalMs: 0 },
+    });
+    const started = Date.now();
+    const error = await transport.callTool("crypto_market", { action: "price" }).catch((e) => e);
+    expect(error).toBeInstanceOf(TransportError);
+    expect(error.failureType).toBe("TIMEOUT");
+    expect(error.retriable).toBe(true);
+    // Bounded: 2 attempts × 30ms — never the old 3 × 20s amplification.
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it("with a caller deadline, retries stop once the deadline is reached (budget outranks maxAttempts)", async () => {
+    const transport = new McpTransport({
+      fetchImpl: stalledBodyFetch(),
+      requestTimeoutMs: 20,
+      // Policy allows 5 attempts; the deadline allows roughly one.
+      retryPolicy: { maxAttempts: 5, baseDelayMs: 1, maxDelayMs: 5 },
+      retryOptions: { sleep: () => Promise.resolve() },
+      throttler: { minIntervalMs: 0 },
+    });
+    const started = Date.now();
+    const error = await transport
+      .callTool("crypto_market", { action: "price" }, { deadlineMs: started + 60 })
+      .catch((e) => e);
+    expect(error.failureType).toBe("TIMEOUT");
+    // Elapsed is bounded by the deadline, not by 5 × 20ms + backoff.
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it("a deadline already below the attempt floor fails fast as non-retriable TIMEOUT (no wasted attempt)", async () => {
+    const fetches: string[] = [];
+    const inner = stalledBodyFetch();
+    const transport = new McpTransport({
+      fetchImpl: (async (url: unknown, init?: RequestInit) => {
+        fetches.push(String(url));
+        return inner(url, init);
+      }) as typeof fetch,
+      requestTimeoutMs: 10_000,
+      retryOptions: { sleep: () => Promise.resolve() },
+      throttler: { minIntervalMs: 0 },
+    });
+    const error = await transport
+      .callTool("crypto_market", { action: "price" }, { deadlineMs: Date.now() + 100 }) // < 500ms floor
+      .catch((e) => e);
+    expect(error.failureType).toBe("TIMEOUT");
+    expect(error.retriable).toBe(false);
+    // No handshake, no tools/call: the budget check happens before any network activity.
+    expect(fetches).toHaveLength(0);
+  });
+
+  it("caller cancellation mid-body is non-retriable TIMEOUT (the budget that cancelled will cancel the retry too)", async () => {
+    const controller = new AbortController();
+    const transport = new McpTransport({
+      fetchImpl: stalledBodyFetch(),
+      requestTimeoutMs: 10_000,
+      retryPolicy: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 5 },
+      retryOptions: { sleep: () => Promise.resolve() },
+      throttler: { minIntervalMs: 0 },
+    });
+    const pending = transport.callTool("crypto_market", { action: "price" }, { signal: controller.signal });
+    setTimeout(() => controller.abort(), 25);
+    const error = await pending.catch((e) => e);
+    expect(error.failureType).toBe("TIMEOUT");
+    expect(error.retriable).toBe(false);
+  });
+
+  it("SSE keep-alive pings never extend the deadline; the exchange still times out (production: 32s ping loop)", async () => {
+    // Emits ": ping" lines every 5ms for up to 200ms; body never carries a JSON-RPC result.
+    const pingBodyFetch = (async (_url: unknown, init?: RequestInit) => {
+      const bodyText = init?.body === undefined ? "" : String(init.body);
+      const parsed = (() => { try { return JSON.parse(bodyText) as { method?: string }; } catch { return {}; } })();
+      if (parsed.method === "initialize") {
+        return new Response(
+          JSON.stringify({ jsonrpc: "2.0", id: 0, result: { protocolVersion: "2025-03-26", serverInfo: { name: "m", version: "1" }, capabilities: {} } }),
+          { status: 200, headers: { "mcp-session-id": "sid-ping" } },
+        );
+      }
+      if (parsed.method === "notifications/initialized") return new Response("", { status: 202 });
+      const signal = init?.signal;
+      let timer: ReturnType<typeof setInterval> | undefined;
+      return {
+        status: 200,
+        headers: new Headers({ "content-type": "text/event-stream" }),
+        text: () =>
+          new Promise<string>((_resolve, reject) => {
+            timer = setInterval(() => { /* keep-alive pings only */ }, 5);
+            const stop = (): void => { if (timer !== undefined) clearInterval(timer); };
+            signal?.addEventListener("abort", () => {
+              stop();
+              const e = new Error("aborted");
+              e.name = "AbortError";
+              reject(e);
+            }, { once: true });
+          }),
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    const transport = new McpTransport({
+      fetchImpl: pingBodyFetch,
+      requestTimeoutMs: 40,
+      retryPolicy: { maxAttempts: 1, baseDelayMs: 1, maxDelayMs: 5 },
+      throttler: { minIntervalMs: 0 },
+    });
+    const started = Date.now();
+    const error = await transport.callTool("crypto_market", { action: "price" }).catch((e) => e);
+    expect(error.failureType).toBe("TIMEOUT");
+    expect(Date.now() - started).toBeLessThan(1000); // pings never bought extra time
+  });
+});
+
+describe("MCP tool-error classification (regression 2026-10-09)", () => {
+  it("upstream ConnectTimeout/ConnectionError is retriable TIMEOUT (was: uniform retriable PROVIDER_ERROR)", () => {
+    const e1 = classifyMcpToolError("Error executing tool crypto_market: ConnectTimeout('')");
+    expect(e1.failureType).toBe("TIMEOUT");
+    expect(e1.retriable).toBe(true);
+    const e2 = classifyMcpToolError("ConnectionError: failed to establish connection");
+    expect(e2.failureType).toBe("TIMEOUT");
+  });
+
+  it("deterministic rejections (unknown action / invalid params) are PERMANENT (retry cannot fix them)", () => {
+    expect(classifyMcpToolError("Unknown action: ").retriable).toBe(false);
+    expect(classifyMcpToolError("Unknown action: ").failureType).toBe("SCHEMA_ERROR");
+    expect(classifyMcpToolError("invalid params: symbol is required").retriable).toBe(false);
+    expect(classifyMcpToolError("method not found").failureType).toBe("SCHEMA_ERROR");
+  });
+
+  it("neutral per-source failures stay retriable PROVIDER_ERROR (FINDINGS.md §2; documented law)", () => {
+    const neutral = classifyMcpToolError("data temporarily unavailable");
+    expect(neutral.failureType).toBe("PROVIDER_ERROR");
+    expect(neutral.retriable).toBe(true);
+  });
+
+  it("tool-level isError with ConnectTimeout does NOT retry the full policy budget (was: 3 × 32s)", async () => {
+    const transport = new McpTransport({
+      fetchImpl: sessionAwareFetch([
+        { body: okJsonRpc([{ type: "text", text: "Error executing tool crypto_market: ConnectTimeout('')" }], true) },
+      ]),
+      retryPolicy: { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 5 },
+      retryOptions: { sleep: () => Promise.resolve() },
+      throttler: { minIntervalMs: 0 },
+    });
+    const error = await transport.callTool("crypto_market", { action: "price" }).catch((e) => e);
+    expect(error.failureType).toBe("TIMEOUT");
+    expect(error.retriable).toBe(true);
+  });
+
+  it("default policy is now maxAttempts 2 (live 32s hangs must fit one ~45s wave)", () => {
+    const transport = new McpTransport({ fetchImpl: sessionAwareFetch([]) });
+    // Reach the private policy through behavior: a permanent failure with zero sleeps is
+    // policy-independent; assert the constructor default instead via the retry shape on 5xx.
+    expect((transport as unknown as { retryPolicy: { maxAttempts: number } }).retryPolicy.maxAttempts).toBe(2);
   });
 });

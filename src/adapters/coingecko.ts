@@ -10,9 +10,10 @@
  * preserved (raw capture + timestamps), outputs are QUANTITATIVE_OBSERVATION, retrieval
  * failure is a technical condition never negative evidence, no execution surface.
  */
-import type { ProviderAdapter, CapabilityName } from "./capability-registry.js";
-import type { ToolResultInput, ToolOutput } from "../domain/tool-result.js";
+import type { CapabilityCall, ProviderAdapter, CapabilityName } from "./capability-registry.js";
+import type { ToolResult, ToolResultInput, ToolOutput } from "../domain/tool-result.js";
 import { RestTransport } from "./transports/rest.js";
+import { validateCryptoMarketFallback, type FallbackGate } from "./fallback-compatibility.js";
 
 /** Coin id inference from the question's asset token (e.g. "BTC" -> "bitcoin"). */
 const COMMON_COIN_IDS: ReadonlyMap<string, string> = new Map([
@@ -114,7 +115,7 @@ export class CoinGeckoMarketDataAdapter implements ProviderAdapter {
     this.rest = rest ?? new RestTransport({ baseUrl: "https://api.coingecko.com", defaultHeaders: { "user-agent": "Mozilla/5.0 (compatible; LumenTerminal/1.0; research read-only)" } });
   }
 
-  async execute(capability: CapabilityName, params: Record<string, unknown>): Promise<ToolResultInput> {
+  async execute(capability: CapabilityName, params: Record<string, unknown>, call?: CapabilityCall): Promise<ToolResultInput> {
     if (capability !== "MARKET_DATA_ANALYSIS" && capability !== "CRYPTO_MARKET_DATA") {
       throw new Error(`${this.providerId} has no mapping for capability ${capability}`);
     }
@@ -141,6 +142,8 @@ export class CoinGeckoMarketDataAdapter implements ProviderAdapter {
 
     const outcome = await this.rest.get("/api/v3/simple/price", {
       params: { ids: coinId, vs_currencies: "usd", include_market_cap: "true", include_24hr_vol: "true", include_24hr_change: "true", include_last_updated_at: "true" },
+      ...(call?.deadlineMs !== undefined ? { deadlineMs: call.deadlineMs } : {}),
+      ...(call?.signal !== undefined ? { signal: call.signal } : {}),
     });
     const body = outcome.body as CoinGeckoSimple;
     const entry = body[coinId];
@@ -191,5 +194,11 @@ export class CoinGeckoMarketDataAdapter implements ProviderAdapter {
       ...(entry.last_updated_at !== undefined ? { sourceTimestamp: new Date(entry.last_updated_at * 1000).toISOString() } : {}),
       limitations: this.limitations,
     };
+  }
+
+  /** Fallback gate: reject wrong-instrument or live-request-stale answers (registry only). */
+  validateFallback(capability: CapabilityName, params: Record<string, unknown>, result: ToolResult): FallbackGate {
+    void capability;
+    return validateCryptoMarketFallback(params, result);
   }
 }

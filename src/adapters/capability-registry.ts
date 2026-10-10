@@ -13,8 +13,9 @@
  */
 
 import type { ProvenanceOrigin } from "../domain/provenance.js";
-import type { ToolResult, ToolResultInput } from "../domain/tool-result.js";
+import type { ToolResult, ToolResultInput, ToolFailureType } from "../domain/tool-result.js";
 import { normalizedResult } from "../domain/tool-result.js";
+import { TransportError } from "./transports/resilience.js";
 
 /** Capability names come from the architecture's CAPABILITY list (tool-skill-orchestration.md §3). */
 export type CapabilityName =
@@ -34,6 +35,17 @@ export type CapabilityName =
   | (string & {}); // extensible; new capabilities register without engine changes
 
 /**
+ * Per-call budget/cancellation forwarded to adapters (engine investigation deadline).
+ * Adapters that ignore it stay correct — the field is optional plumbing, never required.
+ */
+export interface CapabilityCall {
+  /** Shared investigation deadline (epoch ms): bounds attempts AND per-attempt timeouts. */
+  readonly deadlineMs?: number;
+  /** Caller cancellation (engine/budget abort), propagated through transport fetch + body read. */
+  readonly signal?: AbortSignal;
+}
+
+/**
  * The one interface every provider adapter satisfies. Adapters own transport, auth, throttling,
  * normalization, and classification; the engine never sees provider specifics.
  */
@@ -44,7 +56,22 @@ export interface ProviderAdapter {
   readonly limitations: readonly string[];
   /** Freshness profile, e.g. "rss:15-60min", "economic-release:1-2d-lag". */
   readonly freshnessProfile: string;
-  execute(capability: CapabilityName, params: Record<string, unknown>): Promise<ToolResultInput>;
+  execute(
+    capability: CapabilityName,
+    params: Record<string, unknown>,
+    call?: CapabilityCall,
+  ): Promise<ToolResultInput>;
+  /**
+   * Optional fallback-compatibility gate (applied ONLY to fallback attempts, never the
+   * primary). A strict per-domain validator that rejects a fallback output that "succeeds"
+   * but cannot answer the request (wrong instrument/interval/freshness/fields). Return
+   * `{compatible: true}` to accept; `{compatible: false, reasons}` to keep walking the chain.
+   */
+  validateFallback?(
+    capability: CapabilityName,
+    params: Record<string, unknown>,
+    result: ToolResult,
+  ): { compatible: true } | { compatible: false; reasons: readonly string[] };
 }
 
 export interface Registration {
@@ -75,6 +102,7 @@ export class CapabilityRegistry {
     params: Record<string, unknown>,
     origin: ProvenanceOrigin,
     at = new Date(),
+    call?: CapabilityCall,
   ): Promise<ToolResult> {
     const candidates = this.resolve(capability);
     if (candidates.length === 0) {
@@ -100,9 +128,10 @@ export class CapabilityRegistry {
     let primaryFailureIndex = -1;
     /** Fallback audit trail: every non-serving provider attempt, in order (1:1 with candidates). */
     const attempts: { provider: string; outcome: string; failureType?: ToolResult["failure"]["type"] }[] = [];
+    let candidateIndex = 0;
     for (const { adapter } of candidates) {
       try {
-        const input = await adapter.execute(capability, params);
+        const input = await adapter.execute(capability, params, call);
         // Fallback law (provider-failover policy): a serving fallback must not erase the
         // primary's failure. attemptedProviders carries the machine-readable trail; the
         // limitation makes it surfaceable ("continued using [fallback]").
@@ -128,7 +157,22 @@ export class CapabilityRegistry {
         // next provider gets a chance, and the empty result is preserved as lastFailure
         // so an all-empty outcome stays an honest EMPTY (never fabricated evidence).
         const hasCoverage = result.normalizedOutput.some((o) => o.outputClass !== "UNAVAILABLE");
-        if (result.failure.type === "NONE" && hasCoverage) return result;
+        if (result.failure.type === "NONE" && hasCoverage) {
+          // Fallback-compatibility gate (applies ONLY to fallback attempts; primary stays
+          // coverage-only per the failover law). A fallback that "succeeds" but cannot answer
+          // the request (wrong instrument/interval/freshness/fields) must not close the
+          // capability — the next provider gets a chance.
+          if (candidateIndex > 0 && adapter.validateFallback !== undefined) {
+            const gate = adapter.validateFallback(capability, params, result);
+            if (!gate.compatible) {
+              const reasons = gate.reasons.join("; ");
+              attempts.push({ provider: adapter.providerId, outcome: `incompatible (${reasons})` });
+              candidateIndex += 1;
+              continue;
+            }
+          }
+          return result;
+        }
         attempts.push({
           provider: adapter.providerId,
           outcome:
@@ -145,7 +189,18 @@ export class CapabilityRegistry {
         }
         lastFailure = result;
       } catch (error) {
-        attempts.push({ provider: adapter.providerId, outcome: "threw" });
+        // Typed-failure law: preserve the transport's classification (TIMEOUT vs
+        // PROVIDER_ERROR vs SCHEMA_ERROR vs RATE_LIMIT…) — the requirement ledger renders
+        // `result.failure.type`, so a hardcoded PROVIDER_ERROR erased TIMEOUT and mislabeled
+        // budget misses as generic provider faults.
+        const failureType: ToolFailureType =
+          error instanceof TransportError ? (error.failureType as ToolFailureType) : "PROVIDER_ERROR";
+        const retriable = error instanceof TransportError ? error.retriable : true;
+        attempts.push({
+          provider: adapter.providerId,
+          outcome: error instanceof TransportError ? `threw (${failureType})` : "threw",
+          ...(error instanceof TransportError ? { failureType } : {}),
+        });
         const thrown = normalizedResult(
           {
             tool: adapter.providerId,
@@ -155,9 +210,9 @@ export class CapabilityRegistry {
             completeness: "EMPTY",
             validation: "VALID",
             failure: {
-              type: "PROVIDER_ERROR",
+              type: failureType,
               message: error instanceof Error ? error.message : String(error),
-              retriable: true,
+              retriable,
             },
             limitations: [...adapter.limitations],
           },
@@ -170,6 +225,7 @@ export class CapabilityRegistry {
         }
         lastFailure = thrown;
       }
+      candidateIndex += 1;
     }
     // All candidates failed: return the PRIMARY's failure as the headline (its result is the
     // most authoritative statement of why the capability is unavailable) with the fallback

@@ -15,7 +15,7 @@
  *   the engine decides when the loop must stop; with the reason recorded.
  */
 
-import type { CapabilityRegistry } from "../adapters/capability-registry.js";
+import type { CapabilityRegistry, CapabilityCall } from "../adapters/capability-registry.js";
 import type { ModelProvider } from "../model/provider.js";
 import { ModelFailure } from "../model/provider.js";
 import {
@@ -207,7 +207,9 @@ export function capabilityDeadlineResult(
  * The provider call itself is not force-aborted here (adapters own their transports and their
  * own bounded timeouts, and a fetch that ignores its signal cannot be killed from this layer);
  * the ENGINE stops WAITING on it and returns the honest TIMEOUT result above. The underlying
- * promise is abandoned, not awaited, so the wave settles and its siblings deliver.
+ * promise is abandoned, not awaited, so the wave settles and its siblings deliver. The
+ * optional call carries the investigation deadline down to the transports, so each attempt
+ * is bounded by BOTH the engine's wait slice and the transport's own deadline-aware retry.
  */
 export async function executeCapabilityBounded(
   registry: CapabilityRegistry,
@@ -216,12 +218,13 @@ export async function executeCapabilityBounded(
   origin: ProvenanceOrigin,
   at: Date,
   allowanceMs: number,
+  call?: CapabilityCall,
 ): Promise<ToolResult> {
   if (allowanceMs <= 0) return capabilityDeadlineResult(capability, params, origin, at, 0);
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
-      registry.execute(capability, params, origin, at),
+      registry.execute(capability, params, origin, at, call),
       new Promise<ToolResult>((resolve) => {
         timer = setTimeout(
           () => resolve(capabilityDeadlineResult(capability, params, origin, at, allowanceMs)),
@@ -930,6 +933,10 @@ export async function runAdaptiveResearch(
           systemOrigin,
           at(),
           capabilityAllowance,
+          // BUDGET FORWARDING: the investigation deadline reaches the transports, which bound
+          // every attempt (and stop retrying) once it is reached — a hung upstream can no
+          // longer hold a capability pending past the budget.
+          options.deadlineMs !== undefined ? { deadlineMs: options.deadlineMs } : undefined,
         );
         options.onProgress?.(progressEvent("capability_completed", at(), `capability ${capability} completed: ${result.failure.type === "NONE" ? result.completeness : `failed (${result.failure.type})`}`, { capability, ...(result.failure.type === "NONE" ? { completeness: result.completeness } : { failureType: result.failure.type }) }));
         return { capability, result };
@@ -1365,6 +1372,7 @@ export async function runAdaptiveResearch(
           },
           systemOrigin,
           at(),
+          options.deadlineMs !== undefined ? { deadlineMs: options.deadlineMs } : undefined,
         );
         options.onProgress?.(progressEvent("capability_completed", at(), `${label} completed: ${result.failure.type === "NONE" ? result.completeness : `failed (${result.failure.type})`}`, { capability }));
         const evidenceIds: string[] = [];

@@ -655,6 +655,10 @@ async function executeBatch(
         systemOrigin,
         at(),
         capabilitySlice(options.capabilitySliceMs),
+        // BUDGET FORWARDING: the investigation deadline reaches the transports, which bound
+        // every attempt (and stop retrying) once it is reached — a hung upstream can no
+        // longer hold a capability pending past the budget.
+        options.deadlineMs !== undefined ? { deadlineMs: options.deadlineMs } : undefined,
       );
       options.onProgress?.(progressEvent("capability_completed", at(), `capability ${capability} completed: ${result.failure.type === "NONE" ? result.completeness : `failed (${result.failure.type})`}`, { capability, ...(result.failure.type === "NONE" ? { completeness: result.completeness } : { failureType: result.failure.type }) }));
       const evidenceIds: string[] = [];

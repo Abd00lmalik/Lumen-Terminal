@@ -32,8 +32,8 @@ import {
   withRetry,
   TransportError,
   RetryExhaustedError,
-  timeoutError,
   classifyHttpFailure,
+  fetchWithDeadline,
   RawCapture,
   type RetryPolicy,
   type RetryOptions,
@@ -54,6 +54,41 @@ export interface McpTransportOptions {
   readonly clientInfo?: { readonly name: string; readonly version: string };
   /** Test seam: override the underlying HTTP fetch. */
   readonly fetchImpl?: typeof fetch;
+}
+
+/** Per-call budget/cancellation, forwarded from the capability registry (engine deadline). */
+export interface McpCallOptions {
+  /** Shared investigation deadline (epoch ms): bounds attempts AND per-attempt timeout. */
+  readonly deadlineMs?: number;
+  /** Caller cancellation (engine/budget abort), propagated through fetch + body consumption. */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * Never start an attempt that cannot run for at least this long: with <500ms of budget left
+ * an attempt is guaranteed to time out, so failing fast as a non-retriable TIMEOUT preserves
+ * the remaining budget for sibling capabilities.
+ */
+const MIN_ATTEMPT_FLOOR_MS = 500;
+
+/**
+ * Tool-level `isError` classification (a COMPLETE HTTP exchange that returned a definitive
+ * tool failure — distinct from an HTTP/network timeout, which never produces a response).
+ * - deterministic rejections (unknown action, invalid params, method not found) are
+ *   PERMANENT: retrying the identical request cannot fix them
+ * - upstream transport failures (ConnectTimeout, ConnectionError, … — the live 2026-10-09
+ *   crypto_market signature) are transient but EXPENSIVE: retriable under the bounded policy
+ * - neutral per-source failures ("data temporarily unavailable", FINDINGS.md §2) and unknown
+ *   wording stay retriable PROVIDER_ERROR (documented neutral-failure law)
+ */
+export function classifyMcpToolError(detail: string): TransportError {
+  if (/connect\s*time(?:ed)?\s*out|read\s*time(?:ed)?\s*out|connection\s*(?:error|reset|refused|timeout)|timed?\s*out|socket hang up|remote\s*protocol/i.test(detail)) {
+    return new TransportError("TIMEOUT", `MCP tool upstream transport failure: ${detail}`, { retriable: true });
+  }
+  if (/\bunknown action\b|invalid (?:params?|arguments?|request)\b|method not found|unsupported\b/i.test(detail)) {
+    return new TransportError("SCHEMA_ERROR", `MCP tool deterministic rejection: ${detail}`, { retriable: false });
+  }
+  return new TransportError("PROVIDER_ERROR", `MCP tool reported isError: ${detail}`, { retriable: true });
 }
 
 /** JSON-RPC error payload when the server rejects the call. */
@@ -105,7 +140,10 @@ export class McpTransport {
 
   constructor(options: McpTransportOptions = {}) {
     this.endpoint = options.endpoint ?? DEFAULT_MCP_ENDPOINT;
-    this.retryPolicy = options.retryPolicy ?? { maxAttempts: 3, baseDelayMs: 250, maxDelayMs: 4_000, honorRetryAfter: true };
+    // maxAttempts 2 (was 3): live 2026-10-09 showed a hung upstream tool answer after ~32s;
+    // 3 attempts (~100s) dwarf the 45s capability wave window. 2 × 20s + backoff ≈ 41s fits
+    // one wave; the caller's deadlineMs (investigation budget) remains the outer bound.
+    this.retryPolicy = options.retryPolicy ?? { maxAttempts: 2, baseDelayMs: 250, maxDelayMs: 4_000, honorRetryAfter: true };
     this.throttler = new Throttler(options.throttler ?? { minIntervalMs: 150 });
     this.retryOptions = options.retryOptions ?? {};
     this.requestTimeoutMs = options.requestTimeoutMs ?? 20_000;
@@ -119,16 +157,34 @@ export class McpTransport {
    * (DISCOVERED: the endpoint requires initialize → mcp-session-id → notifications/initialized).
    * Failures throw typed TransportErrors; adapters convert them into failed TOOL_RESULTs
    * they never fabricate outputs (final lock §18).
+   *
+   * Budget law: `call.deadlineMs` (the investigation deadline) bounds EVERY attempt — the
+   * per-attempt timeout shrinks to the remaining budget, no attempt starts with less than
+   * MIN_ATTEMPT_FLOOR_MS of budget left, and withRetry stops retrying once the deadline is
+   * reached. A hung upstream can never keep a capability pending past the deadline.
    */
-  async callTool(toolName: string, args: Record<string, unknown> = {}): Promise<McpCallOutcome> {
+  async callTool(toolName: string, args: Record<string, unknown> = {}, call: McpCallOptions = {}): Promise<McpCallOutcome> {
     const startedAt = Date.now();
     let attempts = 0;
+    const timeoutForAttempt = (): number => {
+      if (call.deadlineMs === undefined) return this.requestTimeoutMs;
+      const remaining = call.deadlineMs - Date.now();
+      if (remaining < MIN_ATTEMPT_FLOOR_MS) {
+        // Non-retriable: the budget that stopped this attempt will not fund another one.
+        throw new TransportError("TIMEOUT", `MCP ${toolName}: insufficient deadline budget (${remaining}ms left, floor ${MIN_ATTEMPT_FLOOR_MS}ms)`, { retriable: false });
+      }
+      return Math.min(this.requestTimeoutMs, remaining);
+    };
     return this.throttler.run(async () => {
       try {
         const outcome = await withRetry(async (attempt) => {
           attempts = attempt;
-          return this.callWithSession(toolName, args);
-        }, { policy: this.retryPolicy, ...this.retryOptions });
+          return this.callWithSession(toolName, args, timeoutForAttempt(), call.signal);
+        }, {
+          policy: this.retryPolicy,
+          ...this.retryOptions,
+          ...(call.deadlineMs !== undefined ? { deadlineMs: call.deadlineMs } : {}),
+        });
         return { ...outcome, attempts, durationMs: Date.now() - startedAt };
       } catch (error) {
         if (error instanceof RetryExhaustedError) {
@@ -144,12 +200,12 @@ export class McpTransport {
     return this.serverInfo;
   }
 
-  private async callWithSession(toolName: string, args: Record<string, unknown>): Promise<McpCallOutcome> {
+  private async callWithSession(toolName: string, args: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<McpCallOutcome> {
     if (this.sessionId === undefined) {
-      await this.initializeSession();
+      await this.initializeSession(timeoutMs, signal);
     }
     try {
-      return await this.callOnce(toolName, args);
+      return await this.callOnce(toolName, args, timeoutMs, signal);
     } catch (error) {
       // A missing/expired session surfaces as HTTP 400 "Missing session ID" (DISCOVERED).
       // Treat it as transient transport state: reset and let the bounded retry re-handshake.
@@ -162,14 +218,14 @@ export class McpTransport {
   }
 
   /** One full handshake: initialize → mcp-session-id header → notifications/initialized (202, empty). */
-  private async initializeSession(): Promise<void> {
+  private async initializeSession(timeoutMs: number, signal?: AbortSignal): Promise<void> {
     const id = ++this.nextId;
     const response = await this.post(undefined, {
       jsonrpc: "2.0",
       id,
       method: "initialize",
       params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: this.clientInfo },
-    });
+    }, timeoutMs, signal);
     const rawReference = this.rawCapture.capture("mcp", `initialize@${this.endpoint}`, response.text);
     if (response.status !== 200) {
       throw classifyHttpFailure(response.status, response.text, response.headers["retry-after"]);
@@ -195,21 +251,21 @@ export class McpTransport {
 
     this.sessionId = sessionId;
     // Mandatory completion of the handshake (DISCOVERED: 202 with an empty body).
-    const notified = await this.post(sessionId, { jsonrpc: "2.0", method: "notifications/initialized" });
+    const notified = await this.post(sessionId, { jsonrpc: "2.0", method: "notifications/initialized" }, timeoutMs, signal);
     if (notified.status !== 202 && notified.status !== 200) {
       this.sessionId = undefined;
       throw classifyHttpFailure(notified.status, notified.text, notified.headers["retry-after"]);
     }
   }
 
-  private async callOnce(toolName: string, args: Record<string, unknown>): Promise<McpCallOutcome> {
+  private async callOnce(toolName: string, args: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<McpCallOutcome> {
     const id = ++this.nextId;
     const response = await this.post(this.sessionId, {
       jsonrpc: "2.0",
       id,
       method: "tools/call",
       params: { name: toolName, arguments: args },
-    });
+    }, timeoutMs, signal);
 
     if (response.status !== 200) {
       // Capture the raw rejection before classifying: provenance must stay inspectable (lock §7).
@@ -231,9 +287,11 @@ export class McpTransport {
       throw new TransportError("SCHEMA_ERROR", `MCP response for ${toolName} has no result`, { retriable: false });
     }
     if (parsed.result.isError === true) {
-      // Tool-level error. FINDINGS.md documents neutral per-source failures; transient for our
-      // skills; bounded retry decides, and adapters never fabricate over failures (lock §18).
-      throw new TransportError("PROVIDER_ERROR", `MCP tool ${toolName} reported isError: ${summarizeContent(parsed.result.content ?? [])}`, { retriable: true });
+      // Tool-level error from a COMPLETE exchange — classified, never conflated with an
+      // HTTP/network timeout (which never produces a response at all). Deterministic
+      // rejections are permanent; upstream transport failures are bounded-retriable;
+      // neutral per-source failures stay retriable (classifyMcpToolError).
+      throw classifyMcpToolError(summarizeContent(parsed.result.content ?? []));
     }
 
     return {
@@ -244,30 +302,22 @@ export class McpTransport {
     };
   }
 
-  private async post(sessionId: string | undefined, body: unknown): Promise<McpFetchOutcome> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
-    let response: Response;
-    try {
-      response = await this.fetchImpl(this.endpoint, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json, text/event-stream",
-          ...(sessionId !== undefined ? { "mcp-session-id": sessionId } : {}),
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-    } catch (error) {
-      if (controller.signal.aborted) throw timeoutError(`MCP request ${this.endpoint}`, this.requestTimeoutMs);
-      throw new TransportError("PROVIDER_ERROR", `network error calling MCP endpoint: ${error instanceof Error ? error.message : String(error)}`, { retriable: true });
-    } finally {
-      clearTimeout(timeout);
-    }
-    const headers: Record<string, string> = {};
-    response.headers.forEach((value, key) => { headers[key.toLowerCase()] = value; });
-    return { status: response.status, headers, text: await response.text() };
+  /**
+   * One HTTP POST covering the FULL exchange: the abort signal stays active until the
+   * response body is fully consumed (fetchWithDeadline). SSE keep-alive pings hold the body
+   * open without completing it — they are tolerated but never extend the deadline, so a
+   * server that only pings still times out as a typed TIMEOUT.
+   */
+  private async post(sessionId: string | undefined, body: unknown, timeoutMs: number, signal?: AbortSignal): Promise<McpFetchOutcome> {
+    return fetchWithDeadline(this.fetchImpl, this.endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        ...(sessionId !== undefined ? { "mcp-session-id": sessionId } : {}),
+      },
+      body: JSON.stringify(body),
+    }, { timeoutMs, ...(signal !== undefined ? { signal } : {}), what: `MCP request ${this.endpoint}` });
   }
 
   private parsePayload(text: string, toolName: string): JsonRpcResult & { content?: readonly unknown[]; isError?: boolean } {

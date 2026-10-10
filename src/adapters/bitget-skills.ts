@@ -7,7 +7,7 @@
  * (final lock §6/§11). G1/G2 remain vendor-neutral stubs (final lock §12).
  */
 
-import { CapabilityRegistry, HistoricalDataStub, WebRetrievalStub, type ProviderAdapter } from "./capability-registry.js";
+import { CapabilityRegistry, HistoricalDataStub, WebRetrievalStub, type CapabilityCall, type ProviderAdapter } from "./capability-registry.js";
 import { G1HistoricalDataAdapter, BINANCE_VISION_BASE_URL } from "./g1-historical.js";
 import { G2WebRetrievalAdapter } from "./g2-web-retrieval.js";
 import { NewsFallbackAdapter, SentimentFallbackAdapter, MacroFallbackAdapter } from "./fallback-providers.js";
@@ -488,7 +488,7 @@ export class TechnicalKlinesRestAdapter implements ProviderAdapter {
 
   constructor(private readonly rest: RestTransport) {}
 
-  async execute(capability: string, params: Record<string, unknown>): Promise<ToolResultInput> {
+  async execute(capability: string, params: Record<string, unknown>, call?: CapabilityCall): Promise<ToolResultInput> {
     if (capability !== "TECHNICAL_ANALYSIS") {
       throw new TransportError("SCHEMA_ERROR", `${this.providerId} has no mapping for capability ${capability}`, { retriable: false });
     }
@@ -502,7 +502,11 @@ export class TechnicalKlinesRestAdapter implements ProviderAdapter {
       ...(query.endTime !== undefined ? { endTime: query.endTime } : {}),
     };
 
-    const outcome = await this.rest.get(path, { params: restParams });
+    const outcome = await this.rest.get(path, {
+      params: restParams,
+      ...(call?.deadlineMs !== undefined ? { deadlineMs: call.deadlineMs } : {}),
+      ...(call?.signal !== undefined ? { signal: call.signal } : {}),
+    });
     const candles = parseCandles(outcome.body, path);
     const lastCandle = candles[candles.length - 1];
     const sourceTimestamp = lastCandle !== undefined ? new Date(Number(lastCandle.ts)).toISOString() : undefined;
@@ -576,22 +580,28 @@ export class TechnicalAnalysisAdapter implements ProviderAdapter {
     });
   }
 
-  async execute(capability: string, params: Record<string, unknown>): Promise<ToolResultInput> {
+  async execute(capability: string, params: Record<string, unknown>, call?: CapabilityCall): Promise<ToolResultInput> {
     try {
-      return await this.mcpAdapter.execute(capability, params);
+      return await this.mcpAdapter.execute(capability, params, call);
     } catch (error) {
       // Registry-level fallback: surface the MCP failure, then let the klines path answer.
       // NOTE: the fallback serves the same capability with a different method; the registry
       // cannot see this, so the limitation must travel with the result.
       if (capability !== "TECHNICAL_ANALYSIS") throw error;
-      const klines = await new TechnicalKlinesRestAdapter(this.rest).execute(capability, params);
-      return {
-        ...klines,
-        limitations: [
-          ...(klines.limitations ?? []),
-          `MCP technical_analysis unavailable (${error instanceof Error ? error.message : String(error)}); served by REST klines fallback`,
-        ],
-      };
+      try {
+        const klines = await new TechnicalKlinesRestAdapter(this.rest).execute(capability, params, call);
+        return {
+          ...klines,
+          limitations: [
+            ...(klines.limitations ?? []),
+            `MCP technical_analysis unavailable (${error instanceof Error ? error.message : String(error)}); served by REST klines fallback`,
+          ],
+        };
+      } catch {
+        // Both paths failed: the PRIMARY's (MCP) failure is the headline (failover law — a
+        // fallback's failure never erases the primary's); its classification travels intact.
+        throw error;
+      }
     }
   }
 }

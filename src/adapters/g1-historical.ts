@@ -27,8 +27,9 @@
 import type { CapabilityName, HistoricalQuery, HistoricalDataProvider } from "./capability-registry.js";
 import { RestTransport } from "./transports/rest.js";
 import { TransportError } from "./transports/resilience.js";
-import type { ToolOutput, ToolResultInput } from "../domain/tool-result.js";
+import type { ToolResult, ToolOutput, ToolResultInput } from "../domain/tool-result.js";
 import { intervalTokenFor, isResolution } from "../research/resolution.js";
+import { validateCryptoMarketFallback, type FallbackGate } from "./fallback-compatibility.js";
 
 /**
  * Capabilities G1 can satisfy once connected.
@@ -302,6 +303,17 @@ export class G1HistoricalDataAdapter implements HistoricalDataProvider {
       throw new TransportError("SCHEMA_ERROR", `${this.providerId} has no mapping for capability ${capability}`, { retriable: false });
     }
     return this.query(this.withDefaults(params));
+  }
+
+  /**
+   * Fallback gate for CRYPTO_MARKET_DATA (live 2026-10-09 probe: after the market-intel MCP
+   * timed out, G1's 3-year historical default answered "current BTC price" with 2023 monthly
+   * candles). A HISTORICAL deep-lookback result cannot close a LIVE market-data capability;
+   * HISTORICAL_COMPARISON itself is ungated (deep history is exactly what it asks for).
+   */
+  validateFallback(capability: CapabilityName, params: Record<string, unknown>, result: ToolResult): FallbackGate {
+    if (capability !== "CRYPTO_MARKET_DATA") return { compatible: true };
+    return validateCryptoMarketFallback(params, result);
   }
 
   /** Fill unset query fields with capability defaults; explicit values are never overridden. */

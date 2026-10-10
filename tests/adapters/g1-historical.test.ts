@@ -234,6 +234,30 @@ describe("G1 historical-data adapter (vendor: Bitget → Binance Vision)", () =>
     const chunk = toolResult.normalizedOutput[0]!.content as { candleCount: number };
     expect(chunk.candleCount).toBe(2);
   });
+
+  // REGRESSION (2026-10-09): after market-intel MCP timed out, G1's 3-year default answered
+  // "current BTC price" with 2023 monthly candles and closed the capability. The fallback gate
+  // must reject G1's deep historical result for LIVE CRYPTO_MARKET_DATA requests, while
+  // HISTORICAL_COMPARISON (the capability that WANTS deep history) stays ungated.
+  it("validateFallback: rejects G1's deep historical default for a live CRYPTO_MARKET_DATA request", async () => {
+    const bitget = new RestTransport({ fetchImpl: scriptedFetch([{ body: bitgetCandles() }]) });
+    const vision = new RestTransport({ baseUrl: BINANCE_VISION_BASE_URL, fetchImpl: scriptedFetch([{ body: "[]" }]) });
+    const g1 = new G1HistoricalDataAdapter(bitget, vision);
+
+    const raw = await g1.query(BASE_QUERY); // HISTORICAL freshness
+    const toolResult = normalizedResult(raw, ORIGIN);
+
+    const liveGate = g1.validateFallback!("CRYPTO_MARKET_DATA", { asset: "BTC", question: "current price" }, toolResult);
+    expect(liveGate.compatible).toBe(false);
+
+    // HISTORICAL_COMPARISON is never gated (deep history is the point):
+    expect(g1.validateFallback!("HISTORICAL_COMPARISON", { asset: "BTC" }, toolResult).compatible).toBe(true);
+
+    // A bounded window request (requiredWindowHours) makes G1's slice the CORRECT answer:
+    expect(
+      g1.validateFallback!("CRYPTO_MARKET_DATA", { asset: "BTC", requiredWindowHours: 24 }, toolResult).compatible,
+    ).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

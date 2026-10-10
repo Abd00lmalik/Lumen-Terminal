@@ -19,8 +19,8 @@ import {
   withRetry,
   TransportError,
   RetryExhaustedError,
-  timeoutError,
   classifyHttpFailure,
+  fetchWithDeadline,
   RawCapture,
   type RetryPolicy,
   type RetryOptions,
@@ -49,6 +49,10 @@ export interface RestGetOptions {
   readonly headers?: Record<string, string>;
   /** "json" (default) parses the body as JSON; "text" returns the raw text (CSV/XML/RSS endpoints). */
   readonly responseType?: "json" | "text";
+  /** Shared investigation deadline (epoch ms): bounds attempts AND per-attempt timeout. */
+  readonly deadlineMs?: number;
+  /** Caller cancellation (engine/budget abort), propagated through fetch + body consumption. */
+  readonly signal?: AbortSignal;
 }
 
 export interface RestGetOutcome {
@@ -97,15 +101,30 @@ export class RestTransport {
     this.rawCapture = new RawCapture();
   }
 
-  /** GET a public REST path with query params; throttled + bounded retry. */
+  /**
+   * GET a public REST path with query params; throttled + bounded retry. The same
+   * full-exchange deadline law as McpTransport: the abort signal stays active until the body
+   * is fully consumed (headers+body under ONE deadline), and `options.deadlineMs` stops
+   * retries once the investigation budget is exhausted.
+   */
   async get(path: string, options: RestGetOptions = {}): Promise<RestGetOutcome> {
     const startedAt = Date.now();
+    const MIN_ATTEMPT_FLOOR_MS = 500;
+    const timeoutForAttempt = (): number => {
+      const requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
+      if (options.deadlineMs === undefined) return requestTimeoutMs;
+      const remaining = options.deadlineMs - Date.now();
+      if (remaining < MIN_ATTEMPT_FLOOR_MS) {
+        throw new TransportError("TIMEOUT", `REST GET ${path}: insufficient deadline budget (${remaining}ms left, floor ${MIN_ATTEMPT_FLOOR_MS}ms)`, { retriable: false });
+      }
+      return Math.min(requestTimeoutMs, remaining);
+    };
     return this.throttler.run(async () => {
       let attempts = 0;
       const outcome = await withRetry(async (attempt) => {
         attempts = attempt;
-        return this.getOnce(path, options, attempt);
-      }, { policy: this.retryPolicy, ...this.retryOptions });
+        return this.getOnce(path, options, timeoutForAttempt());
+      }, { policy: this.retryPolicy, ...this.retryOptions, ...(options.deadlineMs !== undefined ? { deadlineMs: options.deadlineMs } : {}) });
       return { ...outcome, attempts, durationMs: Date.now() - startedAt };
     }).catch((error: unknown) => {
       if (error instanceof RetryExhaustedError) throw error.lastError;
@@ -113,36 +132,34 @@ export class RestTransport {
     });
   }
 
-  private async getOnce(path: string, options: RestGetOptions, _attempt: number): Promise<RestGetOutcome> {
-    void _attempt;
+  private async getOnce(path: string, options: RestGetOptions, timeoutMs: number): Promise<RestGetOutcome> {
     const url = new URL(this.baseUrl + path);
     for (const [key, value] of Object.entries(options.params ?? {})) {
       url.searchParams.set(key, value);
     }
 
-    const controller = new AbortController();
-    const requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
-    const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url, { method: "GET", signal: controller.signal, headers: { ...this.defaultHeaders, ...options.headers } });
-    } catch (error) {
-      if (controller.signal.aborted) throw timeoutError(`REST GET ${path}`, requestTimeoutMs);
-      throw new TransportError("PROVIDER_ERROR", `network error on GET ${path}: ${error instanceof Error ? error.message : String(error)}`, { retriable: true });
-    } finally {
-      clearTimeout(timeout);
+    // Full-exchange deadline: body read is inside the abort window (a stalling/chunked
+    // response can no longer hold the request open past requestTimeoutMs).
+    const { status, headers, text } = await fetchWithDeadline(
+      this.fetchImpl,
+      url,
+      { method: "GET", headers: { ...this.defaultHeaders, ...options.headers } },
+      {
+        timeoutMs,
+        ...(options.signal !== undefined ? { signal: options.signal } : {}),
+        what: `REST GET ${path}`,
+      },
+    );
+
+    if (status < 200 || status >= 300) {
+      throw classifyHttpFailure(status, text, headers["retry-after"]);
     }
 
-    if (!response.ok) {
-      throw classifyHttpFailure(response.status, await response.text().catch(() => ""), response.headers.get("retry-after"));
-    }
-
-    const text = await response.text();
     // Capture the raw payload BEFORE parsing: even unparseable/failed responses must remain
     // inspectable for provenance (final lock §7); nothing is silently swallowed.
     const rawReference = this.rawCapture.capture("rest", `GET ${path}${url.search}`, text);
     if (options.responseType === "text") {
-      return { body: text, rawReference, attempts: 0, durationMs: 0, status: response.status };
+      return { body: text, rawReference, attempts: 0, durationMs: 0, status };
     }
     let body: unknown;
     try {
@@ -150,7 +167,7 @@ export class RestTransport {
     } catch {
       throw new TransportError("INVALID_RESPONSE", `REST GET ${path} returned non-JSON body (raw captured: ${rawReference})`, { retriable: false });
     }
-    return { body, rawReference, attempts: 0, durationMs: 0, status: response.status };
+    return { body, rawReference, attempts: 0, durationMs: 0, status };
   }
 
   /** Introspection for tests. */

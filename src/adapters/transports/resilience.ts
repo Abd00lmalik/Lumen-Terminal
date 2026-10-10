@@ -168,21 +168,29 @@ export class RetryExhaustedError extends Error {
 
 export interface RetryOptions {
   readonly policy: RetryPolicy;
-  /** Injectable clock for deterministic tests (reserved; backoff uses sleep). */
+  /** Injectable clock for deterministic tests (used for the deadline stop). */
   readonly now?: () => number;
   /** Injectable sleep for deterministic tests. */
   readonly sleep?: (ms: number) => Promise<void>;
   /** Test/observability hook: invoked before each retry with the wait actually applied. */
   readonly onRetry?: (error: TransportError, attempt: number, delayMs: number) => void;
+  /**
+   * Shared wall-clock deadline (epoch ms): once reached, NO further attempt is started, no
+   * matter how many policy attempts remain (capability time budgets: retries must never
+   * consume the whole investigation budget). The last failure is surfaced as
+   * RetryExhaustedError so the typed classification survives.
+   */
+  readonly deadlineMs?: number;
 }
 
 /**
  * Retry a transport call with exponential backoff and full jitter. Only transient failures
  * (failure-recovery.md §11) are retried; permanent failures propagate immediately. Bounded by
- * `policy.maxAttempts`; never indefinite.
+ * `policy.maxAttempts` AND by `deadlineMs` when given; never indefinite.
  */
 export async function withRetry<T>(fn: (attempt: number) => Promise<T>, options: RetryOptions): Promise<T> {
   const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const now = options.now ?? (() => Date.now());
   const { policy } = options;
 
   let lastError: TransportError | undefined;
@@ -197,6 +205,9 @@ export async function withRetry<T>(fn: (attempt: number) => Promise<T>, options:
       if (!error.retriable) throw error;
       lastError = error;
       if (isLastAttempt) break;
+      // Deadline stop: the shared investigation budget outranks policy attempts — a retry
+      // that would START after the deadline must not start at all.
+      if (options.deadlineMs !== undefined && now() >= options.deadlineMs) break;
 
       let delayMs = Math.min(policy.maxDelayMs, policy.baseDelayMs * 2 ** (attempt - 1));
       delayMs = Math.floor(delayMs * (0.5 + Math.random() * 0.5)); // full jitter
@@ -244,5 +255,120 @@ export class RawCapture {
 
   get size(): number {
     return this.entries.size;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Full-exchange fetch: headers AND body under ONE deadline, caller-cancellable
+// ---------------------------------------------------------------------------
+
+/**
+ * Compose multiple abort signals without AbortSignal.any (engines: node >=20.0; .any needs
+ * 20.3). The combined signal aborts when ANY input aborts; cleanup removes every listener so
+ * a completed request never leaks listeners on long-lived caller signals.
+ */
+export function combineSignals(
+  ...signals: readonly (AbortSignal | undefined)[]
+): { signal: AbortSignal; cleanup: () => void } {
+  const controller = new AbortController();
+  const cleanups: (() => void)[] = [];
+  for (const s of signals) {
+    if (s === undefined) continue;
+    if (s.aborted) {
+      controller.abort(s.reason);
+      break;
+    }
+    const onAbort = (): void => controller.abort(s.reason);
+    s.addEventListener("abort", onAbort, { once: true });
+    cleanups.push(() => s.removeEventListener("abort", onAbort));
+  }
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      for (const cleanup of cleanups) cleanup();
+    },
+  };
+}
+
+export interface FullExchangeOptions {
+  /** Hard wall-clock ceiling covering headers AND complete body consumption. */
+  readonly timeoutMs: number;
+  /** Caller cancellation (budget expiry, engine abort): propagated through fetch + body read. */
+  readonly signal?: AbortSignal;
+  /** Human-readable request identity for error messages. */
+  readonly what: string;
+}
+
+export interface FullExchangeResponse {
+  readonly status: number;
+  readonly headers: Record<string, string>;
+  readonly text: string;
+}
+
+/**
+ * Perform one HTTP exchange where the abort signal stays active until the response BODY has
+ * been fully read (production defect this replaces: transports cleared their timeout after
+ * headers arrived, so an SSE keep-alive stream could hold `response.text()` past every
+ * budget — the capability stayed pending indefinitely). Classification:
+ * - own deadline fires → TIMEOUT (retriable; a bounded retry may still fit the budget)
+ * - CALLER signal fires → TIMEOUT, retriable: FALSE (the budget that cancelled this call
+ *   will cancel the retry too; retrying would starve the investigation)
+ * - other network failures → PROVIDER_ERROR (retriable), never a hang.
+ * Timers and abort listeners are cleared on every exit path.
+ */
+export async function fetchWithDeadline(
+  fetchImpl: typeof fetch,
+  url: string | URL,
+  init: RequestInit,
+  options: FullExchangeOptions,
+): Promise<FullExchangeResponse> {
+  const deadlineController = new AbortController();
+  const timer = setTimeout(() => deadlineController.abort(), options.timeoutMs);
+  const combined = combineSignals(init.signal ?? undefined, deadlineController.signal, options.signal);
+  const cleanup = (): void => {
+    clearTimeout(timer);
+    combined.cleanup();
+  };
+  const abortedError = (phase: "headers" | "body"): TransportError => {
+    if (options.signal?.aborted === true) {
+      return new TransportError("TIMEOUT", `${options.what} cancelled by caller during ${phase}`, { retriable: false });
+    }
+    return timeoutError(`${options.what} (${phase} phase)`, options.timeoutMs);
+  };
+  const isAbort = (error: unknown): boolean =>
+    deadlineController.signal.aborted ||
+    options.signal?.aborted === true ||
+    (error instanceof Error && error.name === "AbortError");
+
+  try {
+    let response: Response;
+    try {
+      response = await fetchImpl(url, { ...init, signal: combined.signal });
+    } catch (error) {
+      if (isAbort(error)) throw abortedError("headers");
+      throw new TransportError(
+        "PROVIDER_ERROR",
+        `network error calling ${options.what}: ${error instanceof Error ? error.message : String(error)}`,
+        { retriable: true },
+      );
+    }
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (error) {
+      if (isAbort(error)) throw abortedError("body");
+      throw new TransportError(
+        "PROVIDER_ERROR",
+        `network error reading response body from ${options.what}: ${error instanceof Error ? error.message : String(error)}`,
+        { retriable: true },
+      );
+    }
+    const headers: Record<string, string> = {};
+    response.headers.forEach((value, key) => {
+      headers[key.toLowerCase()] = value;
+    });
+    return { status: response.status, headers, text };
+  } finally {
+    cleanup();
   }
 }

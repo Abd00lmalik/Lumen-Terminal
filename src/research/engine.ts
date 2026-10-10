@@ -8,7 +8,7 @@
  * evidence ingestion. It performs no evidence fabrication and owns no truth.
  */
 
-import type { CapabilityRegistry } from "../adapters/capability-registry.js";
+import type { CapabilityCall, CapabilityRegistry } from "../adapters/capability-registry.js";
 import type { ToolResult } from "../domain/tool-result.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
 import type { Workspace } from "../domain/workspace.js";
@@ -32,8 +32,9 @@ export class ResearchEngine {
     capability: string,
     params: Record<string, unknown>,
     origin: ProvenanceOrigin,
+    call?: CapabilityCall,
   ): Promise<ToolResult> {
-    return this.options.registry.execute(capability, params, origin);
+    return this.options.registry.execute(capability, params, origin, undefined, call);
   }
 
   /** Persistence hook: workspace survives beyond individual messages (lock §14). */

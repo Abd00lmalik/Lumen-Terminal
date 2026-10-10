@@ -103,3 +103,80 @@ describe("REST transport boundary (technical-analysis data path, FINDINGS.md §2
     expect(transport.capturedRawCount).toBe(1);
   });
 });
+
+/**
+ * REGRESSION (2026-10-09): REST had the identical defect as MCP — the timeout was cleared
+ * after headers arrived, so a chunked/stalling body could hold `response.text()` forever.
+ */
+describe("REST transport; full-exchange deadline (regression 2026-10-09)", () => {
+  it("a body that stalls past the timeout throws retriable TIMEOUT (was: hang past the cleared timeout)", async () => {
+    const fetchImpl = ((_url: unknown, init?: RequestInit) =>
+      Promise.resolve({
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        text: () =>
+          new Promise<string>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              const e = new Error("aborted");
+              e.name = "AbortError";
+              reject(e);
+            }, { once: true });
+          }),
+      })) as unknown as typeof fetch;
+    const transport = new RestTransport({
+      fetchImpl,
+      requestTimeoutMs: 30,
+      retryPolicy: { maxAttempts: 1, baseDelayMs: 1, maxDelayMs: 5 },
+      throttler: { minIntervalMs: 0 },
+    });
+    const started = Date.now();
+    const err = await transport.get("/api/v2/spot/market/candles", { requestTimeoutMs: 30 }).catch((e) => e);
+    expect(err).toBeInstanceOf(TransportError);
+    expect(err.failureType).toBe("TIMEOUT");
+    expect(err.retriable).toBe(true);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it("a deadline below the attempt floor fails fast as non-retriable TIMEOUT (no fetch wasted)", async () => {
+    let fetches = 0;
+    const fetchImpl = (async () => {
+      fetches++;
+      return new Response("[]", { status: 200 });
+    }) as unknown as typeof fetch;
+    const transport = new RestTransport({ fetchImpl, throttler: { minIntervalMs: 0 } });
+    const err = await transport
+      .get("/api/v2/spot/market/candles", { deadlineMs: Date.now() + 100 }) // < 500ms floor
+      .catch((e) => e);
+    expect(err.failureType).toBe("TIMEOUT");
+    expect(err.retriable).toBe(false);
+    expect(fetches).toBe(0);
+  });
+
+  it("caller cancellation mid-body is non-retriable TIMEOUT", async () => {
+    const controller = new AbortController();
+    const fetchImpl = ((_url: unknown, init?: RequestInit) =>
+      Promise.resolve({
+        status: 200,
+        headers: new Headers(),
+        text: () =>
+          new Promise<string>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              const e = new Error("aborted");
+              e.name = "AbortError";
+              reject(e);
+            }, { once: true });
+          }),
+      })) as unknown as typeof fetch;
+    const transport = new RestTransport({
+      fetchImpl,
+      retryPolicy: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 5 },
+      retryOptions: { sleep: () => Promise.resolve() },
+      throttler: { minIntervalMs: 0 },
+    });
+    const pending = transport.get("/api/v2/spot/market/candles", { requestTimeoutMs: 10_000, signal: controller.signal });
+    setTimeout(() => controller.abort(), 20);
+    const err = await pending.catch((e) => e);
+    expect(err.failureType).toBe("TIMEOUT");
+    expect(err.retriable).toBe(false);
+  });
+});

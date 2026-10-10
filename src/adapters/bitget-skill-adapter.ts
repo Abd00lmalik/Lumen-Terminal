@@ -13,7 +13,7 @@
  * - convert transport failures into failed TOOL_RESULTs; no fabricated fallback data (lock §18)
  */
 
-import type { CapabilityName, ProviderAdapter } from "./capability-registry.js";
+import type { CapabilityCall, CapabilityName, ProviderAdapter } from "./capability-registry.js";
 import type { ToolOutput, ToolOutputClass, ToolResultInput } from "../domain/tool-result.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
 import type { McpTransport, McpCallOutcome } from "./transports/mcp.js";
@@ -102,7 +102,7 @@ export class BitgetSkillAdapter implements ProviderAdapter {
     this.flattenOutput = options.flattenOutput ?? ((o) => [o]);
   }
 
-  async execute(capability: string, params: Record<string, unknown>): Promise<ToolResultInput> {
+  async execute(capability: string, params: Record<string, unknown>, call?: CapabilityCall): Promise<ToolResultInput> {
     const spec = this.toolFor(capability);
     if (spec === undefined) {
       throw new TransportError("SCHEMA_ERROR", `${this.providerId} has no tool mapped for capability ${capability}`, { retriable: false });
@@ -111,7 +111,7 @@ export class BitgetSkillAdapter implements ProviderAdapter {
     const args = spec.buildArgs(params);
     let outcome: McpCallOutcome;
     try {
-      outcome = await this.transport.callTool(spec.toolName, args);
+      outcome = await this.transport.callTool(spec.toolName, args, call);
     } catch (error) {
       throw this.rethrowAsTransportError(error, spec.toolName);
     }    const content = outcome.content;

@@ -20,9 +20,10 @@
  * - Yahoo RSS headline feeds: per-ticker equity news (secondary reporting).
  * - Stooq daily CSV (keyless): OHLCV fallback when the Yahoo chart path fails.
  */
-import type { ProviderAdapter, CapabilityName } from "./capability-registry.js";
-import type { ToolResultInput, ToolOutput } from "../domain/tool-result.js";
+import type { CapabilityCall, ProviderAdapter, CapabilityName } from "./capability-registry.js";
+import type { ToolResult, ToolResultInput, ToolOutput } from "../domain/tool-result.js";
 import { RestTransport } from "./transports/rest.js";
+import { validateEquityMarketFallback, type FallbackGate } from "./fallback-compatibility.js";
 
 /** Every Yahoo request carries a browser UA (bare clients get 4xx from the edge). */
 const YAHOO_UA = "Mozilla/5.0 (compatible; LumenTerminal/1.0; research read-only)";
@@ -272,7 +273,7 @@ export class EquityMarketDataAdapter implements ProviderAdapter {
     this.stooq = stooq ?? new RestTransport({ baseUrl: "https://stooq.com", defaultHeaders: { "user-agent": YAHOO_UA } });
   }
 
-  async execute(capability: CapabilityName, params: Record<string, unknown>): Promise<ToolResultInput> {
+  async execute(capability: CapabilityName, params: Record<string, unknown>, call?: CapabilityCall): Promise<ToolResultInput> {
     if (capability !== "EQUITY_MARKET_DATA" && capability !== "COMMODITY_MARKET_DATA" && capability !== "FX_MARKET_DATA") {
       throw new Error(`${this.providerId} has no mapping for capability ${capability}`);
     }
@@ -304,7 +305,11 @@ export class EquityMarketDataAdapter implements ProviderAdapter {
 
     // Primary: Yahoo v8 chart.
     try {
-      const outcome = await this.yahoo.get(`/v8/finance/chart/${encodeURIComponent(symbol)}`, { params: { range, interval } });
+      const outcome = await this.yahoo.get(`/v8/finance/chart/${encodeURIComponent(symbol)}`, {
+        params: { range, interval },
+        ...(call?.deadlineMs !== undefined ? { deadlineMs: call.deadlineMs } : {}),
+        ...(call?.signal !== undefined ? { signal: call.signal } : {}),
+      });
       const { candles, meta } = parseYahooChart(outcome.body);
       if (candles.length > 0 && meta !== undefined) {
         const last = candles[candles.length - 1]!;
@@ -350,7 +355,12 @@ export class EquityMarketDataAdapter implements ProviderAdapter {
 
     // Fallback: Stooq daily CSV.
     const stooqSymbol = `${symbol.toLowerCase().replace(/\./g, "")}.us`;
-    const stooqOutcome = await this.stooq.get("/q/d/l/", { params: { s: stooqSymbol, i: "d" }, responseType: "text" });
+    const stooqOutcome = await this.stooq.get("/q/d/l/", {
+      params: { s: stooqSymbol, i: "d" },
+      responseType: "text",
+      ...(call?.deadlineMs !== undefined ? { deadlineMs: call.deadlineMs } : {}),
+      ...(call?.signal !== undefined ? { signal: call.signal } : {}),
+    });
     const stooqBody = typeof stooqOutcome.body === "string" ? stooqOutcome.body : String(stooqOutcome.body);
     const candles = parseStooqCsv(stooqBody);
     if (candles.length === 0) {
@@ -398,6 +408,12 @@ export class EquityMarketDataAdapter implements ProviderAdapter {
       sourceTimestamp: new Date(`${last.ts}T00:00:00Z`).toISOString(),
       limitations: [...this.limitations, "served by Stooq CSV fallback after Yahoo chart was unavailable"],
     };
+  }
+
+  /** Fallback gate: reject wrong-ticker or live-request-stale answers (registry only). */
+  validateFallback(capability: CapabilityName, params: Record<string, unknown>, result: ToolResult): FallbackGate {
+    void capability;
+    return validateEquityMarketFallback(params, result);
   }
 }
 
