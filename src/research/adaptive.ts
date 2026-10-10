@@ -320,6 +320,77 @@ export function retrievalBrief(
   ].join("\n");
 }
 
+/**
+ * THE SHAPES THIS RUN STILL OWES: the union of the unmet rows' demanded data shapes, in a
+ * stable order. Read from the ledger, so it changes exactly when the trader's request does.
+ * Shared by the adaptive loop AND the flow runner (one law, one function).
+ */
+export function requiredFacetsBrief(requirements: readonly ResearchRequirement[]): readonly string[] {
+  const out: string[] = [];
+  for (const row of requirements) {
+    if (row.status === "SATISFIED" || row.role === "CONTEXT" || row.role === "CHALLENGE") continue;
+    for (const facet of row.dataFacets ?? []) if (!out.includes(facet)) out.push(facet);
+  }
+  return out;
+}
+
+/**
+ * THE RESOLUTION THIS RUN STILL OWES: the finest granularity any unmet shape row names
+ * ("hourly"), or — when no resolution is named — the granularity the smallest unmet
+ * window implies. Providers are asked for the RIGHT bars instead of their own default, so
+ * a 24-hour path request cannot silently return daily candles.
+ */
+export function requiredResolutionBrief(requirements: readonly ResearchRequirement[]): Resolution | undefined {
+  let named: Resolution | undefined;
+  let smallestWindow: number | undefined;
+  for (const row of requirements) {
+    if (row.status === "SATISFIED" || row.role === "CONTEXT" || row.role === "CHALLENGE") continue;
+    if ((row.dataFacets ?? []).length === 0) continue;
+    const rowResolution = requiredResolutionOf(row);
+    if (rowResolution !== undefined && (named === undefined || resolutionCovers(named, rowResolution))) {
+      named = rowResolution;
+    }
+    const window = row.windowHours ?? requestedWindowHoursOf(row.description);
+    if (window !== undefined && (smallestWindow === undefined || window < smallestWindow)) smallestWindow = window;
+  }
+  if (named !== undefined) return named;
+  return impliedResolutionForWindow(smallestWindow);
+}
+
+/**
+ * THE WINDOW THIS RUN STILL OWES (MC-5): the narrowest lookback any unmet requirement
+ * names. It travels with the call so a provider answers THE window the trader asked for
+ * instead of its own default (the live defect: a "last 7 days" ask was served three years
+ * of daily candles because the window never reached the provider). This is a REQUEST, not
+ * a claim about what will be served; coverage is still decided from the payload.
+ */
+export function requiredWindowHoursBrief(requirements: readonly ResearchRequirement[]): number | undefined {
+  let smallest: number | undefined;
+  for (const row of requirements) {
+    if (row.status === "SATISFIED" || row.role === "CONTEXT" || row.role === "CHALLENGE") continue;
+    const window = row.windowHours ?? requestedWindowHoursOf(row.description);
+    if (window === undefined) continue;
+    if (smallest === undefined || window < smallest) smallest = window;
+  }
+  return smallest;
+}
+
+/**
+ * The capability params the briefs add for THIS call (what the adaptive loop's per-task
+ * builder produces). The flow runner forwards the SAME briefs with THESE keys so both
+ * schedulers speak identical provider vocabulary.
+ */
+export function requirementBriefParams(requirements: readonly ResearchRequirement[]): Record<string, unknown> {
+  const facets = requiredFacetsBrief(requirements);
+  const resolution = requiredResolutionBrief(requirements);
+  const windowHours = requiredWindowHoursBrief(requirements);
+  return {
+    ...(facets.length > 0 ? { requiredFacets: facets } : {}),
+    ...(resolution !== undefined ? { requiredResolution: resolution } : {}),
+    ...(windowHours !== undefined ? { requiredWindowHours: windowHours } : {}),
+  };
+}
+
 export function engineMarketClass(question: string, resolvedAsset?: string): SubjectMarketClass {
   const fromQuestion = subjectClassOfKind(resolveInstrument(question)?.kind);
   if (fromQuestion !== "UNKNOWN") return fromQuestion;
@@ -857,51 +928,8 @@ export async function runAdaptiveResearch(
         roundsSkippedByBudget = true;
         break;
       }
-      // THE SHAPES THIS RUN STILL OWES: the union of the unmet rows' demanded data shapes, in a
-  // stable order. Read from the ledger, so it changes exactly when the trader's request does.
-  const requiredFacetBrief = (): readonly string[] => {
-    const out: string[] = [];
-    for (const row of requirements) {
-      if (row.status === "SATISFIED" || row.role === "CONTEXT" || row.role === "CHALLENGE") continue;
-      for (const facet of row.dataFacets ?? []) if (!out.includes(facet)) out.push(facet);
-    }
-    return out;
-  };
-      // THE RESOLUTION THIS RUN STILL OWES: the finest granularity any unmet shape row names
-      // ("hourly"), or — when no resolution is named — the granularity the smallest unmet
-      // window implies. Providers are asked for the RIGHT bars instead of their own default, so
-      // a 24-hour path request cannot silently return daily candles.
-      const requiredResolutionBrief = (): Resolution | undefined => {
-        let named: Resolution | undefined;
-        let smallestWindow: number | undefined;
-        for (const row of requirements) {
-          if (row.status === "SATISFIED" || row.role === "CONTEXT" || row.role === "CHALLENGE") continue;
-          if ((row.dataFacets ?? []).length === 0) continue;
-          const rowResolution = requiredResolutionOf(row);
-          if (rowResolution !== undefined && (named === undefined || resolutionCovers(named, rowResolution))) {
-            named = rowResolution;
-          }
-          const window = row.windowHours ?? requestedWindowHoursOf(row.description);
-          if (window !== undefined && (smallestWindow === undefined || window < smallestWindow)) smallestWindow = window;
-        }
-        if (named !== undefined) return named;
-        return impliedResolutionForWindow(smallestWindow);
-      };
-      // THE WINDOW THIS RUN STILL OWES (MC-5): the narrowest lookback any unmet requirement
-      // names. It travels with the call so a provider answers THE window the trader asked for
-      // instead of its own default (the live defect: a "last 7 days" ask was served three years
-      // of daily candles because the window never reached the provider). This is a REQUEST, not
-      // a claim about what will be served; coverage is still decided from the payload.
-      const requiredWindowHoursBrief = (): number | undefined => {
-        let smallest: number | undefined;
-        for (const row of requirements) {
-          if (row.status === "SATISFIED" || row.role === "CONTEXT" || row.role === "CHALLENGE") continue;
-          const window = row.windowHours ?? requestedWindowHoursOf(row.description);
-          if (window === undefined) continue;
-          if (smallest === undefined || window < smallest) smallest = window;
-        }
-        return smallest;
-      };
+      // THE SHAPES / RESOLUTION / WINDOW THIS RUN STILL OWES: shared helpers (see
+      // `requirementBriefParams`) so the flow runner sends the SAME briefs, not a copy.
 
       // Independent capability calls run in PARALLEL (performance mandate §32): the registry
       // executes each through its own provider chain with bounded transport timeouts, and one
@@ -919,16 +947,11 @@ export async function runAdaptiveResearch(
           capability,
           {
             ...(options.capabilityParams ?? {}),
-            // SHAPE BRIEF (research-integrity contract): the unresolved rows' demanded data
-            // shapes travel with the call, so a provider that serves several shapes from one
-            // tool can serve the RIGHT one. The market-intel tool answers `crypto_market` for a
-            // spot reading and the same `crypto_market` for an hourly candle series; without this
-            // brief it could only pick its default, which is why a request for the last 24 hours
-            // of price path came back as one instant. This is a REQUEST, never a claim about
+            // SHAPE + RESOLUTION + WINDOW BRIEF (research-integrity contract / MC-5): the
+            // unresolved ledger rows' demanded shapes, granularity and lookback travel with
+            // the call (`requirementBriefParams`). This is a REQUEST, never a claim about
             // what will be served — coverage is decided from the payload when it arrives.
-            ...(requiredFacetBrief().length > 0 ? { requiredFacets: requiredFacetBrief() } : {}),
-            ...(requiredResolutionBrief() !== undefined ? { requiredResolution: requiredResolutionBrief() } : {}),
-            ...(requiredWindowHoursBrief() !== undefined ? { requiredWindowHours: requiredWindowHoursBrief() } : {}),
+            ...requirementBriefParams(requirements),
           },
           systemOrigin,
           at(),

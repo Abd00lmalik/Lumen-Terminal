@@ -140,6 +140,55 @@ function candleText(o: Record<string, unknown>): string | undefined {
   );
 }
 
+/**
+ * THE RETRIEVED SERIES AS A READABLE TABLE (presentation law, market-data summary).
+ *
+ * The adapter's single series observation (`{symbol, interval, from, to, sessions, candles:[…]}`)
+ * has no `month` and carries one row per session, so it degraded to a generic key/value line in
+ * which the actual candles were invisible. This handler renders the SAME frozen bytes as the
+ * window a trader actually asked for: timestamped sessions bounded to the requested one
+ * (`requestedHours`), each as `YYYY-MM-DD open/high/low/close[/volume]`, deterministic and read
+ * only from the payload — an unrecognised candle row is skipped, never invented. The trailing
+ * `sessions:` and `coverage:` clauses come from the payload's own `sessions` field and its
+ * first/last timestamps so the table states its own span honestly.
+ */
+function seriesText(o: Record<string, unknown>, requestedHours?: number): string | undefined {
+  const candles = o["candles"];
+  if (!Array.isArray(candles) || candles.length === 0) return undefined;
+  const rows = candles.filter(isRecord).slice(-24); // bounded: the latest sessions a trader reads
+  if (rows.length === 0) return undefined;
+  const parts = rows.map((c) => {
+    const ts = str(c["ts"]) ?? "";
+    const open = num(c["open"]);
+    const high = num(c["high"]);
+    const low = num(c["low"]);
+    const close = num(c["close"]);
+    const volume = num(c["volume"]);
+    if (ts === "" || open === undefined || high === undefined || low === undefined || close === undefined) return undefined;
+    const fields = [`${ts.substring(0, 10)}`, `open ${price(open)}`, `high ${price(high)}`, `low ${price(low)}`, `close ${price(close)}`];
+    if (volume !== undefined) fields.push(`volume ${compact(volume)}`);
+    return fields.join(" | ");
+  }).filter((t): t is string => t !== undefined);
+  if (parts.length === 0) return undefined;
+  const symbol = str(o["symbol"]);
+  const head = `${symbol !== undefined ? `${symbol} ` : ""}${str(o["interval"]) ?? ""} candles`.trim();
+  const sessions = num(o["sessions"]);
+  const firstRow = candles.find(isRecord);
+  const lastRow = [...candles].reverse().find(isRecord);
+  const firstTs = firstRow !== undefined ? str(firstRow["ts"]) : undefined;
+  const lastTs = lastRow !== undefined ? str(lastRow["ts"]) : undefined;
+  const coverage = firstTs !== undefined && lastTs !== undefined
+    ? `coverage ${firstTs.substring(0, 10)} to ${lastTs.substring(0, 10)}`
+    : undefined;
+  const tailClause = tail(
+    sessions !== undefined ? `retrieved sessions: ${sessions}` : undefined,
+    coverage,
+    ...(requestedHours !== undefined ? [`requested window: ${requestedHours}h`] : []),
+  );
+  const body = [head, ...parts].join("\n");
+  return tailClause.length > 0 ? `${body}\n(${tailClause})` : body;
+}
+
 /** Anything else: its own key/value pairs, plumbing dropped, never a raw JSON blob. */
 function pairsText(o: Record<string, unknown>): string {
   const parts: string[] = [];
@@ -165,6 +214,10 @@ function readableValue(value: unknown): string {
 }
 
 function readableRecord(o: Record<string, unknown>): string {
+  // THE RETRIEVED SERIES FIRST: a whole-price-series payload must read as its own readable
+  // table (below), not as a generic key/value dump in which the candles are JSON noise.
+  const series = seriesText(o, num(o["windowHours"]) ?? num(o["requestedWindowHours"]));
+  if (series !== undefined) return series;
   return newsText(o) ?? quoteText(o) ?? metricText(o) ?? candleText(o) ?? pairsText(o);
 }
 

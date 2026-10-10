@@ -18,7 +18,7 @@
  */
 
 import type { CapabilityRegistry } from "../adapters/capability-registry.js";
-import { PLANNER_CAPABILITIES, partialDecision, engineMarketClass, retrievalBrief, withinWaveBudget, capabilitySlice, executeCapabilityBounded } from "./adaptive.js";
+import { PLANNER_CAPABILITIES, partialDecision, engineMarketClass, retrievalBrief, withinWaveBudget, capabilitySlice, executeCapabilityBounded, requirementBriefParams } from "./adaptive.js";
 import { computeConfidence, type ConfidenceComponents } from "./confidence.js";
 import { validateContractOutcome } from "./contract-boundary.js";
 import { type QuestionResolution } from "./question-resolution.js";
@@ -410,7 +410,7 @@ export async function runFlow(
     const flatCalls: { capability: string }[] = [];
     for (const task of roundTasks) for (const capability of task.capabilities) flatCalls.push({ capability });
 
-    const executions: FlowExecution[] = await executeBatch(flatCalls, round, researchRef, options, systemOrigin, at, ingestedSignatures);
+    const executions: FlowExecution[] = await executeBatch(flatCalls, round, researchRef, options, systemOrigin, at, ingestedSignatures, requirementBriefParams(requirements));
     allExecutions.push(...executions);
 
     // CHALLENGE-ATTEMPT LAW + coverage from THIS run's evidence (engine-assessed, never the
@@ -531,6 +531,7 @@ export async function runFlow(
       systemOrigin,
       at,
       ingestedSignatures,
+      requirementBriefParams(requirements),
     );
     allExecutions.push(...deepExecutions);
     rounds.push({ round: rounds.length + 1, executions: deepExecutions, decision: finalDecision });
@@ -631,6 +632,16 @@ async function executeBatch(
   systemOrigin: ProvenanceOrigin,
   at: () => Date,
   alreadyIngested: Set<string> = new Set<string>(),
+  /**
+   * SHAPE / RESOLUTION / WINDOW BRIEF for every call in this batch (research-integrity
+   * contract + MC-5, forwarded through `requirementBriefParams`): the runner's ONE slice per
+   * capability executes the plan with the SAME provider vocabulary the adaptive loop sends —
+   * the unresolved ledger rows' demanded shapes, granularity and lookback. A windowed ask
+   * ("last 7 days") reaches the provider as `requiredWindowHours`, so a Yahoo fetch is ranged
+   * to COVER the window instead of the 1mo default and a series that spans days of real
+   * candle timestamps lands in the graph. Omitted only by tests that script every call.
+   */
+  briefParams: Record<string, unknown> = {},
 ): Promise<FlowExecution[]> {
   const results: FlowExecution[] = new Array(calls.length);
   let cursor = 0;
@@ -651,7 +662,14 @@ async function executeBatch(
       const result = await executeCapabilityBounded(
         options.registry,
         capability,
-        { ...(options.capabilityParams ?? {}) },
+        {
+          ...(options.capabilityParams ?? {}),
+          // SHARED BRIEF (one law with the adaptive loop): the shapes/resolution/window the
+          // unmet ledger rows still owe travel with every flow-routed call too. Without it a
+          // flow run asked a market-data provider for its own default (`1mo/1d`) regardless of
+          // the requested window, and coverage then measured the retrieved candles' span.
+          ...briefParams,
+        },
         systemOrigin,
         at(),
         capabilitySlice(options.capabilitySliceMs),
