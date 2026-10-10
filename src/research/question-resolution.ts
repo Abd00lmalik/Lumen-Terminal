@@ -618,9 +618,12 @@ export function evaluateQuestionResolution(input: QuestionResolutionInput): Ques
   const temporalScope = temporalScopeOf(input.question);
   const required = requiredDimensionsFor(intent);
   const evidenceCount = input.evidenceCount ?? ledgerEvidenceCount(input.ledger);
-  const relevantEvidenceCount = input.ledger
-    .filter((r) => r.role !== "CONTEXT" && r.evidenceRefs.length > 0)
-    .reduce((n, r) => n + r.evidenceRefs.length, 0);
+  // DISTINCT refs across non-CONTEXT rows: summing per-row counts counted the same observation
+  // once per requirement it served, so the UI read "195 relevant of 20 evidence" — a "relevant"
+  // number larger than the total evidence in the run. Relevant can never exceed total.
+  const relevantEvidenceCount = new Set(
+    input.ledger.filter((r) => r.role !== "CONTEXT" && r.evidenceRefs.length > 0).flatMap((r) => r.evidenceRefs),
+  ).size;
   const staleEvidenceCount = input.ledger.reduce((n, r) => n + r.staleOnlyRefs.length, 0);
   // The domains the run actually HELD (admitted observations only): what the attempt law may
   // claim was reachable. Absent when the caller has no observation pool to describe.

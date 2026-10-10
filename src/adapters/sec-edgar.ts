@@ -80,7 +80,20 @@ function issuerTickerOf(params: Record<string, unknown>): string | undefined {
   const raw = [params.symbol, params.asset, params.ticker, params.issuer]
     .find((v) => typeof v === "string" && v.trim() !== "");
   if (typeof raw !== "string") return undefined;
-  const token = (raw.trim().toUpperCase().split(/[\s/:.\-]/)[0] ?? "").replace(/[^A-Z0-9]/g, "");
+  const head = raw.trim().toUpperCase().split(/[\s/]+/)[0] ?? "";
+  // DERIVATIVE/INDEX/FX FORMS ARE NOT ISSUERS (relevance contract): a futures, index or FX
+  // symbol carries a contract/exchange marker (`CL=F`, `^GSPC`, `EURUSD=X`) that denotes an
+  // instrument, never a corporate registrant. Stripping that marker turned `CL=F` (crude oil
+  // futures) into the ticker `CLF` and resolved it to Cleveland-Cliffs, so an oil question
+  // silently acquired an unrelated issuer's SEC filings. Such a symbol resolves to NO issuer.
+  if (/[=^:/]/.test(head)) return undefined;
+  // A CORPORATE FORM IS A BASE SYMBOL PLUS AT MOST A SINGLE-LETTER CLASS SUFFIX (`BRK.B`,
+  // `BF-B`). Exchange-qualified index/FX forms (`DX-Y.NYB`) have more segments and are not
+  // issuers; resolving their first segment would reach an unrelated registrant.
+  const parts = head.split(/[.\-]/).filter((p) => p !== "");
+  if (parts.length === 0 || parts.length > 2) return undefined;
+  if (parts.length === 2 && !/^[A-Z]$/.test(parts[1]!)) return undefined;
+  const token = (parts[0] ?? "").replace(/[^A-Z0-9]/g, "");
   // 1-5 uppercase letters: the corporate-ticker shape. Anything longer (a company name, a
   // crypto pair) is not a ticker and is not silently truncated into one.
   if (!/^[A-Z]{1,5}$/.test(token)) return undefined;
