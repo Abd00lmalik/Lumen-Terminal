@@ -67,23 +67,42 @@ interface Candle {
   readonly volume: number | null;
 }
 
+/** A value that is genuinely a finite number; anything else (null, NaN, a string) is absent. */
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Yahoo v8 chart -> candles.
+ *
+ * DEFENSIVE ARRAY HANDLING (research-integrity contract §3): the OHLCV arrays are PROVIDER data
+ * and are not guaranteed to be dense, present or equal-length (a suspended session, an intraday
+ * partial bar, a mismatched array). Each row is read ONLY from indices that actually carry a
+ * finite value; a row missing ANY of open/high/low/close is DROPPED rather than backfilled from
+ * `close`, because substituting one field for another fabricates an observation the provider
+ * never made. Volume stays null when absent; it is never zero-filled or estimated.
+ */
 function parseYahooChart(body: unknown): { candles: Candle[]; meta: YahooChartResult["meta"] } {
   const result = (body as { chart?: { result?: YahooChartResult[] } }).chart?.result?.[0];
   if (!result) return { candles: [], meta: undefined };
   const meta = result.meta;
-  const timestamps = result.timestamp ?? [];
+  const timestamps = Array.isArray(result.timestamp) ? result.timestamp : [];
   const quote = result.indicators?.quote?.[0] ?? {};
   const candles: Candle[] = [];
   for (let i = 0; i < timestamps.length; i += 1) {
-    const close = quote.close?.[i];
-    if (close === null || close === undefined) continue; // incomplete session row
+    const stamp = finiteNumber(timestamps[i]);
+    const open = finiteNumber(quote.open?.[i]);
+    const high = finiteNumber(quote.high?.[i]);
+    const low = finiteNumber(quote.low?.[i]);
+    const close = finiteNumber(quote.close?.[i]);
+    if (stamp === undefined || open === undefined || high === undefined || low === undefined || close === undefined) continue;
     candles.push({
-      ts: new Date(timestamps[i]! * 1000).toISOString().slice(0, 10),
-      open: quote.open?.[i] ?? close,
-      high: quote.high?.[i] ?? close,
-      low: quote.low?.[i] ?? close,
+      ts: new Date(stamp * 1000).toISOString().slice(0, 10),
+      open,
+      high,
+      low,
       close,
-      volume: quote.volume?.[i] ?? null,
+      volume: finiteNumber(quote.volume?.[i]) ?? null,
     });
   }
   return { candles, meta };
@@ -93,22 +112,25 @@ function parseYahooChart(body: unknown): { candles: Candle[]; meta: YahooChartRe
 function parseStooqCsv(csv: string): Candle[] {
   const candles: Candle[] = [];
   const lines = csv.trim().split(/\r?\n/);
+  // An EMPTY CSV cell is absent, not zero: `Number("")` is 0, and backfilling a missing field
+  // (or reading "" as 0) would fabricate a value the provider never sent.
+  const csvNumber = (raw: string | undefined): number | undefined => {
+    if (raw === undefined || raw.trim() === "") return undefined;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : undefined;
+  };
   for (const line of lines.slice(1)) {
     const cols = line.split(",");
     const date = cols[0];
-    const open = Number(cols[1]);
-    const high = Number(cols[2]);
-    const low = Number(cols[3]);
-    const close = Number(cols[4]);
-    if (date === undefined || date === "" || !Number.isFinite(close)) continue;
-    candles.push({
-      ts: date,
-      open: Number.isFinite(open) ? open : close,
-      high: Number.isFinite(high) ? high : close,
-      low: Number.isFinite(low) ? low : close,
-      close,
-      volume: cols[5] !== undefined && Number.isFinite(Number(cols[5])) ? Number(cols[5]) : null,
-    });
+    const open = csvNumber(cols[1]);
+    const high = csvNumber(cols[2]);
+    const low = csvNumber(cols[3]);
+    const close = csvNumber(cols[4]);
+    if (date === undefined || date.trim() === "" || close === undefined) continue;
+    // A row that omits any OHLC field is an INCOMPLETE observation: it is dropped, never
+    // backfilled from `close` (that would invent an open/high/low the provider did not send).
+    if (open === undefined || high === undefined || low === undefined) continue;
+    candles.push({ ts: date.trim(), open, high, low, close, volume: csvNumber(cols[5]) ?? null });
   }
   return candles;
 }
@@ -116,7 +138,9 @@ function parseStooqCsv(csv: string): Candle[] {
 function candleOutputs(candles: Candle[], about: string, limit: number): ToolOutput[] {
   return candles.slice(-limit).map((c) => ({
     outputClass: "QUANTITATIVE_OBSERVATION" as const,
-    content: c,
+    // A MISSING volume is OMITTED, never written as null: the shape law reads facet keys, and a
+    // `volume: null` key would let a payload with no volume values claim a VOLUME shape.
+    content: { ts: c.ts, open: c.open, high: c.high, low: c.low, close: c.close, ...(c.volume !== null ? { volume: c.volume } : {}) },
     about,
     timeframe: "1d",
   }));
@@ -205,6 +229,143 @@ function windowSummaryOutputs(candles: Candle[], about: string): ToolOutput[] {
     });
   }
   return outputs;
+}
+
+// ---------------------------------------------------------------------------
+// WINDOW-AWARE RETRIEVAL + THE RETRIEVED SERIES AS ONE OBSERVATION
+// ---------------------------------------------------------------------------
+
+/** Yahoo `range` tokens, smallest -> largest, with the day-span each one covers. */
+const YAHOO_RANGES: readonly (readonly [number, string])[] = [
+  [5, "5d"], [31, "1mo"], [93, "3mo"], [186, "6mo"], [366, "1y"], [732, "2y"], [1830, "5y"], [3660, "10y"],
+];
+
+/**
+ * The Yahoo `range` token whose span COVERS the requested lookback (in hours).
+ *
+ * A provider asked for "the last 7 days" must be fetched over a range that actually reaches
+ * back that far: the live defect fetched `range=5d` for a 7-day question, so the request could
+ * never be answered no matter how the payload was read. `undefined` (no window named) keeps the
+ * 1mo default, which carries a previous-week baseline for week-over-week asks. This is a
+ * REQUEST; the retrieved candles remain the only source of coverage.
+ */
+export function rangeForWindowHours(hours: number | undefined): string {
+  if (hours === undefined || !Number.isFinite(hours) || hours <= 0) return "1mo";
+  const days = hours / 24;
+  for (const [spanDays, token] of YAHOO_RANGES) if (days <= spanDays) return token;
+  return "10y";
+}
+
+/** The engine's requested window (hours) for this call, when the plan supplied one. */
+function windowHoursOf(params: Record<string, unknown>): number | undefined {
+  for (const raw of [params.requiredWindowHours, params.windowHours]) {
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return raw;
+  }
+  return undefined;
+}
+
+/** Hours of time the retrieved candles span (first session open -> last session close). */
+function seriesSpanHours(candles: readonly Candle[]): number {
+  if (candles.length === 0) return 0;
+  const first = candles[0]!;
+  const last = candles[candles.length - 1]!;
+  return (Date.parse(`${last.ts}T00:00:00Z`) - Date.parse(`${first.ts}T00:00:00Z`)) / 3_600_000 + 24;
+}
+
+/**
+ * THE RETRIEVED SERIES AS ONE OBSERVATION.
+ *
+ * The provider returns a TABLE of timestamped candles. Emitting them ONLY as separate
+ * per-candle outputs gives every row a ZERO-hour span, so a windowed requirement ("this week",
+ * "the last 7 days") could never be matched by the very series that answers it: the engine held
+ * five 0-hour observations instead of one 5-day series and reported the market-data requirement
+ * unmet while the data sat in the graph. This output carries the WHOLE retrieved table
+ * (`candles` plus the explicit `from`/`to` window), so the ingestion boundary measures the true
+ * span and resolution from the payload itself. Nothing is derived or estimated: every row is a
+ * candle the provider returned, and a lone print is not a series (guarded by arity).
+ */
+function seriesOutput(candles: readonly Candle[], symbol: string, interval: string): ToolOutput | undefined {
+  if (candles.length < 2) return undefined;
+  const first = candles[0]!;
+  const last = candles[candles.length - 1]!;
+  return {
+    outputClass: "QUANTITATIVE_OBSERVATION" as const,
+    content: {
+      symbol,
+      interval,
+      from: first.ts,
+      to: last.ts,
+      sessions: candles.length,
+      candles: candles.map((c) => ({
+        ts: c.ts,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        ...(c.volume !== null ? { volume: c.volume } : {}),
+      })),
+    },
+    about: symbol,
+    timeframe: interval,
+  };
+}
+
+/**
+ * THE REQUESTED WINDOW'S OWN OHLC, derived ONLY from the retrieved candles.
+ *
+ * "Period high/low" is defined here EXPLICITLY as the window's INTRADAY high/low FIELDS of the
+ * retrieved candles — `high` is the maximum candle high and `low` the minimum candle low across
+ * the sessions inside the window, never a closing price and never a percentage. `open`/`close`
+ * are the first candle's open and the last candle's close. When the retrieved candles do not
+ * reach back across the whole window, `coverageComplete` is false and the shortfall is stated
+ * in `missingCoverage` — the run gets the honest partial, never a silent gap.
+ */
+function requestedWindowSummary(candles: readonly Candle[], symbol: string, hours: number): ToolOutput {
+  const last = candles[candles.length - 1]!;
+  const sessionDays = Math.max(1, Math.ceil(hours / 24));
+  const cutoff = new Date(`${last.ts}T00:00:00Z`);
+  cutoff.setUTCDate(cutoff.getUTCDate() - (sessionDays - 1));
+  const cutoffIso = cutoff.toISOString().slice(0, 10);
+  const inWindow = candles.filter((c) => c.ts >= cutoffIso);
+  const rows = inWindow.length > 0 ? inWindow : [last];
+  const first = rows[0]!;
+  const high = Math.max(...rows.map((c) => c.high));
+  const low = Math.min(...rows.map((c) => c.low));
+  const changePct = first.open !== 0 ? ((last.close - first.open) / first.open) * 100 : undefined;
+  const observedHours = (Date.parse(`${last.ts}T00:00:00Z`) - Date.parse(`${first.ts}T00:00:00Z`)) / 3_600_000 + 24;
+  return {
+    outputClass: "QUANTITATIVE_OBSERVATION" as const,
+    content: {
+      symbol,
+      metric: "ohlcv_window",
+      windowHours: hours,
+      start: first.ts,
+      end: last.ts,
+      sessions: rows.length,
+      open: first.open,
+      high,
+      low,
+      close: last.close,
+      ...(changePct !== undefined ? { changePct: Number(changePct.toFixed(2)) } : {}),
+      coverageComplete: observedHours + 1e-9 >= hours,
+      basis: `derived only from ${rows.length} retrieved daily candle(s) (${first.ts} to ${last.ts}); high/low are the candles' intraday high/low fields`,
+      ...(observedHours + 1e-9 < hours
+        ? { missingCoverage: `retrieved candles span ${Math.round(observedHours)}h of the requested ${hours}h window` }
+        : {}),
+    },
+    about: symbol,
+    timeframe: "1d",
+  };
+}
+
+/** Honest limitation text when the retrieved window is short of what was requested. */
+function windowCoverageLimitation(candles: readonly Candle[], hours: number | undefined): readonly string[] {
+  if (hours === undefined) return [];
+  const span = seriesSpanHours(candles);
+  if (span + 1e-9 >= hours) return [];
+  return [
+    `requested a ${Math.round(hours)}h window but the retrieved candles span only ${Math.round(span)}h; coverage is reported as partial`, 
+  ];
 }
 
 /**
@@ -297,9 +458,12 @@ export class EquityMarketDataAdapter implements ProviderAdapter {
         limitations: [],
       };
     }
-    // 1mo default (was 5d): week-over-week questions need TWO calendar weeks of sessions;
-    // 5d yielded exactly one and the synthesis honestly reported the missing baseline.
-    const range = typeof params.range === "string" ? params.range : "1mo";
+    // RANGE FOLLOWS THE REQUESTED WINDOW (windowed-retrieval contract): when the plan names a
+    // lookback, fetch a range that COVERS it (a 7-day ask must not be fetched over 5 days).
+    // With no window named the 1mo default stands (it carries a previous-week baseline for
+    // week-over-week questions). An explicit `range` param always wins.
+    const requestedHours = windowHoursOf(params);
+    const range = typeof params.range === "string" ? params.range : rangeForWindowHours(requestedHours);
     const interval = typeof params.interval === "string" ? params.interval : "1d";
     const limit = typeof params.limit === "number" ? params.limit : 5;
 
@@ -335,6 +499,13 @@ export class EquityMarketDataAdapter implements ProviderAdapter {
         // Week-level summaries + week-over-week comparison so synthesis can quote the
         // period comparison directly (limit bounds the verbose candle list only).
         outputs.push(...windowSummaryOutputs(candles, symbol));
+        // THE WHOLE RETRIEVED SERIES AS ONE TIMESTAMPED OBSERVATION (windowed-retrieval
+        // contract): this is what lets a windowed requirement be matched by the data that
+        // answers it, instead of only by 0-hour per-candle rows.
+        const series = seriesOutput(candles, symbol, interval);
+        if (series !== undefined) outputs.push(series);
+        // The REQUESTED window's own OHLC, derived only from the retrieved candles.
+        if (requestedHours !== undefined) outputs.push(requestedWindowSummary(candles, symbol, requestedHours));
         return {
           tool: this.providerId,
           capability,
@@ -346,7 +517,7 @@ export class EquityMarketDataAdapter implements ProviderAdapter {
           freshness: "CURRENT",
           validation: "VALID",
           sourceTimestamp: new Date(`${last.ts}T00:00:00Z`).toISOString(),
-          limitations: this.limitations,
+          limitations: [...this.limitations, ...windowCoverageLimitation(candles, requestedHours)],
         };
       }
     } catch {
@@ -380,33 +551,37 @@ export class EquityMarketDataAdapter implements ProviderAdapter {
     }
     const last = candles[candles.length - 1]!;
     const prev = candles.length >= 2 ? candles[candles.length - 2]!.close : undefined;
+    const stooqOutputs: ToolOutput[] = [
+      {
+        outputClass: "QUANTITATIVE_OBSERVATION" as const,
+        content: {
+          symbol,
+          price: last.close,
+          previousClose: prev,
+          changePct: prev !== undefined && prev !== 0 ? ((last.close - prev) / prev) * 100 : undefined,
+          asOf: `${last.ts} (Stooq daily close)`,
+          source: "Stooq",
+        },
+        about: symbol,
+      },
+      ...candleOutputs(candles, symbol, limit),
+      ...windowSummaryOutputs(candles, symbol),
+    ];
+    const stooqSeries = seriesOutput(candles, symbol, "1d");
+    if (stooqSeries !== undefined) stooqOutputs.push(stooqSeries);
+    if (requestedHours !== undefined) stooqOutputs.push(requestedWindowSummary(candles, symbol, requestedHours));
     return {
       tool: this.providerId,
       capability,
       transport: "rest:stooq.com",
       params: { ...params, symbol },
       rawReference: stooqOutcome.rawReference,
-      outputs: [
-        {
-          outputClass: "QUANTITATIVE_OBSERVATION" as const,
-          content: {
-            symbol,
-            price: last.close,
-            previousClose: prev,
-            changePct: prev !== undefined && prev !== 0 ? ((last.close - prev) / prev) * 100 : undefined,
-            asOf: `${last.ts} (Stooq daily close)`,
-            source: "Stooq",
-          },
-          about: symbol,
-        },
-        ...candleOutputs(candles, symbol, limit),
-        ...windowSummaryOutputs(candles, symbol),
-      ],
+      outputs: stooqOutputs,
       completeness: "COMPLETE",
       freshness: "CURRENT",
       validation: "VALID",
       sourceTimestamp: new Date(`${last.ts}T00:00:00Z`).toISOString(),
-      limitations: [...this.limitations, "served by Stooq CSV fallback after Yahoo chart was unavailable"],
+      limitations: [...this.limitations, "served by Stooq CSV fallback after Yahoo chart was unavailable", ...windowCoverageLimitation(candles, requestedHours)],
     };
   }
 

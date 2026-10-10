@@ -1868,9 +1868,16 @@ export function concernsSubject(text: string, subjectTerms: ReadonlySet<string>)
     // them, at least one substantive), so the canonical forms of an instrument count as the
     // same subject as the text providers write.
     if (/[^A-Z0-9]/.test(term)) {
-      const squashed = term.replace(/[^A-Z0-9]+/g, "");
-      if (tokens.has(squashed)) return true;
       const parts = term.split(/[^A-Z0-9]+/).filter((p) => p !== "");
+      const base = parts[0];
+      const squashed = term.replace(/[^A-Z0-9]+/g, "");
+      // SOURCE-RELEVANCE LAW (futures/index/FX forms): the squashed form must ALSO be
+      // corroborated by the term's own BASE symbol. Concatenating away the punctuation turned
+      // `CL=F` (crude oil futures) into `CLF`, so a crude-oil question admitted Cleveland-Cliffs
+      // filings — a different instrument that merely shares letters. The base (`CL`) is never
+      // named by that filing, so the collision no longer admits unrelated issuer sources;
+      // ^TNX/DX-Y.NYB/EURUSD=X still match because their base IS the token the text reports.
+      if (base !== undefined && tokens.has(squashed) && tokens.has(base)) return true;
       if (parts.some((p) => p.length >= 2) && parts.every((p) => tokens.has(p))) return true;
     }
     if (new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(upper)) return true;
@@ -2423,7 +2430,9 @@ function finestOf(resolutions: readonly Resolution[]): Resolution | undefined {
 export function distinctEvidenceCount(
   req: Pick<ResearchRequirement, "evidenceRefs" | "duplicateEvidenceRefs">,
 ): number {
-  return req.evidenceRefs.length;
+  // DISTINCT refs, not the array length: the row must never report more observations than the
+  // distinct evidence objects it actually cites (the count and the attached evidence agree).
+  return new Set(req.evidenceRefs).size;
 }
 
 export function assessCoverage(
@@ -2441,6 +2450,12 @@ export function assessCoverage(
     // count the trader reads as corroboration.
     const satisfiedIdentity = new Map<string, string>();
     const duplicates: string[] = [];
+    // REF-LEVEL DEDUPE (evidence-count accuracy): the same evidence OBJECT reached through a
+    // second capability alias (or re-matched from a group) must not be cited twice. Without
+    // this, a row's reported evidence count exceeded the number of distinct observations that
+    // actually backed it (the live "71 evidence" for 10 headlines), so the count the trader
+    // reads disagreed with the capability executions and the attached evidence.
+    const satisfiedRefs = new Set<string>();
     // MC-6 GROUP ASSEMBLY: a chunked provider (G1 monthly candle blocks) serves ONE response as
     // several segments; no single segment spans the window, so the matcher read each segment as
     // NO_MATCH and a correct series was unresolvable. The engine assembles each response's
@@ -2461,8 +2476,15 @@ export function assessCoverage(
           continue;
         }
         if (identity !== undefined) satisfiedIdentity.set(identity, item.ref);
-        satisfied.push(...(item.groupRefs ?? [item.ref]));
-      } else if (result === "STALE_ONLY") staleOnly.push(item.ref);
+        let added = false;
+        for (const ref of item.groupRefs ?? [item.ref]) {
+          if (satisfiedRefs.has(ref)) continue;
+          satisfiedRefs.add(ref);
+          satisfied.push(ref);
+          added = true;
+        }
+        if (!added) duplicates.push(item.ref);
+      } else if (result === "STALE_ONLY" && !staleOnly.includes(item.ref)) staleOnly.push(item.ref);
     }
     const status: RequirementStatus =
       satisfied.length > 0 ? "SATISFIED" : staleOnly.length > 0 ? "PARTIALLY_SATISFIED" : req.status === "PARTIALLY_SATISFIED" ? "PARTIALLY_SATISFIED" : "PENDING";
