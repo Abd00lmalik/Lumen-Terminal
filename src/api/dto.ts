@@ -1086,6 +1086,14 @@ export interface ResearchDiagnosticsDTO {
   readonly floorCapabilities: readonly string[];
   readonly recoveryRounds: number;
   /**
+   * WHY NO RECOVERY ROUND RAN, when the run stopped with unresolved material requirements and
+   * recovery was deliberately skipped (bounded recovery: a wave only starts when the remaining
+   * budget can finish it, because a wave killed mid-flight loses the evidence already gathered).
+   * Absent when recovery ran, when nothing was left unresolved, or when the contract forbids it —
+   * so "0 recovery rounds" beside unmet rows is an explained decision, never a silent zero.
+   */
+  readonly recoveryNote?: string;
+  /**
    * The engine's completion gate verdict per research outcome the request ran (a request may
    * dispatch its own loop AND route to a flow, each with its own gate).
    */

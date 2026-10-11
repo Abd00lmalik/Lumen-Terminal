@@ -574,6 +574,7 @@ export class ResearchApp {
       }[];
       readonly floorCapabilities?: readonly string[];
       readonly recoveryRounds?: number;
+      readonly recoverySkippedReason?: string;
       readonly confidence?: ConfidenceComponents;
       readonly questionResolution?: {
         readonly intent: string;
@@ -603,6 +604,7 @@ export class ResearchApp {
     ]
       .filter((outcome): outcome is NonNullable<typeof outcome> => outcome !== undefined)
       .map((outcome) => outcome as unknown as OutcomeLike);
+    const recoveryNote = loopOutcomes.map((o) => o.recoverySkippedReason).find((note) => note !== undefined);
     const executionRecords = loopOutcomes.flatMap((o) => o.executions ?? []);
     const requirementLedger = loopOutcomes.flatMap((o) => o.requirements ?? []);
     // Engine-computed confidence: the most conservative value across this request's outcomes
@@ -669,6 +671,10 @@ export class ResearchApp {
               })),
               floorCapabilities: [...new Set(loopOutcomes.flatMap((o) => o.floorCapabilities ?? []))],
               recoveryRounds: Math.max(...loopOutcomes.map((o) => o.recoveryRounds ?? 0)),
+              // Bounded-recovery honesty: the engine's own explanation for skipping recovery, so
+              // the coverage panel can say why a zero sits beside unmet requirements. First
+              // explanation across this request's outcomes wins (they share one deadline).
+              ...(recoveryNote !== undefined ? { recoveryNote } : {}),
               completionGates: gates,
               completionGate: gates[gates.length - 1] ?? "UNKNOWN",
               coverage:

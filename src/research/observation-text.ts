@@ -141,6 +141,32 @@ function candleText(o: Record<string, unknown>): string | undefined {
 }
 
 /**
+ * A SINGLE timestamped OHLCV bar: the shape the per-candle outputs carry (a whole-series payload
+ * is rendered by `seriesText` below). Rendering a bar through the generic quote handler read its
+ * `close` as a "price" and dropped the session's open/high/low context, so a requested price
+ * sequence came back as `price at 87.9, 24h volume 245.00K` with no date and no instrument.
+ * Every field is read from the payload; a record without a date or without OHLC stays unrendered.
+ */
+function candleRowText(o: Record<string, unknown>): string | undefined {
+  const ts = str(o["ts"]) ?? str(o["date"]) ?? str(o["timestamp"]);
+  const open = num(o["open"]);
+  const high = num(o["high"]);
+  const low = num(o["low"]);
+  const close = num(o["close"]);
+  if (ts === undefined || open === undefined || high === undefined || low === undefined || close === undefined) return undefined;
+  const name = str(o["symbol"]) ?? str(o["instrument"]) ?? str(o["ticker"]);
+  const volume = num(o["volume"]);
+  return tail(
+    `${name !== undefined ? `${name} ` : ""}${ts.substring(0, 10)}`,
+    `open ${price(open)}`,
+    `high ${price(high)}`,
+    `low ${price(low)}`,
+    `close ${price(close)}`,
+    volume !== undefined ? `volume ${compact(volume)}` : undefined,
+  );
+}
+
+/**
  * THE RETRIEVED SERIES AS A READABLE TABLE (presentation law, market-data summary).
  *
  * The adapter's single series observation (`{symbol, interval, from, to, sessions, candles:[…]}`)
@@ -218,7 +244,7 @@ function readableRecord(o: Record<string, unknown>): string {
   // table (below), not as a generic key/value dump in which the candles are JSON noise.
   const series = seriesText(o, num(o["windowHours"]) ?? num(o["requestedWindowHours"]));
   if (series !== undefined) return series;
-  return newsText(o) ?? quoteText(o) ?? metricText(o) ?? candleText(o) ?? pairsText(o);
+  return newsText(o) ?? candleRowText(o) ?? quoteText(o) ?? metricText(o) ?? candleText(o) ?? pairsText(o);
 }
 
 /**

@@ -22,10 +22,18 @@
  * Epistemic honesty: these are delayed market QUOTES (quantitative observations), not
  * economic releases, not Fed policy text, and not analyst interpretation. Market-implied
  * series are labeled as such in the limitations; no value is derived or inferred.
+ *
+ * WHAT IT CANNOT SERVE (and now says so): every observable is fetched with a FIXED
+ * `range=5d` and only the response's `meta` block is read, so one output per instrument — a
+ * single current reading. A requirement that demands an OHLCV series, a period high/low, a
+ * windowed volume or a lookback longer than five sessions cannot be answered here; the
+ * snapshot gate below rejects such a fallback instead of closing the capability with an
+ * instant (see the rs_000382 note in `validateFallback`).
  */
 import type { ProviderAdapter, CapabilityName } from "./capability-registry.js";
-import type { ToolResultInput, ToolOutput } from "../domain/tool-result.js";
+import type { ToolResult, ToolResultInput, ToolOutput } from "../domain/tool-result.js";
 import { RestTransport } from "./transports/rest.js";
+import { validateCurrentQuoteFallback, type FallbackGate } from "./fallback-compatibility.js";
 
 const YAHOO_UA = "Mozilla/5.0 (compatible; LumenTerminal/1.0; research read-only)";
 
@@ -187,5 +195,18 @@ export class MarketRegimeAdapter implements ProviderAdapter {
       failure: { type: "NONE", retriable: false },
       limitations: this.limitations,
     };
+  }
+
+  /**
+   * A current reading must never stand in for a time series (rs_000382). This provider serves
+   * ONE snapshot per instrument from a fixed `range=5d` fetch, so when the caller's ledger
+   * demands an OHLCV/series/high/low/volume shape — or a lookback longer than five sessions — the
+   * registry must keep walking the chain instead of closing the capability with an instant. The
+   * snapshot stays fully available for the current readings it really is (a live index/yield/USD
+   * level), which is what the primary market-data path is NOT asked for in that case.
+   */
+  validateFallback(capability: CapabilityName, params: Record<string, unknown>, result: ToolResult): FallbackGate {
+    void capability;
+    return validateCurrentQuoteFallback(params, result, "the current market-regime quote");
   }
 }

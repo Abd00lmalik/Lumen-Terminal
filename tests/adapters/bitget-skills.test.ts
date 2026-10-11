@@ -28,7 +28,16 @@ describe("five Bitget skills registered through the generic registry (final lock
     const { registry } = createBitgetAdapterSet({ mcp: mcp as never, rest: rest as never, fallbacks: false });
 
     expect(registry.resolve("MACRO_ANALYSIS").map((r) => r.adapter.providerId)).toEqual(["bitget-signal/macro-analyst"]);
-    expect(registry.resolve("MARKET_DATA_ANALYSIS").map((r) => r.adapter.providerId)).toEqual(["bitget-signal/market-intel"]);
+    // The generic MARKET_DATA_ANALYSIS capability declares OHLCV/series/high/low/volume shapes
+    // (requirements.ts CAPABILITY_SUPPORT), so the real price-series provider is wired into its
+    // chain: the Bitget primary stays FIRST on the equal-priority tie, the equity/commodity/FX
+    // OHLCV adapter follows it (it returns EMPTY here without a resolvable ticker, so the macro
+    // snapshot providers keep serving basket questions), and the current-quote regime snapshot is
+    // gated out of windowed requests entirely.
+    expect(registry.resolve("MARKET_DATA_ANALYSIS").map((r) => r.adapter.providerId)).toEqual([
+      "bitget-signal/market-intel",
+      "equity/yahoo-chart",
+    ]);
     expect(registry.resolve("SENTIMENT_ANALYSIS").map((r) => r.adapter.providerId)).toEqual(["bitget-signal/sentiment-analyst"]);
     // Equity capabilities (2026-09-18) register NEWS_ANALYSIS via the Yahoo headline feed
     // alongside the Bitget primary; everything else stays single-provider here.
@@ -188,10 +197,11 @@ describe("five Bitget skills registered through the generic registry (final lock
   });
 
   it("adapters are wired as flat instances; no hidden per-flow branches in the factory", () => {
-    // the factory registers 15 providers across the probed capabilities by DEFAULT (5 skills +
-    // G1 + G2 + 4 capability fallbacks incl. CoinGecko + 4 equity + the keyless EDGAR/derivatives
-    // replacements reachable via these capability names). G1 (2026-09-15) and G2 (2026-09-15)
-    // replace their stubs.
+    // the factory registers these providers across the probed capabilities by DEFAULT (5 skills +
+    // G1 + G2 + 4 capability fallbacks incl. CoinGecko + 5 equity (the market-data adapter serves
+    // MARKET_DATA_ANALYSIS as well as the equity/commodity/FX capabilities) + the keyless
+    // EDGAR/derivatives replacements reachable via these capability names). G1 (2026-09-15) and
+    // G2 (2026-09-15) replace their stubs.
     const { registry } = createBitgetAdapterSet({ mcp: mcp as never, rest: rest as never });
     const providers = new Set<string>();
     for (const capability of ["MACRO_ANALYSIS", "MARKET_DATA_ANALYSIS", "SENTIMENT_ANALYSIS", "NEWS_ANALYSIS", "TECHNICAL_ANALYSIS", "HISTORICAL_COMPARISON", "SOURCE_VALIDATION"]) {
@@ -203,6 +213,7 @@ describe("five Bitget skills registered through the generic registry (final lock
       "bitget-signal/news-briefing",
       "bitget-signal/sentiment-analyst",
       "bitget-signal/technical-analysis",
+      "equity/yahoo-chart",
       "equity/yahoo-headlines",
       "fallback/coingecko-market",
       "fallback/fear-greed",

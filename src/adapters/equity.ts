@@ -426,7 +426,19 @@ function schemaError(tool: string, capability: CapabilityName, params: Record<st
 
 export class EquityMarketDataAdapter implements ProviderAdapter {
   readonly providerId = "equity/yahoo-chart";
-  readonly capabilities: readonly CapabilityName[] = ["EQUITY_MARKET_DATA", "COMMODITY_MARKET_DATA", "FX_MARKET_DATA"];
+  // MARKET_DATA_ANALYSIS is a DECLARATION, not a label: the capability's own support contract
+  // (requirements.ts CAPABILITY_SUPPORT) promises OHLCV / SERIES / HIGH / LOW / OPEN / CLOSE /
+  // VOLUME / TIMESTAMP shapes. A generic market-data capability therefore has to be reachable by
+  // a provider that can actually return those shapes — the price-series provider belongs in its
+  // chain. The live defect this closes (rs_000382): a 7-day crude-oil question whose plan named
+  // the generic MARKET_DATA_ANALYSIS capability was served by a current-quote snapshot provider
+  // that hardcodes `range=5d` and emits ONE instant per instrument, so period high/low, volume
+  // and the timestamped sequence could never exist no matter how the payload was read, while the
+  // real 7-day OHLCV pipeline (fixed in the window-bearing coverage work) was never consulted.
+  // Registration order keeps the Bitget primary first on ties; a request with no resolvable
+  // ticker stays EMPTY here so the registry continues to the snapshot/basket providers, and a
+  // crypto symbol is still refused (it is served by the crypto market-data chain).
+  readonly capabilities: readonly CapabilityName[] = ["EQUITY_MARKET_DATA", "COMMODITY_MARKET_DATA", "FX_MARKET_DATA", "MARKET_DATA_ANALYSIS"];
   readonly limitations: readonly string[] = [
     "Yahoo Finance chart data: delayed US equities; not a licensed real-time feed",
     "daily OHLCV history is provider-limited to the requested range",
@@ -443,7 +455,7 @@ export class EquityMarketDataAdapter implements ProviderAdapter {
   }
 
   async execute(capability: CapabilityName, params: Record<string, unknown>, call?: CapabilityCall): Promise<ToolResultInput> {
-    if (capability !== "EQUITY_MARKET_DATA" && capability !== "COMMODITY_MARKET_DATA" && capability !== "FX_MARKET_DATA") {
+    if (capability !== "EQUITY_MARKET_DATA" && capability !== "COMMODITY_MARKET_DATA" && capability !== "FX_MARKET_DATA" && capability !== "MARKET_DATA_ANALYSIS") {
       throw new Error(`${this.providerId} has no mapping for capability ${capability}`);
     }
     const symbol = symbolOf(params);

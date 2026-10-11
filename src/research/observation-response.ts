@@ -30,6 +30,7 @@
 import type { Evidence } from "../domain/objects.js";
 import type { ResearchRequirement } from "./requirements.js";
 import type { SourcingClass } from "../domain/objects.js";
+import { readableObservation } from "./observation-text.js";
 
 /** The sourcing class of one observation; unclassified items are never counted as observations. */
 export function sourcingClassOf(evidence: Pick<Evidence, "sourcing" | "sourceType">): SourcingClass | undefined {
@@ -68,10 +69,36 @@ function stamp(value: string | undefined): string {
   return `${parsed.toISOString().slice(0, 10)} ${parsed.toISOString().slice(11, 16)} UTC`;
 }
 
-/** A compact one-line rendering of an observation; long payloads are truncated, never dropped. */
+/**
+ * A compact one-line rendering of an observation; long payloads are truncated, never dropped.
+ *
+ * READABLE, NEVER RAW JSON: a market-data observation IS a JSON object, and printing it verbatim
+ * put `{"symbol":"CL=F","interval":"1d","from":…,"candles":[…]}` in front of the trader where
+ * the requested price path belonged (the rs_000382 "no useful summary" complaint: the data had
+ * arrived, the sentence had not). `readableObservation` renders the SAME frozen bytes as prose —
+ * a series becomes its timestamped OHLCV rows, a quote its price and change, a metric its measure
+ * and value — and returns a non-JSON observation unchanged, so nothing is rewritten or invented.
+ */
 function line(e: Evidence): string {
-  const text = e.observation.replace(/\s+/g, " ").trim();
-  return text.length > 220 ? `${text.slice(0, 217)}...` : text;
+  const rendered = readableObservation(e.observation, 320);
+  // NAME THE SUBJECT when the payload itself does not (a per-candle OHLCV bar carries only its
+  // numbers). The evidence's OWN `subject` field travels with the line — read, never inferred —
+  // so a timestamped price can be attributed to the instrument it belongs to.
+  const subject = e.subject?.trim();
+  if (subject === undefined || subject === "" || rendered.toUpperCase().includes(subject.toUpperCase())) return rendered;
+  return `${subject}: ${rendered}`;
+}
+
+/**
+ * The timeline entries shown: chronological, bounded, and ALWAYS spanning both ends — the earliest
+ * observed print (the starting value a windowed question asks for) and the latest one (the current
+ * reading, which must be reported with its timestamp). Taking only the first N entries silently
+ * dropped the newest observation of a multi-session run, so a partially covered window showed its
+ * oldest candles and never the latest price.
+ */
+function timelineSample(timeline: readonly Evidence[], max = 4): readonly Evidence[] {
+  if (timeline.length <= max) return timeline;
+  return [...timeline.slice(0, max - 1), timeline[timeline.length - 1]!];
 }
 
 /** Event time when the source declared one, else when the system observed it. */
@@ -105,7 +132,7 @@ export function renderObservationResponse(input: ObservationResponseInput): Obse
       "The requested timeline could not be established from the evidence this run retrieved: no directly observed price, OHLCV or volume record for the requested window was available. Nothing has been substituted for it.",
     );
   } else {
-    for (const e of timeline.slice(0, 4)) {
+    for (const e of timelineSample(timeline)) {
       // A plain hyphen, not an em dash: the transport layer rewrites em dashes to "; " (uiText), which
     // turned every timeline entry into "[time] ; BTC ..." on screen.
     parts.push(`[${stamp(eventTime(e))}] - ${line(e)} [${e.id}]`);

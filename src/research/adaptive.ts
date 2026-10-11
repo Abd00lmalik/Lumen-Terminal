@@ -78,6 +78,7 @@ import { ALL_DECISION_DIMENSIONS } from "./question-resolution.js";
 import type { Evidence, Research } from "../domain/objects.js";
 import { createEvidence } from "../domain/objects.js";
 import { eventWindowEvidence, type EventWindowSpec } from "./event-window.js";
+import { renderObservationResponse } from "./observation-response.js";
 import type { ProvenanceOrigin } from "../domain/provenance.js";
 import type { Workspace } from "../domain/workspace.js";
 import { progressEvent, type ProgressListener } from "./progress.js";
@@ -430,6 +431,14 @@ export interface AdaptiveLoopOutcome {
   readonly answer?: string;
   readonly synthesis?: AnswerSynthesis;
   readonly context: ResearchContext;
+  /**
+   * WHY NO GAP-RECOVERY ROUND RAN. Present only when the run stopped with unresolved material
+   * requirements while recovery was deliberately skipped under the bounded-recovery law (a wave
+   * may only start when the remaining budget can finish it). Surfaced in the run diagnostics so
+   * "0 recovery rounds" beside pending CRITICAL rows is an explained decision, never a silent
+   * zero (the rs_000382 record).
+   */
+  readonly recoverySkippedReason?: string;
   /**
    * The engine's final requirement ledger: the coverage state the completion verdict was
    * computed from. The API layer turns UNRESOLVED CRITICAL entries into the response's
@@ -845,6 +854,33 @@ export async function runAdaptiveResearch(
   requirements = markUnattemptableChallenges(requirements, capabilityUsable);
   let recoveryRoundsUsed = 0;
   const MAX_RECOVERY_ROUNDS = contract.allowGapRecovery ? (options.maxRecoveryRounds ?? 2) : 0;
+  /** Set by `budgetStopDecision` when a budget stop skips recovery; travels out in diagnostics. */
+  let recoverySkippedReason: string | undefined;
+  /**
+   * The budget-stop decision, with the BOUNDED-RECOVERY EXPLANATION attached whenever CRITICAL
+   * rows remain unresolved (see `recoverySkipNote`). One helper so every budget stop reports the
+   * same thing about recovery, and the note is derived from the same inputs as the gate itself.
+   */
+  const budgetStopDecision = (reason: "TIME_BUDGET_EXHAUSTED" | "ROUND_BUDGET_EXHAUSTED", atRound: number): AdaptiveDecision => {
+    const blocking = blockingRequirements(requirements).length;
+    const note = recoverySkipNote({
+      recoveryRoundsUsed,
+      maxRecoveryRounds: MAX_RECOVERY_ROUNDS,
+      blockingCount: blocking,
+      deadlineMs: options.deadlineMs,
+      at,
+      round: atRound,
+      maxRounds,
+    });
+    if (note !== undefined) recoverySkippedReason = note;
+    return partialDecision(
+      reason,
+      atRound,
+      allExecutions.flatMap((e) => e.evidenceIds).length,
+      blocking,
+      note,
+    );
+  };
 
   for (let round = 1; round <= maxRounds; round += 1) {
     // Determine this round's tasks: round 1 = the plan; a gap-recovery round = the engine's
@@ -923,7 +959,7 @@ export async function runAdaptiveResearch(
         stoppedBecause = "TIME_BUDGET_EXHAUSTED";
         // `round` (not rounds.length): this round never reached the push, so the count must be
         // the round the budget interrupted, not the number of committed rounds.
-        finalDecision = partialDecision("TIME_BUDGET_EXHAUSTED", round, allExecutions.flatMap((e) => e.evidenceIds).length, blockingRequirements(requirements).length);
+        finalDecision = budgetStopDecision("TIME_BUDGET_EXHAUSTED", round);
         options.onProgress?.(progressEvent("research_stopped", at(), `research stopped: ${stoppedBecause}`, { reason: stoppedBecause }));
         roundsSkippedByBudget = true;
         break;
@@ -1081,7 +1117,7 @@ export async function runAdaptiveResearch(
     if (roundsSkippedByBudget) {
       // Coverage was just re-assessed for the work that DID run, so the partial rationale can
       // name exactly what the budget left uncovered.
-      finalDecision = partialDecision("TIME_BUDGET_EXHAUSTED", round, allExecutions.flatMap((e) => e.evidenceIds).length, blockingRequirements(requirements).length);
+      finalDecision = budgetStopDecision("TIME_BUDGET_EXHAUSTED", round);
       break;
     }
 
@@ -1271,13 +1307,13 @@ export async function runAdaptiveResearch(
     // dying mid-flight (an in-flight run can never deliver its partial truth to the trader).
     if (!hasWaveBudget(options.deadlineMs, at, options.taskWindowMs ?? RESEARCH_TASK_WINDOW_MS)) {
       stoppedBecause = "TIME_BUDGET_EXHAUSTED";
-      finalDecision = partialDecision("TIME_BUDGET_EXHAUSTED", round, allExecutions.flatMap((e) => e.evidenceIds).length, blockingRequirements(requirements).length);
+      finalDecision = budgetStopDecision("TIME_BUDGET_EXHAUSTED", round);
       options.onProgress?.(progressEvent("research_stopped", at(), `research stopped: ${stoppedBecause}`, { reason: stoppedBecause }));
       break;
     }
     if (round === maxRounds) {
       stoppedBecause = "ROUND_BUDGET_EXHAUSTED";
-      finalDecision = partialDecision("ROUND_BUDGET_EXHAUSTED", round, allExecutions.flatMap((e) => e.evidenceIds).length, blockingRequirements(requirements).length);
+      finalDecision = budgetStopDecision("ROUND_BUDGET_EXHAUSTED", round);
       options.onProgress?.(progressEvent("research_stopped", at(), `research stopped: ${stoppedBecause}`, { reason: stoppedBecause }));
       break;
     }
@@ -1584,6 +1620,25 @@ export async function runAdaptiveResearch(
     });
   }
   /**
+   * READABLE PARTIAL ANSWER (zero-dead-end law; the rs_000382 reproduction).
+   *
+   * When evidence WAS gathered but no synthesis survived (the synthesis model failed or returned
+   * nothing that passed the contract boundary), the run previously ended with no answer text at
+   * all: the trader got the internal stop rationale and, for a market-data run, a single raw JSON
+   * snapshot. A partial result is still an obligation — say what WAS observed, with its timestamp
+   * and its provenance ref, separate market observations from reported news, and name the
+   * requirements that remain unestablished.
+   *
+   * Deliberately placed AFTER the question-resolution verdict above and BEFORE the observation-mode
+   * renderer: the readable partial is presentation, never a coverage claim. It cannot upgrade the
+   * run's status (the ledger's blocking rows still decide that) and it never touches the
+   * research-integrity gates; for a flow that owes the observation contract the LUI renders the
+   * same contract from the same evidence.
+   */
+  if (answer === undefined && collected.length > 0 && contract.allowSynthesis) {
+    answer = renderObservationResponse({ evidence: collected, requirements }).answer;
+  }
+  /**
    * RAW-OBSERVATION RESPONSE (execution contract): the capability result IS the answer. No
    * synthesis model call, no factor analysis, no materiality, no recommendation — the requested
    * fields, read from THIS run's evidence, which is the only data a raw-observation request may
@@ -1609,6 +1664,7 @@ export async function runAdaptiveResearch(
     confidence,
     ...(floorCapabilities.length > 0 ? { floorCapabilities } : {}),
     recoveryRounds: recoveryRoundsUsed,
+    ...(recoverySkippedReason !== undefined ? { recoverySkippedReason } : {}),
     // The run's enforced execution contract, so the API, the response assembler and the UI can
     // honour the prohibitions WITHOUT re-deriving them from the trader's text.
     executionMode: contract.mode,
@@ -1624,7 +1680,7 @@ export async function runAdaptiveResearch(
  * leaked into the final answer) and the decision stays recoverable rather than declaring the
  * question unanswerable (zero-dead-end mandate §13/§15).
  */
-export function partialDecision(_reason: "ROUND_BUDGET_EXHAUSTED" | "TIME_BUDGET_EXHAUSTED", rounds: number, evidenceCount: number, unresolved = 0): AdaptiveDecision {
+export function partialDecision(_reason: "ROUND_BUDGET_EXHAUSTED" | "TIME_BUDGET_EXHAUSTED", rounds: number, evidenceCount: number, unresolved = 0, recoveryNote?: string): AdaptiveDecision {
   if (evidenceCount === 0) {
     return {
       decision: "INSUFFICIENT_EVIDENCE",
@@ -1638,10 +1694,47 @@ export function partialDecision(_reason: "ROUND_BUDGET_EXHAUSTED" | "TIME_BUDGET
     // blocking requirements, the partial result must SAY so: the earlier wording ("research was
     // completed") implied a researched question even with three CRITICAL rows unresolved.
     rationale: unresolved > 0
-      ? `The research budget was reached after ${rounds} round(s) with ${evidenceCount} evidence object(s) gathered; ${unresolved} material requirement(s) remain unresolved within that budget and are reported as such rather than filled in.`
+      ? `The research budget was reached after ${rounds} round(s) with ${evidenceCount} evidence object(s) gathered; ${unresolved} material requirement(s) remain unresolved within that budget and are reported as such rather than filled in.${recoveryNote !== undefined ? ` ${recoveryNote}` : ""}`
       : `Research was completed across ${rounds} round(s) with ${evidenceCount} evidence object(s) gathered before the research budget was reached; the findings below reflect everything collected.`,
     nextTasks: [],
   };
+}
+
+/**
+ * WHY NO RECOVERY ROUND RAN (bounded-recovery honesty). A budget stop that leaves CRITICAL rows
+ * unresolved currently reports only the unresolved count; the trader cannot tell whether the
+ * engine tried recovery and failed or never scheduled it. Recovery is deliberately BOUNDED — a
+ * wave may only start when the remaining deadline (and round budget) can finish it, because a
+ * wave killed mid-flight loses the evidence already gathered with it — so "zero recovery rounds"
+ * is often the correct engineering decision and has to be stated as one, not left as a silent 0
+ * (rs_000382: recovery rounds 0 with four pending rows and no explanation). This reads the same
+ * `recoveryHasBudget` inputs the scheduler uses, so the note can never disagree with the gate.
+ */
+export function recoverySkipNote(input: {
+  readonly recoveryRoundsUsed: number;
+  readonly maxRecoveryRounds: number;
+  readonly blockingCount: number;
+  readonly deadlineMs: number | undefined;
+  readonly at: () => Date;
+  readonly round: number;
+  readonly maxRounds: number;
+}): string | undefined {
+  const { recoveryRoundsUsed, maxRecoveryRounds, blockingCount, deadlineMs, at, round, maxRounds } = input;
+  if (blockingCount === 0 || maxRecoveryRounds === 0) return undefined;
+  if (recoveryRoundsUsed >= maxRecoveryRounds) {
+    return `All ${maxRecoveryRounds} scheduled recovery round(s) were already spent, so no further recovery was attempted.`;
+  }
+  if (deadlineMs !== undefined && maxRounds - round <= RECOVERY_MIN_HEADROOM_ROUNDS) {
+    return `No recovery round was scheduled: round ${round} of ${maxRounds} leaves no round headroom for another capability wave, and the bounded-recovery law never starts a wave the remaining budget cannot finish. The evidence already gathered is preserved above.`;
+  }
+  if (deadlineMs !== undefined) {
+    const remainingMs = deadlineMs - at().getTime();
+    if (remainingMs <= RECOVERY_MIN_HEADROOM_MS) {
+      const secondsLeft = Math.max(0, Math.round(remainingMs / 1000));
+      return `No recovery round was scheduled: the shared research deadline leaves ${secondsLeft}s, below the ${Math.round(RECOVERY_MIN_HEADROOM_MS / 1000)}s headroom a capability wave needs to finish, so the bounded-recovery law finalizes the partial result instead of starting a wave that would be abandoned mid-flight. The evidence already gathered is preserved above.`;
+    }
+  }
+  return "No recovery round was scheduled before this budget stop.";
 }
 
 /**

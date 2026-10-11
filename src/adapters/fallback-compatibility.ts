@@ -135,6 +135,50 @@ function aliasTable(token: string): ReadonlySet<string> {
 }
 
 /**
+ * SHAPES THAT REQUIRE A TIME SERIES, not an instant. A current quote legitimately serves a
+ * snapshot reading; it can never serve any of these, because the number simply is not in the
+ * payload (a 5-day quote response carries a last price and a previous close, nothing else).
+ * Used by the snapshot gate below so a "please say it did not answer" case is mechanical.
+ */
+const SERIES_SHAPES: ReadonlySet<string> = new Set([
+  "SERIES", "OHLC", "HIGH", "LOW", "OPEN", "CLOSE", "VOLUME", "CANDLE", "OHLCV",
+]);
+
+/**
+ * CURRENT-QUOTE SNAPSHOT GATE (market/yahoo-regime-observables and any current-only provider).
+ *
+ * A current-quote provider is registered as a fallback on the generic MARKET_DATA_ANALYSIS
+ * capability, whose own support contract promises OHLCV/SERIES/HIGH/LOW/VOLUME shapes. When the
+ * run's ledger demands one of those shapes (or a lookback longer than the snapshot's fixed
+ * five-session reach), accepting the snapshot CLOSES the capability with an instant and the
+ * windowed rows are silently starved — exactly the rs_000382 failure. Rejecting it here keeps
+ * the provider available for what it really serves (a current reading) while letting the chain
+ * reach a provider that can return the series, or end as an honest EMPTY with the rejection in
+ * the attempt trail. Nothing is fabricated and the primary attempt is never gated.
+ */
+export function validateCurrentQuoteFallback(
+  params: Record<string, unknown>,
+  result: ToolResult,
+  what = "current-quote fallback",
+): FallbackGate {
+  const reasons: string[] = [];
+  const demanded = Array.isArray(params["requiredFacets"])
+    ? (params["requiredFacets"] as unknown[]).filter((f): f is string => typeof f === "string")
+    : [];
+  const seriesShapes = demanded.filter((f) => SERIES_SHAPES.has(f.toUpperCase()));
+  if (seriesShapes.length > 0) {
+    reasons.push(`${what} returns a single current reading and cannot serve the requested shape(s): ${seriesShapes.join(", ")}`);
+  }
+  const windowHours = typeof params["requiredWindowHours"] === "number" ? params["requiredWindowHours"] : undefined;
+  // A quote request with a fixed 5-session reach (`range=5d`) cannot cover a longer lookback.
+  if (windowHours !== undefined && windowHours > 120) {
+    reasons.push(`${what} reaches back five sessions only and cannot cover the requested ${Math.round(windowHours)}h window`);
+  }
+  freshnessCheck(result, params, reasons, what);
+  return reasons.length === 0 ? compatible : { compatible: false, reasons };
+}
+
+/**
  * Equity/commodity/FX market-data fallback gate: ticker identity plus freshness. The equity
  * chain (Yahoo primary → Stooq fallback inside one adapter; adapter-level fallbacks across
  * adapters) must never let an unrelated ticker's quote stand in for the requested one.
