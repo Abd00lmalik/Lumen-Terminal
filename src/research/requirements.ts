@@ -2366,8 +2366,28 @@ function assembledGroupItems(items: readonly CoverageEvidence[]): readonly Cover
     if (first === undefined) continue;
     const withFacets = members.filter((m) => m.dataFacets !== undefined);
     const facets = withFacets.length === 0 ? undefined : [...new Set(withFacets.flatMap((m) => m.dataFacets ?? []))];
-    const withSpan = members.filter((m) => m.coverageHours !== undefined);
-    const span = withSpan.length === 0 ? undefined : Math.max(...withSpan.map((m) => m.coverageHours ?? 0));
+    // ARITY DECIDES SERIES, THE SAME WAY `tableFacets` INFERS IT FOR A MULTI-ROW PAYLOAD. A
+    // series is a set of timestamped observations, so its arity is a fact about how many priced
+    // observations arrived, never about how the provider chose to chunk them. An adapter that
+    // emits one output per candle (equity/yahoo-chart) therefore serves each segment as a
+    // single-observation table with NO SERIES facet, and their union stays SERIES-free even
+    // though together they are exactly the price path the trader asked for — the reproduction
+    // where "crude oil over the last 7 days" returned six daily candles yet the price-sequence
+    // row still read INSUFFICIENT. Two or more priced members ARE a path, and the assembled
+    // group is that path.
+    const priced = members.filter((m) => (m.dataFacets ?? []).some((f) => f === "CLOSE" || f === "OPEN" || f === "SNAPSHOT"));
+    if (facets !== undefined && priced.length > 1) facets.push("SERIES");
+    // SEGMENTS OF ONE RESPONSE JOINTLY SPAN THE WINDOW. Each member measures its OWN span from
+    // its own timestamps, and a segment carrying a single print (a one-session candle) therefore
+    // measures 0 — the fact that makes a snapshot unable to answer "the last 7 days" on its own.
+    // The group's span is NOT the largest member span: two 24-hour segments do not jointly cover
+    // 168 hours, and taking the max here is exactly why a correct 7-day OHLCV response assembled
+    // to a 0-hour observation (the reproduction: "crude oil over the last 7 days" returned six
+    // daily candles, yet every span-bearing row stayed NO_MATCH and the run ended INSUFFICIENT).
+    // The group's span is measured the same way an adapter measures a single table — from the
+    // members' own observation timestamps — so nothing is ever claimed that the data does not
+    // carry: a group of two same-instant prints still measures 0.
+    const span = groupSpanHours(members);
     const resolutions = members
       .map((m) => m.resolution)
       .filter((r): r is Resolution => r !== undefined);
@@ -2409,6 +2429,65 @@ function finestOf(resolutions: readonly Resolution[]): Resolution | undefined {
     if (finest === undefined || order.indexOf(r) < order.indexOf(finest)) finest = r;
   }
   return finest;
+}
+
+/**
+ * Joint SPAN of one provider response's segments, measured on their own observation times.
+ *
+ * An adapter measures a single table's span from the timestamps it actually carries, so a group
+ * of N segments must be measured the same way — not by taking the largest member's span. Two
+ * 24-hour segments from one response jointly cover 48 hours; six daily candles from one response
+ * jointly cover the days they name. The widest member span remains a floor: a group whose members
+ * declared no timestamps keeps the span the one measuring member already proved.
+ *
+ * Nothing here invents a window. A group of two same-instant prints measures 0, which is the
+ * fact that keeps a snapshot unable to answer a windowed row however many copies arrived.
+ */
+function groupSpanHours(members: readonly CoverageEvidence[]): number | undefined {
+  const memberSpan = members
+    .filter((m) => m.coverageHours !== undefined)
+    .reduce<number | undefined>((acc, m) => (acc === undefined ? m.coverageHours : Math.max(acc, m.coverageHours!)), undefined);
+  const stamps = members
+    .map((m) => m.observedAt)
+    .filter((t): t is string => t !== undefined)
+    .map((t) => Date.parse(t))
+    .filter((t) => !Number.isNaN(t))
+    .sort((a, b) => a - b);
+  if (stamps.length === 0) return memberSpan;
+  const newest = stamps[stamps.length - 1]!;
+  const oldest = stamps[0]!;
+  // A BAR IS NOT INSTANTANEOUS, so the NEWEST segment's own bar width belongs to the joint
+  // reach — the same allowance a single table gets from `coverageHoursOf` (which credits the
+  // final bar only when the table already spans time). Without it a group of daily candles
+  // reaches back to the first bar's OPEN and no more, so a seven-day window still reads as
+  // uncovered. The widest declared resolution is the finest bar width the response offers.
+  const barHours = finestResolutionHours(members);
+  const reachHours = (newest - oldest) / 3_600_000 + barHours;
+  return memberSpan === undefined ? reachHours : Math.max(memberSpan, reachHours);
+}
+
+/** Bar width in hours of the group's finest declared resolution; 1 when none is declared. */
+function finestResolutionHours(members: readonly CoverageEvidence[]): number {
+  const ladder: readonly Resolution[] = ["TICK", "MINUTE", "HOUR", "DAY", "WEEK", "MONTH"];
+  let finest: Resolution | undefined;
+  for (const m of members) {
+    if (m.resolution === undefined) continue;
+    if (finest === undefined || ladder.indexOf(m.resolution) < ladder.indexOf(finest)) finest = m.resolution;
+  }
+  switch (finest) {
+    case "TICK":
+      return 1 / 3600;
+    case "MINUTE":
+      return 1 / 60;
+    case "HOUR":
+      return 1;
+    case "DAY":
+      return 24;
+    case "WEEK":
+      return 168;
+    default:
+      return 1;
+  }
 }
 
 /**

@@ -143,6 +143,14 @@ function candleOutputs(candles: Candle[], about: string, limit: number): ToolOut
     content: { ts: c.ts, open: c.open, high: c.high, low: c.low, close: c.close, ...(c.volume !== null ? { volume: c.volume } : {}) },
     about,
     timeframe: "1d",
+    // A CARRIES ITS OWN BAR TIME. Each candle is emitted as its own segment of one provider
+    // response, and the evidence layer reads `sourceTimestamp` as the observation's event time.
+    // Without it every candle segment reports no event time at all, so the engine's MC-6 group
+    // assembly — which measures the response's joint span from its members' event times — saw
+    // six zero-time segments and computed a 0-hour span. Every window-bearing row (period high,
+    // low, volume, the price sequence) then failed the span gate and the correct 7-day response
+    // was reported as insufficient data. The date the data carries is never a claimed window.
+    sourceTimestamp: `${c.ts}T00:00:00Z`,
   }));
 }
 

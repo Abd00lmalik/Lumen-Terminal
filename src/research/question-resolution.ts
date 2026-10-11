@@ -662,13 +662,30 @@ export function evaluateQuestionResolution(input: QuestionResolutionInput): Ques
   const blockingMissing = dimensions.filter((d) => d.fit === "MISSING");
   const applicable = dimensions.filter((d) => d.fit !== "NOT_APPLICABLE");
   const satisfied = dimensions.filter((d) => d.fit === "SATISFIED");
+  // Vacuous coverage: when no required dimension is structurally applicable (all NOT_APPLICABLE
+  // — the question's rows matched no DIMENSION_PATTERN and no scope gate fired), a run can
+  // still be fully covered: its ledger holds real CRITICAL rows, all SATISFIED (auto-derived
+  // descriptions sometimes fail every dimension regex — e.g. an AAPL OHLCV week whose rows read
+  // "period high over the last 7 days" match WHAT_HAPPENED only via the oil run's separate
+  // "event" news row). Gate that case on the ledger, not on dimension mapping, so a
+  // CRITICAL-covered run reaches ANSWERED instead of being demoted by the QUESTION_FIT gate.
+  // The vacuous-ANSWERED hole is still closed: a rowless CURRENT_DRIVERS is MISSING (blocks via
+  // blockingMissing), and a ledger with no satisfied CRITICAL row cannot take this branch.
+  const vacuousCovered =
+    applicable.length === 0 && blockingMissing.length === 0 && input.ledger.some((r) => r.importance === "CRITICAL" && r.status === "SATISFIED");
+
+  // coverage is complete exactly when the mapped dimensions are all satisfied, OR the vacuous
+  // case (none mapped) is backed by real CRITICAL coverage in the ledger.
+  const coverageComplete =
+    (applicable.length > 0 && satisfied.length === applicable.length) ||
+    vacuousCovered;
 
   let status: QuestionResolutionStatus;
   if (evidenceCount === 0 || relevantEvidenceCount === 0) {
     status = "NOT_ANSWERED";
   } else if (input.prose.trim() === "" && satisfied.length === 0) {
     status = "NOT_ANSWERED";
-  } else if (applicable.length > 0 && blockingMissing.length === 0 && satisfied.length === applicable.length && materialityAtLeast(materiality, "MATERIAL")) {
+  } else if (coverageComplete && blockingMissing.length === 0 && materialityAtLeast(materiality, "MATERIAL")) {
     status = "ANSWERED";
   } else if (satisfied.length > 0 || materialityAtLeast(materiality, "RELEVANT")) {
     status = "PARTIALLY_ANSWERED";
